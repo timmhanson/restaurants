@@ -44,6 +44,11 @@ export default function UsersPage() {
   }, [load, groupId])
 
   const restaurantName = (id: number) => restaurants.find((r) => r.id === id)?.name ?? `#${id}`
+  // Owners manage people at restaurants they own (mirrors the API rules); super admins and managers are scoped by the API list.
+  const ownerScoped = me?.role === 'Owner'
+  const owns = (id: number) => restaurants.some((r) => r.id === id && r.canManage)
+  const canEdit = (u: UserDto) => !ownerScoped || u.id === me?.id || u.restaurantIds.length === 0 || u.restaurantIds.some(owns)
+  const canRemove = (u: UserDto) => canEdit(u) && (!ownerScoped || u.restaurantIds.every(owns))
 
   const remove = async () => {
     if (!removing) return
@@ -109,13 +114,17 @@ export default function UsersPage() {
                   </td>
                   <td>{u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : <span className="muted">never</span>}</td>
                   <td>
-                    <div className="row-actions">
-                      <button type="button" className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
-                      <button type="button" className="btn btn-sm" onClick={() => setResetting(u)}>Reset password</button>
-                      {u.id !== me?.id && (
-                        <button type="button" className="btn btn-sm btn-danger" onClick={() => setRemoving(u)}>Remove</button>
-                      )}
-                    </div>
+                    {canEdit(u) ? (
+                      <div className="row-actions">
+                        <button type="button" className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
+                        <button type="button" className="btn btn-sm" onClick={() => setResetting(u)}>Reset password</button>
+                        {u.id !== me?.id && canRemove(u) && (
+                          <button type="button" className="btn btn-sm btn-danger" onClick={() => setRemoving(u)}>Remove</button>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="muted" style={{ fontSize: '0.8rem' }}>Managed by the owners of {u.restaurantIds.map(restaurantName).join(', ')}</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -131,6 +140,8 @@ export default function UsersPage() {
           catalog={catalog}
           canPickRole={isAdmin}
           canPickSuperAdmin={isSuperAdmin}
+          ownerScoped={me?.role === 'Owner'}
+          meId={me?.id}
           onClose={() => setEditing(null)}
           onSaved={(msg) => {
             setEditing(null)
@@ -171,12 +182,15 @@ export default function UsersPage() {
 
 const pretty = (p: string) => p.replace(/([A-Z])/g, ' $1').trim()
 
-function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin, onClose, onSaved }: {
+function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin, ownerScoped, meId, onClose, onSaved }: {
   user: UserDto | null
   restaurants: RestaurantDto[]
   catalog: PermissionInfo[]
   canPickRole: boolean
   canPickSuperAdmin: boolean
+  /** Owners may only assign people to restaurants they own (their own account excepted). */
+  ownerScoped: boolean
+  meId?: number
   onClose: () => void
   onSaved: (message: string) => void
 }) {
@@ -187,11 +201,17 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
     password: '',
     role: user?.role ?? (canPickRole ? 'Manager' : 'TeamMember'),
     permissions: user?.role === 'Manager' ? user.permissionNames : ['ViewComments', 'MarkResponded'],
-    restaurantIds: user?.restaurantIds ?? (restaurants.length === 1 ? [restaurants[0].id] : []),
+    restaurantIds: user?.restaurantIds ?? (lockable(restaurants).length === 1 ? [lockable(restaurants)[0].id] : []),
     isActive: user?.isActive ?? true,
   })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // Restaurants this editor may tick or untick for this user.
+  function lockable(list: RestaurantDto[]) {
+    return list.filter((r) => !ownerScoped || r.canManage || (user !== null && user.id === meId))
+  }
+  const editable = new Set(lockable(restaurants).map((r) => r.id))
 
   const togglePerm = (p: Permission) =>
     setV((s) => ({ ...s, permissions: s.permissions.includes(p) ? s.permissions.filter((x) => x !== p) : [...s.permissions, p] }))
@@ -262,11 +282,18 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
           </Field>
         </div>
         {v.role !== 'SuperAdmin' && (
-          <Field label="Restaurants" hint={v.role === 'TeamMember' ? 'Usually one restaurant per team login.' : 'Owners and managers can belong to several restaurants in the group.'}>
+          <Field
+            label="Restaurants"
+            hint={
+              (v.role === 'TeamMember' ? 'Usually one restaurant per team login.' : 'Owners and managers can belong to several restaurants in the group.') +
+              (editable.size < restaurants.length ? ' Restaurants you do not own are greyed out; their owners manage who works there.' : '')
+            }
+          >
             <div className="check-list" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
               {restaurants.map((r) => (
-                <label key={r.id} className="check">
-                  <input type="checkbox" checked={v.restaurantIds.includes(r.id)} onChange={() => toggleRestaurant(r.id)} /> {r.name}{r.isActive ? '' : ' (inactive)'}
+                <label key={r.id} className="check" style={editable.has(r.id) ? undefined : { opacity: 0.55 }}>
+                  <input type="checkbox" checked={v.restaurantIds.includes(r.id)} disabled={!editable.has(r.id)} onChange={() => toggleRestaurant(r.id)} /> {r.name}
+                  {r.isActive ? '' : ' (inactive)'}
                 </label>
               ))}
               {restaurants.length === 0 && <span className="muted">No restaurants in this group yet.</span>}

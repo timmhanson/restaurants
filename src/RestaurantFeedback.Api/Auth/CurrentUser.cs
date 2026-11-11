@@ -5,7 +5,7 @@ using RestaurantFeedback.Api.Models;
 
 namespace RestaurantFeedback.Api.Auth;
 
-/// <summary>Strongly typed view of the signed-in user, resolved from JWT claims (plus group scope for super admins).</summary>
+/// <summary>The signed-in user as the API sees them for this request.</summary>
 public class CurrentUser
 {
     public int Id { get; private init; }
@@ -15,10 +15,12 @@ public class CurrentUser
     /// <summary>The group the user belongs to, or the group a super admin is currently administering (null = none selected).</summary>
     public int? GroupId { get; private init; }
     public ManagerPermission Permissions { get; private init; }
+    /// <summary>Restaurants the user belongs to (for a super admin: every restaurant in the selected group).</summary>
     public IReadOnlySet<int> RestaurantIds { get; private init; } = new HashSet<int>();
     public bool IsAuthenticated { get; private init; }
     public bool MustChangePassword { get; private init; }
 
+    /// <summary>Claims-only view. Used where the database copy is not needed (login, password change).</summary>
     public CurrentUser(ClaimsPrincipal principal)
     {
         IsAuthenticated = principal.Identity?.IsAuthenticated == true;
@@ -36,14 +38,19 @@ public class CurrentUser
         MustChangePassword = principal.FindFirstValue("pwc") == "1";
     }
 
-    private CurrentUser() { }
-
-    /// <summary>A copy of this (super admin) user scoped to one investment group and its restaurants.</summary>
-    public CurrentUser ScopedTo(int? groupId, IEnumerable<int> restaurantIds) => new()
+    /// <summary>Live view built from the database, so role, permission and restaurant changes apply on the next request.</summary>
+    public CurrentUser(AppUser user, int? groupId, IEnumerable<int> restaurantIds)
     {
-        Id = Id, Username = Username, DisplayName = DisplayName, Role = Role, GroupId = groupId, Permissions = Permissions,
-        RestaurantIds = restaurantIds.ToHashSet(), IsAuthenticated = IsAuthenticated, MustChangePassword = MustChangePassword
-    };
+        IsAuthenticated = true;
+        Id = user.Id;
+        Username = user.Username;
+        DisplayName = user.DisplayName;
+        Role = user.Role;
+        GroupId = groupId;
+        Permissions = user.Role is UserRole.Owner or UserRole.SuperAdmin ? ManagerPermission.All : user.Permissions;
+        RestaurantIds = restaurantIds.ToHashSet();
+        MustChangePassword = user.MustChangePassword;
+    }
 
     public bool IsSuperAdmin => Role == UserRole.SuperAdmin;
     public bool IsOwner => Role == UserRole.Owner;
@@ -52,11 +59,18 @@ public class CurrentUser
     public bool IsTeamMember => Role == UserRole.TeamMember;
     public bool Has(ManagerPermission p) => IsAdmin || (Role == UserRole.Manager && Permissions.HasFlag(p));
     public bool CanAccessRestaurant(int restaurantId) => RestaurantIds.Contains(restaurantId);
+
+    /// <summary>
+    /// Restaurants whose details and staffing this user may change: every restaurant in the group for a
+    /// super admin, the restaurants they own for an owner, nothing for anyone else.
+    /// </summary>
+    public bool CanManageRestaurant(int restaurantId) => IsAdmin && RestaurantIds.Contains(restaurantId);
 }
 
 /// <summary>
-/// Resolves the current user once per request. Super admins pick the investment group they are
-/// working in with the X-Group-Id header (or ?groupId=); that group's restaurants become theirs.
+/// Resolves the current user once per request from the database (not just the token), so that
+/// deactivation, permission changes and restaurant assignments take effect immediately.
+/// Super admins pick the investment group they are working in with the X-Group-Id header (or ?groupId=).
 /// </summary>
 public class CurrentUserProvider(IHttpContextAccessor http, AppDbContext db)
 {
@@ -67,14 +81,33 @@ public class CurrentUserProvider(IHttpContextAccessor http, AppDbContext db)
     {
         if (_cached is not null) return _cached;
         var ctx = http.HttpContext ?? throw new InvalidOperationException("No HTTP context.");
-        var user = new CurrentUser(ctx.User);
-        if (user.IsSuperAdmin)
+        var claims = new CurrentUser(ctx.User);
+        var user = await db.Users.AsNoTracking().Include(u => u.UserRestaurants).FirstOrDefaultAsync(u => u.Id == claims.Id);
+        if (user is null || !user.IsActive) throw new AccountUnavailableException();
+
+        if (user.Role == UserRole.SuperAdmin)
         {
             var raw = ctx.Request.Headers[GroupHeader].FirstOrDefault() ?? ctx.Request.Query["groupId"].FirstOrDefault();
             int? gid = int.TryParse(raw, out var g) ? g : null;
             var rids = gid is null ? [] : await db.Restaurants.Where(r => r.GroupId == gid).Select(r => r.Id).ToListAsync();
-            user = user.ScopedTo(gid, rids);
+            return _cached = new CurrentUser(user, gid, rids);
         }
-        return _cached = user;
+        return _cached = new CurrentUser(user, user.GroupId, user.UserRestaurants.Select(x => x.RestaurantId));
+    }
+}
+
+/// <summary>Thrown when a token belongs to a user who has since been removed or deactivated.</summary>
+public class AccountUnavailableException : Exception;
+
+public class AccountUnavailableMiddleware(RequestDelegate next)
+{
+    public async Task InvokeAsync(HttpContext ctx)
+    {
+        try { await next(ctx); }
+        catch (AccountUnavailableException) when (!ctx.Response.HasStarted)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await ctx.Response.WriteAsJsonAsync(new { message = "Your account is no longer active. Please sign in again." });
+        }
     }
 }

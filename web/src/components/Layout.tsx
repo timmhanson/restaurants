@@ -13,7 +13,7 @@ export default function Layout() {
     { to: '/comments', label: 'Comments', show: has('ViewComments') },
     { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
     { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
-    { to: '/restaurants', label: 'Restaurants', show: isAdmin },
+    { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },
     { to: '/settings', label: 'Settings', show: isAdmin },
     { to: '/audit', label: 'Audit log', show: has('ViewAudit') },
     { to: '/groups', label: 'Groups', show: isSuperAdmin },

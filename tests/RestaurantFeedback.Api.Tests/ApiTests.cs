@@ -5,7 +5,8 @@ using RestaurantFeedback.Api.Models;
 
 namespace RestaurantFeedback.Api.Tests;
 
-public class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
+[Collection(ApiCollection.Name)]
+public class ApiTests(ApiFactory factory)
 {
     private static CommentRequest Card(int restaurantId, string first = "Jane", string last = "Doe", string? phone = "815-555-1234",
         string visit = "2026-11-03", string reason = "Order mistake", bool force = false) => new()
@@ -175,7 +176,7 @@ public class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     {
         var admin = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
         var groups = await admin.GetFromJsonAsync<List<GroupDto>>("/api/groups");
-        Assert.Single(groups!);
+        Assert.Contains(groups!, g => g.Name == "Test Group");
 
         var created = await admin.PostAsJsonAsync("/api/groups", new GroupRequest
         {

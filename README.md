@@ -18,6 +18,19 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 | **Manager** | one or more restaurants in the group | enter cards plus whatever an owner grants: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin |
 | **TeamMember** | the generic shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
 
+### Setting up a group
+
+1. A super admin creates the investment group on **Groups**, optionally with several owners and the
+   group's restaurants in the same step. Every owner created there starts out owning every restaurant.
+2. **Set up** opens the group's **Restaurants & staff** page. Each restaurant's **Staff** screen lists the
+   group's owners, managers and team logins as checkboxes, with quick-add for new people.
+3. Owners choose the restaurants they own (**I own this** / **Stop owning**) and can edit and staff only
+   those. They can add people only to restaurants they own, and every restaurant must keep at least one
+   owner. Super admins can edit and staff any restaurant.
+
+Roles, permissions and restaurant assignments are read from the database on every request, so changes
+(including deactivating a user) take effect immediately without the person signing in again.
+
 Password rules: everyone can change their own password, but only with a 6-digit code emailed to the
 address on file (`POST /api/auth/change-password/request`, then `POST /api/auth/change-password` with the
 current password, new password and code; codes last 10 minutes, 5 attempts, one resend per minute).

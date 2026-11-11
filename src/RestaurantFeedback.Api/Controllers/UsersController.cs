@@ -56,6 +56,8 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (await db.Users.AnyAsync(u => u.Username == username)) return Conflict(new { message = "That username is already taken." });
         var groupId = role == UserRole.SuperAdmin ? null : me.GroupId;
         var rids = groupId is null ? [] : await ValidRestaurantIds(groupId.Value, req.RestaurantIds);
+        if (me.IsOwner && rids.Any(r => !me.CanManageRestaurant(r)))
+            return StatusCode(403, new { message = await NotOwnedMessage(rids.Where(r => !me.CanManageRestaurant(r))) });
 
         var user = new AppUser
         {
@@ -92,10 +94,27 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if ((user.Role == UserRole.SuperAdmin) != (role == UserRole.SuperAdmin))
             return BadRequest(new { message = "Users cannot be moved into or out of the super admin role; create a new account instead." });
 
+        if (!CanManagePerson(me, user)) return StatusCode(403, new { message = await NotYoursMessage(user) });
+
         var username = req.Username.Trim().ToLowerInvariant();
         if (username != user.Username && await db.Users.AnyAsync(u => u.Username == username))
             return Conflict(new { message = "That username is already taken." });
-        var rids = user.GroupId is null ? [] : await ValidRestaurantIds(user.GroupId.Value, req.RestaurantIds);
+        var requested = user.GroupId is null ? [] : await ValidRestaurantIds(user.GroupId.Value, req.RestaurantIds);
+        var existing = user.UserRestaurants.Select(x => x.RestaurantId).ToHashSet();
+        int[] rids;
+        if (me.IsOwner && user.Id != me.Id)
+        {
+            // Owners change assignments only at restaurants they own; assignments elsewhere are left alone.
+            var outside = requested.Where(r => !existing.Contains(r) && !me.CanManageRestaurant(r)).ToList();
+            if (outside.Count > 0) return StatusCode(403, new { message = await NotOwnedMessage(outside) });
+            rids = existing.Where(r => !me.CanManageRestaurant(r)).Union(requested.Where(me.CanManageRestaurant)).ToArray();
+        }
+        else rids = requested; // super admins anywhere; owners may pick any group restaurant for themselves
+
+        var stillOwns = role == UserRole.Owner && req.IsActive ? rids.ToHashSet() : [];
+        var orphaned = await RestaurantsLosingLastOwner(user, existing.Except(stillOwns));
+        if (orphaned.Count > 0)
+            return BadRequest(new { message = $"{string.Join(", ", orphaned)} would be left without an owner. Add another owner there first." });
 
         var before = Snapshot(user);
         user.Username = username;
@@ -125,6 +144,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         var user = await FindManageable(me, id);
         if (user is null) return NotFound();
         if (!CanManage(me, user.Role, user.UserRestaurants.Select(x => x.RestaurantId), out var why)) return StatusCode(403, new { message = why });
+        if (!CanManagePerson(me, user)) return StatusCode(403, new { message = await NotYoursMessage(user) });
         user.PasswordHash = hasher.HashPassword(user, req.Password);
         user.MustChangePassword = user.Role != UserRole.TeamMember && user.Id != me.Id;
         await db.SaveChangesAsync();
@@ -140,8 +160,16 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (user is null) return NotFound();
         if (user.Id == me.Id) return BadRequest(new { message = "You cannot remove your own account." });
         if (!CanManage(me, user.Role, user.UserRestaurants.Select(x => x.RestaurantId), out var why)) return StatusCode(403, new { message = why });
+        if (me.IsOwner && user.UserRestaurants.Any(ur => !me.CanManageRestaurant(ur.RestaurantId)))
+        {
+            var others = await NotOwnedMessage(user.UserRestaurants.Select(ur => ur.RestaurantId).Where(r => !me.CanManageRestaurant(r)));
+            return StatusCode(403, new { message = $"{user.DisplayName} also works at restaurants you do not own. {others} Remove them from your restaurants on the Staff screen instead." });
+        }
         if (user.Role == UserRole.Owner && !await db.Users.AnyAsync(u => u.GroupId == user.GroupId && u.Role == UserRole.Owner && u.IsActive && u.Id != id))
             return BadRequest(new { message = "A group must keep at least one active owner." });
+        var orphaned = await RestaurantsLosingLastOwner(user, user.UserRestaurants.Select(ur => ur.RestaurantId));
+        if (orphaned.Count > 0)
+            return BadRequest(new { message = $"{string.Join(", ", orphaned)} would be left without an owner. Add another owner there first." });
         if (user.Role == UserRole.SuperAdmin && !await db.Users.AnyAsync(u => u.Role == UserRole.SuperAdmin && u.IsActive && u.Id != id))
             return BadRequest(new { message = "At least one active super admin must remain." });
 
@@ -199,6 +227,42 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         foreach (var n in names)
             if (Enum.TryParse<ManagerPermission>(n, true, out var p) && p != ManagerPermission.All) result |= p;
         return result;
+    }
+
+    /// <summary>
+    /// Owners manage people who work at (or could be placed at) restaurants they own: anyone with no restaurant yet,
+    /// or anyone sharing at least one owned restaurant. Super admins and the team-login rule are handled by CanManage.
+    /// </summary>
+    private static bool CanManagePerson(CurrentUser me, AppUser target) =>
+        !me.IsOwner || target.Id == me.Id || target.UserRestaurants.Count == 0
+        || target.UserRestaurants.Any(ur => me.CanManageRestaurant(ur.RestaurantId));
+
+    private async Task<string> NotYoursMessage(AppUser target)
+    {
+        var names = await RestaurantNames(target.UserRestaurants.Select(ur => ur.RestaurantId));
+        return $"{target.DisplayName} only works at restaurants you do not own ({names}). Ask one of those restaurants' owners or a super admin.";
+    }
+
+    private async Task<string> NotOwnedMessage(IEnumerable<int> restaurantIds) =>
+        $"You can only assign people to restaurants you own. Not yours: {await RestaurantNames(restaurantIds)}.";
+
+    private async Task<string> RestaurantNames(IEnumerable<int> ids)
+    {
+        var list = ids.Distinct().ToList();
+        var names = await db.Restaurants.Where(r => list.Contains(r.Id)).OrderBy(r => r.Name).Select(r => r.Name).ToListAsync();
+        return string.Join(", ", names);
+    }
+
+    /// <summary>Restaurants (by name) in which this owner is the last active owner, among those they would stop owning.</summary>
+    private async Task<List<string>> RestaurantsLosingLastOwner(AppUser user, IEnumerable<int> stoppingAt)
+    {
+        if (user.Role != UserRole.Owner || !user.IsActive) return [];
+        var ids = stoppingAt.ToList();
+        if (ids.Count == 0) return [];
+        return await db.Restaurants
+            .Where(r => ids.Contains(r.Id) && r.IsActive
+                        && !r.UserRestaurants.Any(ur => ur.UserId != user.Id && ur.User.Role == UserRole.Owner && ur.User.IsActive))
+            .OrderBy(r => r.Name).Select(r => r.Name).ToListAsync();
     }
 
     private async Task<int[]> ValidRestaurantIds(int groupId, int[] requested)

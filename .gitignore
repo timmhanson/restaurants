@@ -34,3 +34,6 @@ deploy/.secrets/
 # Local-only config with seed passwords
 appsettings.Local.json
 publish.zip
+
+# Local Claude Code launch configs
+.claude/

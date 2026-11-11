@@ -85,6 +85,7 @@ builder.Services.AddHealthChecks();
 var app = builder.Build();
 
 app.UseCors();
+app.UseMiddleware<AccountUnavailableMiddleware>();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthentication();

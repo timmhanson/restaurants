@@ -22,7 +22,10 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
     {
         var groups = await db.Groups.OrderBy(g => g.Name).Select(g => new GroupDto(
             g.Id, g.Name, g.IsActive, g.CreatedAt, g.Restaurants.Count, g.Users.Count(u => u.IsActive),
-            db.Comments.Count(c => c.Restaurant.GroupId == g.Id))).ToListAsync();
+            db.Comments.Count(c => c.Restaurant.GroupId == g.Id))
+        {
+            OwnerNames = g.Users.Where(u => u.Role == UserRole.Owner && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList()
+        }).ToListAsync();
         return groups;
     }
 
@@ -37,6 +40,10 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
         return g is null ? NotFound() : g;
     }
 
+    /// <summary>
+    /// Creates an investment group, optionally with its owners and restaurants in one step.
+    /// Every owner created here owns every restaurant created here; adjust afterwards on each restaurant's Staff screen.
+    /// </summary>
     [HttpPost]
     [Authorize(Roles = "SuperAdmin")]
     public async Task<ActionResult<GroupDto>> Create(GroupRequest req)
@@ -44,27 +51,51 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
         var me = await users.GetAsync();
         var name = req.Name.Trim();
         if (await db.Groups.AnyAsync(g => g.Name == name)) return Conflict(new { message = "A group with that name already exists." });
+
+        var ownerRequests = req.Owners.ToList();
+        if (req.FirstOwner is not null) ownerRequests.Insert(0, req.FirstOwner);
+        var usernames = ownerRequests.Select(o => o.Username.Trim().ToLowerInvariant()).ToList();
+        if (usernames.Distinct().Count() != usernames.Count) return BadRequest(new { message = "Each owner needs a different username." });
+        foreach (var o in ownerRequests)
+        {
+            if (string.IsNullOrWhiteSpace(o.Password) || o.Password.Length < 8)
+                return BadRequest(new { message = $"Owner {o.DisplayName} needs a temporary password of at least 8 characters." });
+            if (string.IsNullOrWhiteSpace(o.DisplayName)) return BadRequest(new { message = "Every owner needs a display name." });
+        }
+        var taken = await db.Users.Where(u => usernames.Contains(u.Username)).Select(u => u.Username).ToListAsync();
+        if (taken.Count > 0) return Conflict(new { message = $"Username already taken: {string.Join(", ", taken)}." });
+        if (req.Restaurants.Any(r => string.IsNullOrWhiteSpace(r.Name))) return BadRequest(new { message = "Every restaurant needs a name." });
+
         var group = new OwnerGroup { Name = name, IsActive = req.IsActive };
         db.Groups.Add(group);
-
-        AppUser? owner = null;
-        if (req.FirstOwner is not null)
+        var restaurants = req.Restaurants.Select(r => new Restaurant
         {
-            var username = req.FirstOwner.Username.Trim().ToLowerInvariant();
-            if (string.IsNullOrWhiteSpace(req.FirstOwner.Password)) return BadRequest(new { message = "The first owner needs a password." });
-            if (await db.Users.AnyAsync(u => u.Username == username)) return Conflict(new { message = "That username is already taken." });
-            owner = new AppUser
+            Group = group, Name = r.Name.Trim(), StreetAddress = r.StreetAddress, City = r.City, State = r.State, Zip = r.Zip, Phone = r.Phone, IsActive = r.IsActive
+        }).ToList();
+        db.Restaurants.AddRange(restaurants);
+
+        var owners = new List<AppUser>();
+        foreach (var o in ownerRequests)
+        {
+            var owner = new AppUser
             {
-                Group = group, Username = username, DisplayName = req.FirstOwner.DisplayName.Trim(), Email = req.FirstOwner.Email?.Trim(),
+                Group = group, Username = o.Username.Trim().ToLowerInvariant(), DisplayName = o.DisplayName.Trim(), Email = string.IsNullOrWhiteSpace(o.Email) ? null : o.Email.Trim(),
                 Role = UserRole.Owner, Permissions = ManagerPermission.All, IsActive = true, MustChangePassword = true
             };
-            owner.PasswordHash = hasher.HashPassword(owner, req.FirstOwner.Password);
-            db.Users.Add(owner);
+            owner.PasswordHash = hasher.HashPassword(owner, o.Password!);
+            foreach (var r in restaurants) owner.UserRestaurants.Add(new UserRestaurant { Restaurant = r });
+            owners.Add(owner);
         }
+        db.Users.AddRange(owners);
         await db.SaveChangesAsync();
+
         await settings.SaveAsync(group.Id, new GroupSettings { GroupDisplayName = group.Name, UpdatedAt = DateTime.UtcNow, UpdatedBy = me.Username });
-        await audit.LogAsync(me, "GroupCreated", "Group", group.Id, new { group.Name, FirstOwner = owner?.Username }, groupId: group.Id);
-        return new GroupDto(group.Id, group.Name, group.IsActive, group.CreatedAt, 0, owner is null ? 0 : 1, 0);
+        await audit.LogAsync(me, "GroupCreated", "Group", group.Id,
+            new { group.Name, Owners = owners.Select(o => o.Username).ToArray(), Restaurants = restaurants.Select(r => r.Name).ToArray() }, groupId: group.Id);
+        return new GroupDto(group.Id, group.Name, group.IsActive, group.CreatedAt, restaurants.Count, owners.Count, 0)
+        {
+            OwnerNames = owners.Select(o => o.DisplayName).OrderBy(n => n).ToList()
+        };
     }
 
     [HttpPut("{id:int}")]
@@ -84,5 +115,8 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
 
     private async Task<GroupDto> Mine(int id) => await db.Groups.Where(x => x.Id == id).Select(g => new GroupDto(
         g.Id, g.Name, g.IsActive, g.CreatedAt, g.Restaurants.Count, g.Users.Count(u => u.IsActive),
-        db.Comments.Count(c => c.Restaurant.GroupId == g.Id))).FirstAsync();
+        db.Comments.Count(c => c.Restaurant.GroupId == g.Id))
+    {
+        OwnerNames = g.Users.Where(u => u.Role == UserRole.Owner && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList()
+    }).FirstAsync();
 }

@@ -41,20 +41,44 @@ public class UserRequest
 
 public record SetPasswordRequest([Required, MinLength(8)] string Password);
 
-public record GroupDto(int Id, string Name, bool IsActive, DateTime CreatedAt, int RestaurantCount, int UserCount, int CommentCount);
+public record GroupDto(int Id, string Name, bool IsActive, DateTime CreatedAt, int RestaurantCount, int UserCount, int CommentCount)
+{
+    public List<string> OwnerNames { get; init; } = [];
+}
 
 public class GroupRequest
 {
     [Required, MaxLength(200)] public string Name { get; set; } = "";
     public bool IsActive { get; set; } = true;
-    /// <summary>Optionally create the group's first owner at the same time.</summary>
+    /// <summary>Optionally create the group's first owner at the same time (kept for older clients; prefer Owners).</summary>
     public UserRequest? FirstOwner { get; set; }
+    /// <summary>Owners to create with the group. Each owns every restaurant created with it.</summary>
+    public List<UserRequest> Owners { get; set; } = [];
+    /// <summary>Restaurants to create with the group.</summary>
+    public List<RestaurantRequest> Restaurants { get; set; } = [];
 }
 
+public record PersonRef(int Id, string DisplayName, string Username);
+
+/// <summary>
+/// A restaurant. The staffing fields (owners, counts, ownedByMe, canManage) are filled in only on the
+/// admin listing (GET /api/restaurants?all=true).
+/// </summary>
 public record RestaurantDto(int Id, string Name, string? StreetAddress, string? City, string? State, string? Zip, string? Phone, bool IsActive)
 {
+    public List<PersonRef>? Owners { get; init; }
+    public int? ManagerCount { get; init; }
+    public int? TeamLoginCount { get; init; }
+    public bool? OwnedByMe { get; init; }
+    public bool? CanManage { get; init; }
+
     public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive);
 }
+
+public record StaffMember(int Id, string DisplayName, string Username, string? Email, string Role, string[] PermissionNames, bool Assigned, bool IsActive, string[] OtherRestaurants);
+public record StaffResponse(RestaurantDto Restaurant, bool CanManage, List<StaffMember> Owners, List<StaffMember> Managers, List<StaffMember> TeamLogins);
+public record StaffRequest(int[] UserIds);
+public record OwnershipRequest(bool Owned);
 
 public class RestaurantRequest
 {

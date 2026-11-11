@@ -41,6 +41,8 @@ export interface UserRequest {
 
 export interface PermissionInfo { name: Permission; value: number; description: string }
 
+export interface PersonRef { id: number; displayName: string; username: string }
+
 export interface RestaurantDto {
   id: number
   name: string
@@ -50,6 +52,32 @@ export interface RestaurantDto {
   zip?: string | null
   phone?: string | null
   isActive: boolean
+  /** Filled in on the admin listing (GET /restaurants?all=true) only. */
+  owners?: PersonRef[]
+  managerCount?: number
+  teamLoginCount?: number
+  ownedByMe?: boolean
+  canManage?: boolean
+}
+
+export interface StaffMember {
+  id: number
+  displayName: string
+  username: string
+  email?: string | null
+  role: Role
+  permissionNames: Permission[]
+  assigned: boolean
+  isActive: boolean
+  otherRestaurants: string[]
+}
+
+export interface StaffResponse {
+  restaurant: RestaurantDto
+  canManage: boolean
+  owners: StaffMember[]
+  managers: StaffMember[]
+  teamLogins: StaffMember[]
 }
 
 export interface RestaurantRequest {
@@ -70,9 +98,16 @@ export interface GroupDto {
   restaurantCount: number
   userCount: number
   commentCount: number
+  ownerNames: string[]
 }
 
-export interface GroupRequest { name: string; isActive: boolean; firstOwner?: UserRequest | null }
+export interface GroupRequest {
+  name: string
+  isActive: boolean
+  firstOwner?: UserRequest | null
+  owners?: UserRequest[]
+  restaurants?: RestaurantRequest[]
+}
 
 export interface GroupSettings {
   schemaVersion: number

@@ -91,3 +91,13 @@ public class CapturingEmailSender : IEmailSender
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// All API test classes share one server and database. ApiFactory configures the app through process-wide
+/// environment variables, so two factories must never start at the same time.
+/// </summary>
+[CollectionDefinition(Name)]
+public class ApiCollection : ICollectionFixture<ApiFactory>
+{
+    public const string Name = "api";
+}
