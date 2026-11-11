@@ -1,0 +1,50 @@
+name: Build, test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: restaurant-feedback-45200
+  DOTNET_VERSION: 10.0.x
+  NODE_VERSION: 22
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build React front end
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Test API
+        run: dotnet test tests/RestaurantFeedback.Api.Tests --configuration Release
+
+      - name: Publish API with the front end in wwwroot
+        run: |
+          rm -rf src/RestaurantFeedback.Api/wwwroot
+          cp -r web/dist src/RestaurantFeedback.Api/wwwroot
+          dotnet publish src/RestaurantFeedback.Api --configuration Release --output publish
+
+      - name: Deploy to Azure App Service
+        if: github.event_name != 'pull_request'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: publish
