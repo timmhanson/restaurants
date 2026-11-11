@@ -1,0 +1,36 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+App_Data/
+*.db
+*.db-shm
+*.db-wal
+publish/
+
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Front-end build copied into the API
+src/RestaurantFeedback.Api/wwwroot/
+
+# Secrets and local deployment output
+deploy/.secrets/
+*.PublishSettings
+.env
+.env.*
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Local-only config with seed passwords
+appsettings.Local.json
+publish.zip

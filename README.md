@@ -1,0 +1,80 @@
+# Restaurant Guest Feedback
+
+Tracks the guest comment / coupon postcards that restaurant teams hand out when something goes wrong,
+replacing the spreadsheet. Built for investment groups that operate several Culver's restaurants.
+
+- **Back end:** ASP.NET Core 10 REST API (`src/RestaurantFeedback.Api`), EF Core + SQLite, JWT auth.
+- **Front end:** React 19 + Vite + TypeScript (`web`), served by the API from `wwwroot` in production.
+- **Settings:** one JSON blob per investment group in Azure Blob Storage (local files in development).
+- **Email:** Azure Communication Services Email sends the 6-digit verification codes (logged to the console in development).
+- **Hosting:** Azure App Service **F1 (free)** + a Standard_LRS storage account, all in `rg-restaurant-feedback`.
+
+## Roles and permissions
+
+| Role | Scope | Can |
+| --- | --- | --- |
+| **SuperAdmin** | every investment group | everything; create/administer groups, pick a group with the `X-Group-Id` header |
+| **Owner** | their group (many owners ↔ many restaurants) | enter cards, view/analyse/export, manage users, restaurants and settings |
+| **Manager** | one or more restaurants in the group | enter cards plus whatever an owner grants: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin |
+| **TeamMember** | the generic shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
+
+Password rules: everyone can change their own password, but only with a 6-digit code emailed to the
+address on file (`POST /api/auth/change-password/request`, then `POST /api/auth/change-password` with the
+current password, new password and code; codes last 10 minutes, 5 attempts, one resend per minute).
+Owners and super admins can reset anyone's password (managers with `ManageTeamLogin` can reset the team
+login). A reset by someone else forces a new password at the next login, except for team logins, which
+usually have no email and are managed by the owner/manager.
+
+## The card
+
+The entry form mirrors the physical postcard: coupon offer ("Please enjoy ___"), date issued, expiry
+(issue date + the group's validity months, 3 by default), authorized by; guest name, street, city/state/zip,
+phone; plus visit date, reason category and details. Reason categories and coupon offers are configurable
+per group.
+
+Duplicate detection runs on every card (see `GuestMatcher`): phone number wins, then name + street
+(abbreviations normalised), then name + zip. The API returns **409** with the matches when the same guest,
+visit date and reason already exist (exact duplicate) or when the guest has another card within the
+configured window (likely duplicate); the UI shows the alert and offers "Submit anyway" (`force: true`).
+A guest with two or more cards on file anywhere in the group is flagged as a **repeat guest**, listed in
+analytics and filterable in the comments view.
+
+Every login, card, edit, response, export, user, restaurant and settings change is written to the audit log.
+
+## Run locally
+
+```bash
+cd src/RestaurantFeedback.Api && dotnet run        # http://localhost:5298, SQLite in App_Data
+cd web && npm install && npm run dev               # http://localhost:5173, proxies /api
+```
+
+Development seeds an owner `owner` / `LocalOwner!2026` with the "Culver's of Joliet" restaurant.
+Put a super admin and any other local-only values in `src/RestaurantFeedback.Api/appsettings.Local.json`
+(git-ignored):
+
+```json
+{ "Seed": { "SuperAdminUsername": "you@example.com", "SuperAdminPassword": "..." } }
+```
+
+Tests: `dotnet test` (unit tests for guest matching plus end-to-end API tests on a throw-away SQLite file).
+
+## Deploy
+
+- `deploy/provision.sh` creates the Azure resources (idempotent) and prints the app settings to configure.
+- `deploy/deploy.sh` builds the front end, publishes the API and zip-deploys it.
+- `.github/workflows/deploy.yml` does the same on every push to `main`, using the
+  `AZURE_WEBAPP_PUBLISH_PROFILE` repository secret.
+
+Configuration keys (App Service settings use `__` as the separator): `ConnectionStrings__Default`,
+`Jwt__Key`, `Storage__AccountUrl` (managed identity) or `Storage__ConnectionString`,
+`Email__ConnectionString` + `Email__Sender` (Azure Communication Services; the sender is the
+`DoNotReply@<id>.azurecomm.net` address of the Azure-managed domain), and the `Seed__*` values for the
+first super admin, group, restaurant and owner.
+
+Azure resources: `rg-restaurant-feedback` holds the F1 plan + web app, the storage account, and the
+Communication Services + Email Communication Service resources. Everything except email is on a free
+tier; email is pay-per-message (fractions of a cent).
+
+Free-tier notes: F1 sleeps after 20 minutes idle, so the first request can take 30 to 60 seconds, and it
+has a 60 CPU-minutes/day quota. The SQLite file lives on the persistent `/home/data` share. To grow, move
+the plan to B1 and swap SQLite for Azure SQL (change the EF provider and regenerate the migration).
