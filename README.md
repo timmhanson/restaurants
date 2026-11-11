@@ -62,8 +62,10 @@ Tests: `dotnet test` (unit tests for guest matching plus end-to-end API tests on
 
 - `deploy/provision.sh` creates the Azure resources (idempotent) and prints the app settings to configure.
 - `deploy/deploy.sh` builds the front end, publishes the API and zip-deploys it.
-- `.github/workflows/deploy.yml` does the same on every push to `main`, using the
-  `AZURE_WEBAPP_PUBLISH_PROFILE` repository secret.
+- `.github/workflows/deploy.yml` does the same on every push to `main`. It signs in to Azure with
+  OpenID Connect (no stored passwords) as the `gh-restaurants-deploy` app registration, which trusts only
+  this repo's `main` branch and holds Website Contributor on the web app alone. Repository secrets:
+  `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
 
 Configuration keys (App Service settings use `__` as the separator): `ConnectionStrings__Default`,
 `Jwt__Key`, `Storage__AccountUrl` (managed identity) or `Storage__ConnectionString`,

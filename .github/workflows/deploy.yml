@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# OIDC: GitHub mints a short-lived token that Azure trusts for this repo's main branch only.
+permissions:
+  id-token: write
+  contents: read
+
 env:
   AZURE_WEBAPP_NAME: restaurant-feedback-45200
   DOTNET_VERSION: 10.0.x
@@ -14,9 +19,9 @@ jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -28,7 +33,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -41,10 +46,15 @@ jobs:
           cp -r web/dist src/RestaurantFeedback.Api/wwwroot
           dotnet publish src/RestaurantFeedback.Api --configuration Release --output publish
 
+      - name: Sign in to Azure (OIDC, no stored passwords)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Deploy to Azure App Service
-        if: github.event_name != 'pull_request'
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: publish
