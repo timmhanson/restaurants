@@ -266,6 +266,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("RestaurantId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Source")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("State")
                         .HasColumnType("TEXT");
 

@@ -39,6 +39,8 @@ export interface UserRequest {
   permissions: Permission[]
   restaurantIds: number[]
   isActive: boolean
+  /** Administrators only: false lets the person keep the password that was set for them. */
+  requirePasswordChange?: boolean
 }
 
 export interface PermissionInfo { name: Permission; value: number; description: string }
@@ -136,7 +138,16 @@ export interface GroupSettings {
   updatedBy?: string | null
 }
 
+/** How a guest comment came in. Phone calls need the guest's phone number. */
+export const COMMENT_SOURCES = [
+  { value: 'SMG survey', label: 'SMG survey', hint: 'Guest survey from SMG' },
+  { value: 'Culvers.com Contact Us', label: 'Culvers.com', hint: 'Contact Us form on Culvers.com' },
+  { value: 'Phone call', label: 'Phone call', hint: 'The guest called the restaurant' },
+] as const
+export const PHONE_SOURCE = 'Phone call'
+
 export interface CommentRequest {
+  source?: string | null
   restaurantId: number
   guestFirstName: string
   guestLastName: string
@@ -184,6 +195,7 @@ export interface CommentSummary {
   guestKey: string
   guestCommentCount: number
   replyMethod?: string | null
+  source?: string | null
   repliedOn?: string | null
   lastActivityAt?: string | null
   noteCount: number
@@ -262,6 +274,7 @@ export interface AnalyticsDto {
   avgDaysToReply?: number | null
   waitingOverAWeek: number
   byReplyMethod: CountItem[]
+  bySource: CountItem[]
 }
 
 export interface RestaurantRollup {

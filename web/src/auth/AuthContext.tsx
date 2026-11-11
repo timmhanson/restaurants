@@ -24,6 +24,12 @@ interface AuthState {
   /** System or group administrator: everything in the group. */
   isGroupWide: boolean
   isTeamMember: boolean
+  /** A system administrator looking at one group as its Group Administrator would (the yellow bar). */
+  viewingAs: boolean
+  /** A system administrator with no group open: the oversight pages only. */
+  overseeing: boolean
+  /** Leave the group being viewed and go back to system administration. */
+  exitGroup: () => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -62,11 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const g = await api.get<GroupDto[]>('/groups')
       setGroups(g)
-      // Default to the first active group so the super admin lands somewhere useful.
-      if (!groupStore.get() && g.length) {
-        const first = g.find((x) => x.isActive) ?? g[0]
-        groupStore.set(first.id)
-        setGroupId(first.id)
+      // Forget a group that no longer exists so the system administrator is not stuck viewing it.
+      const open = groupStore.get()
+      if (open && !g.some((x) => x.id === open)) {
+        groupStore.set(null)
+        setGroupId(null)
       }
     } catch {
       setGroups([])
@@ -87,10 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tokenStore.set(res.token)
       setUser(res.user)
       setMustChange(res.mustChangePassword)
-      if (res.user.role !== 'SuperAdmin') {
-        groupStore.set(null)
-        setGroupId(null)
-      }
+      // Everyone starts outside any "viewing as" session; system administrators land on their overview.
+      groupStore.set(null)
+      setGroupId(null)
     },
     [],
   )
@@ -107,7 +112,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const selectGroup = useCallback((id: number | null) => {
     groupStore.set(id)
     setGroupId(id)
+    if (id === null) {
+      setRestaurants([])
+      setSettings(null)
+    }
   }, [])
+  const exitGroup = useCallback(() => selectGroup(null), [selectGroup])
 
   // Restore the session on page load.
   useEffect(() => {
@@ -167,8 +177,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isGroupAdmin: user?.role === 'GroupAdmin',
       isGroupWide,
       isTeamMember: user?.role === 'TeamMember',
+      viewingAs: user?.role === 'SuperAdmin' && groupId !== null,
+      overseeing: user?.role === 'SuperAdmin' && groupId === null,
+      exitGroup,
     }
-  }, [user, loading, mustChangePassword, restaurants, settings, groups, groupId, login, logout, applyLogin, selectGroup, refreshContext, refreshGroups])
+  }, [user, loading, mustChangePassword, restaurants, settings, groups, groupId, login, logout, applyLogin, selectGroup, exitGroup, refreshContext, refreshGroups])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

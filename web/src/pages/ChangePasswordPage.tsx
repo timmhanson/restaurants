@@ -64,7 +64,7 @@ export default function ChangePasswordPage({ forced = false }: { forced?: boolea
       setCurrent('')
       setNext('')
       setConfirm('')
-      if (forced) nav('/enter', { replace: true })
+      if (forced) nav('/', { replace: true })
     } catch (err) {
       setError((err as Error).message)
     } finally {

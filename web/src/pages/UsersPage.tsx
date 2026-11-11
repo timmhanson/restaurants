@@ -105,7 +105,7 @@ export default function UsersPage() {
           other owners' restaurants. Other owners and group administrators are managed by your group administrators.
         </Alert>
       )}
-      {isSuperAdmin && !groupId && <Alert kind="warn">Select an investment group in the top bar to manage its administrators, owners, managers and team logins.</Alert>}
+      {isSuperAdmin && !groupId && <Alert kind="info">Everyone in every group. To add or change people in a group, open it with "View as admin" on Investment groups.</Alert>}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind="success" onClose={() => setNotice(null)}>{notice}</Alert>}
       {users === null ? (
@@ -202,12 +202,15 @@ export default function UsersPage() {
       {resetting && (
         <ResetPasswordModal
           user={resetting}
+          canWaive={canWaive(me?.role)}
           onClose={() => setResetting(null)}
-          onSaved={() => {
+          onSaved={(required) => {
             setNotice(
               resetting.role === 'TeamMember'
                 ? `Password for the team login "${resetting.displayName}" was changed. Share it with the crew.`
-                : `${resetting.displayName} will be asked to choose a new password at their next login.`,
+                : required
+                  ? `${resetting.displayName} will be asked to choose a new password at their next login.`
+                  : `${resetting.displayName}'s password was set. They can keep using it.`,
             )
             setResetting(null)
             void load()
@@ -269,7 +272,9 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
     permissions: user?.role === 'Manager' ? user.permissionNames : ['ViewComments', 'MarkResponded'],
     restaurantIds: user?.restaurantIds ?? (lockable(restaurants).length === 1 ? [lockable(restaurants)[0].id] : []),
     isActive: user?.isActive ?? true,
+    requirePasswordChange: true,
   })
+  const showWaive = canWaive(myRole) && v.role !== 'TeamMember' && Boolean(v.password) && (!user || user.id !== meId)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -296,10 +301,12 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
       else await api.post('/users', body)
       onSaved(
         user
-          ? `${v.displayName} was updated.${v.password && user.role !== 'TeamMember' ? ' They must choose a new password at next login.' : ''}`
+          ? `${v.displayName} was updated.${v.password && user.role !== 'TeamMember' && user.id !== meId && v.requirePasswordChange ? ' They must choose a new password at next login.' : ''}`
           : v.role === 'TeamMember'
             ? `Team login "${v.username}" created. Share the username and password with the crew at the restaurant.`
-            : `${v.displayName} was created. They will be asked to choose a new password when they first sign in.`,
+            : v.requirePasswordChange
+              ? `${v.displayName} was created. They will be asked to choose a new password when they first sign in.`
+              : `${v.displayName} was created. They can sign in with the password you set and keep it.`,
       )
     } catch (err) {
       setError((err as Error).message)
@@ -355,9 +362,24 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
           <Field label="Email (optional)">
             <input type="email" value={v.email ?? ''} onChange={(e) => setV((s) => ({ ...s, email: e.target.value }))} autoComplete="off" />
           </Field>
-          <Field label={user ? 'New password (leave blank to keep)' : 'Password'} hint={v.role === 'TeamMember' ? 'Shared with the crew; they will not be asked to change it.' : 'They must change it at their first login.'}>
+          <Field
+            label={user ? 'New password (leave blank to keep)' : 'Password'}
+            hint={
+              v.role === 'TeamMember'
+                ? 'Shared with the crew; they will not be asked to change it.'
+                : v.requirePasswordChange || !canWaive(myRole)
+                  ? 'They must change it at their next sign-in.'
+                  : 'They can keep this password.'
+            }
+          >
             <input type="password" value={v.password ?? ''} onChange={(e) => setV((s) => ({ ...s, password: e.target.value }))} minLength={8} autoComplete="new-password" required={!user} />
           </Field>
+          {showWaive && (
+            <label className="check span2">
+              <input type="checkbox" checked={v.requirePasswordChange ?? true} onChange={(e) => setV((s) => ({ ...s, requirePasswordChange: e.target.checked }))} />{' '}
+              Require a new password at next sign-in
+            </label>
+          )}
         </div>
         {groupWideRole(v.role) ? (
           <p className="muted" style={{ margin: 0 }}>
@@ -403,8 +425,15 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
   )
 }
 
-function ResetPasswordModal({ user, onClose, onSaved }: { user: UserDto; onClose: () => void; onSaved: () => void }) {
+/** System and group administrators may set a password the person keeps (no forced change at next sign-in). */
+function canWaive(role?: Role) {
+  return role === 'SuperAdmin' || role === 'GroupAdmin'
+}
+
+function ResetPasswordModal({ user, canWaive, onClose, onSaved }: { user: UserDto; canWaive: boolean; onClose: () => void; onSaved: (required: boolean) => void }) {
   const [password, setPassword] = useState('')
+  const [requireChange, setRequireChange] = useState(true)
+  const waivable = canWaive && user.role !== 'TeamMember'
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const submit = async (e: FormEvent) => {
@@ -412,8 +441,9 @@ function ResetPasswordModal({ user, onClose, onSaved }: { user: UserDto; onClose
     setBusy(true)
     setError(null)
     try {
-      await api.put(`/users/${user.id}/password`, { password })
-      onSaved()
+      const required = waivable ? requireChange : user.role !== 'TeamMember'
+      await api.put(`/users/${user.id}/password`, { password, requirePasswordChange: required })
+      onSaved(required)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -427,11 +457,18 @@ function ResetPasswordModal({ user, onClose, onSaved }: { user: UserDto; onClose
         <p className="muted">
           {user.role === 'TeamMember'
             ? 'This is the shared crew login. The new password takes effect immediately and the crew will not be asked to change it.'
-            : 'The user will be asked to choose their own password the next time they sign in.'}
+            : waivable && !requireChange
+              ? 'They can sign in with this password and keep it.'
+              : 'The user will be asked to choose their own password the next time they sign in.'}
         </p>
-        <Field label="Temporary password" hint="At least 8 characters.">
+        <Field label={waivable && !requireChange ? 'New password' : 'Temporary password'} hint="At least 8 characters.">
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoComplete="new-password" autoFocus />
         </Field>
+        {waivable && (
+          <label className="check">
+            <input type="checkbox" checked={requireChange} onChange={(e) => setRequireChange(e.target.checked)} /> Require a new password at next sign-in
+          </label>
+        )}
         <div className="actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Set password'}</button>

@@ -200,6 +200,7 @@ export default function CommentsPage() {
                   </td>
                   <td>
                     {c.reason}
+                    {c.source && <div className="small muted">via {c.source}</div>}
                     {c.reasonDetails && <div className="muted" style={{ fontSize: '0.8rem', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reasonDetails}</div>}
                   </td>
                   <td>{c.couponOffer || <span className="muted">—</span>}</td>

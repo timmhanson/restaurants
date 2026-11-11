@@ -53,7 +53,7 @@ public class FollowUpTests(ApiFactory factory)
         // The same guest sends cards to both restaurants.
         CommentRequest Card(int rid, string date, string reason) => new()
         {
-            RestaurantId = rid, GuestFirstName = "Dana", GuestLastName = "Guest", Phone = "708-555-0101", VisitDate = DateOnly.Parse(date), Reason = reason, Force = true
+            RestaurantId = rid, Source = "Phone call", GuestFirstName = "Dana", GuestLastName = "Guest", Phone = "708-555-0101", VisitDate = DateOnly.Parse(date), Reason = reason, Force = true
         };
         var c1 = (await (await admin.PostAsJsonAsync("/api/comments", Card(frankfort, "2026-10-01", "Wait time"))).Content.ReadFromJsonAsync<CommentSummary>())!;
         var c2 = (await (await admin.PostAsJsonAsync("/api/comments", Card(orland, "2026-10-20", "Order mistake"))).Content.ReadFromJsonAsync<CommentSummary>())!;

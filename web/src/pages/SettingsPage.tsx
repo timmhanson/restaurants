@@ -70,7 +70,7 @@ export default function SettingsPage() {
         <h1>Group settings</h1>
         {groupName && <span className="muted">{groupName}</span>}
       </div>
-      {isSuperAdmin && !groupId && <Alert kind="warn">Select an investment group in the top bar first.</Alert>}
+      {isSuperAdmin && !groupId && <Alert kind="warn">Open a group with "View as admin" on Investment groups first.</Alert>}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {saved && <Alert kind="success" onClose={() => setSaved(false)}>Settings saved.</Alert>}
       {!s ? (

@@ -59,6 +59,8 @@ export default function CommentDrawer({ comment, onClose, onEdit, onChanged, onD
         <dl className="kv">
           <dt>Restaurant</dt>
           <dd>{comment.restaurantName}</dd>
+          <dt>Came in via</dt>
+          <dd>{comment.source || <span className="muted">not recorded</span>}</dd>
           <dt>Visit</dt>
           <dd>
             {fmtDate(comment.visitDate)} ({comment.dayOfWeek})

@@ -11,7 +11,7 @@ public class ApiTests(ApiFactory factory)
     private static CommentRequest Card(int restaurantId, string first = "Jane", string last = "Doe", string? phone = "815-555-1234",
         string visit = "2026-11-03", string reason = "Order mistake", bool force = false) => new()
     {
-        RestaurantId = restaurantId, GuestFirstName = first, GuestLastName = last, Phone = phone, StreetAddress = "123 Main St",
+        RestaurantId = restaurantId, Source = "SMG survey", GuestFirstName = first, GuestLastName = last, Phone = phone, StreetAddress = "123 Main St",
         City = "Joliet", State = "IL", Zip = "60431", VisitDate = DateOnly.Parse(visit), DateIssued = DateOnly.Parse(visit),
         Reason = reason, ReasonDetails = "Missing fries", CouponOffer = "Free Value Basket", AuthorizedBy = "Mgr", Force = force
     };

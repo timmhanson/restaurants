@@ -14,12 +14,12 @@ import SettingsPage from './pages/SettingsPage'
 import UsersPage from './pages/UsersPage'
 import type { Permission } from './api/types'
 
-function Guard({ allow, children }: { allow: boolean; children: React.ReactElement }) {
-  return allow ? children : <Navigate to="/enter" replace />
+function Guard({ allow, home, children }: { allow: boolean; home: string; children: React.ReactElement }) {
+  return allow ? children : <Navigate to={home} replace />
 }
 
 export default function App() {
-  const { user, loading, mustChangePassword, has, isAdmin, isSuperAdmin, isGroupWide } = useAuth()
+  const { user, loading, mustChangePassword, has, isAdmin, isSuperAdmin, isGroupWide, overseeing } = useAuth()
   if (loading) return <Spinner label="Starting…" />
   if (!user) {
     return (
@@ -37,22 +37,26 @@ export default function App() {
       </Routes>
     )
   }
+  // Entering a card is the main job, so everyone lands there. A system administrator who is not viewing a
+  // group lands on the group overview instead; the store pages open once they view a group.
+  const home = overseeing ? '/groups' : '/enter'
+  const inGroup = !overseeing
   const perm = (p: Permission) => has(p)
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Navigate to="/enter" replace />} />
-        <Route path="/login" element={<Navigate to="/enter" replace />} />
-        <Route path="/enter" element={<EnterCardPage />} />
+        <Route index element={<Navigate to={home} replace />} />
+        <Route path="/login" element={<Navigate to={home} replace />} />
+        <Route path="/enter" element={<Guard home={home} allow={inGroup}><EnterCardPage /></Guard>} />
         <Route path="/password" element={<ChangePasswordPage />} />
-        <Route path="/comments" element={<Guard allow={perm('ViewComments')}><CommentsPage /></Guard>} />
-        <Route path="/analytics" element={<Guard allow={perm('ViewAnalytics')}><AnalyticsPage /></Guard>} />
-        <Route path="/users" element={<Guard allow={isAdmin || perm('ManageTeamLogin')}><UsersPage /></Guard>} />
-        <Route path="/restaurants" element={<Guard allow={isAdmin}><RestaurantsPage /></Guard>} />
-        <Route path="/settings" element={<Guard allow={isGroupWide}><SettingsPage /></Guard>} />
-        <Route path="/audit" element={<Guard allow={perm('ViewAudit')}><AuditPage /></Guard>} />
-        <Route path="/groups" element={<Guard allow={isSuperAdmin}><GroupsPage /></Guard>} />
-        <Route path="*" element={<Navigate to="/enter" replace />} />
+        <Route path="/comments" element={<Guard home={home} allow={inGroup && perm('ViewComments')}><CommentsPage /></Guard>} />
+        <Route path="/analytics" element={<Guard home={home} allow={inGroup && perm('ViewAnalytics')}><AnalyticsPage /></Guard>} />
+        <Route path="/users" element={<Guard home={home} allow={isAdmin || perm('ManageTeamLogin')}><UsersPage /></Guard>} />
+        <Route path="/restaurants" element={<Guard home={home} allow={inGroup && isAdmin}><RestaurantsPage /></Guard>} />
+        <Route path="/settings" element={<Guard home={home} allow={inGroup && isGroupWide}><SettingsPage /></Guard>} />
+        <Route path="/audit" element={<Guard home={home} allow={perm('ViewAudit')}><AuditPage /></Guard>} />
+        <Route path="/groups" element={<Guard home={home} allow={isSuperAdmin}><GroupsPage /></Guard>} />
+        <Route path="*" element={<Navigate to={home} replace />} />
       </Route>
     </Routes>
   )

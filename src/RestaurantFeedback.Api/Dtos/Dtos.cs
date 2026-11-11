@@ -37,9 +37,15 @@ public class UserRequest
     public string[] Permissions { get; set; } = [];
     public int[] RestaurantIds { get; set; } = [];
     public bool IsActive { get; set; } = true;
+    /// <summary>
+    /// When a password is set for someone else, make them choose a new one at next sign-in (the default).
+    /// Only System and Group Administrators may turn this off; team logins never have to.
+    /// </summary>
+    public bool RequirePasswordChange { get; set; } = true;
 }
 
-public record SetPasswordRequest([Required, MinLength(8)] string Password);
+/// <param name="RequirePasswordChange">See <see cref="UserRequest.RequirePasswordChange"/>.</param>
+public record SetPasswordRequest([Required, MinLength(8)] string Password, bool RequirePasswordChange = true);
 /// <summary>Suspend (Active = false) or restore someone's access to every restaurant they work at.</summary>
 public record UserStatusRequest(bool Active);
 
@@ -116,6 +122,8 @@ public class CommentRequest
     [MaxLength(50)] public string? State { get; set; }
     [MaxLength(20)] public string? Zip { get; set; }
     [MaxLength(30)] public string? Phone { get; set; }
+    /// <summary>How the comment came in: "SMG survey", "Culvers.com Contact Us" or "Phone call". Phone calls need the guest's phone number.</summary>
+    [MaxLength(50)] public string? Source { get; set; }
     [MaxLength(200)] public string? CouponOffer { get; set; }
     public DateOnly? DateIssued { get; set; }
     [MaxLength(100)] public string? AuthorizedBy { get; set; }
@@ -134,6 +142,7 @@ public record CommentSummary(
     bool Responded, DateTime? RespondedAt, string? RespondedByName, DateTime CreatedAt, string CreatedByName, DateTime? UpdatedAt,
     string GuestKey, int GuestCommentCount)
 {
+    public string? Source { get; init; }
     public string? ReplyMethod { get; init; }
     public DateOnly? RepliedOn { get; init; }
     public DateTime? LastActivityAt { get; init; }
@@ -149,7 +158,7 @@ public record CommentSummary(
         c.Responded, c.RespondedAt, c.RespondedByName, c.CreatedAt, c.CreatedByName, c.UpdatedAt,
         c.GuestKey, guestCommentCount)
     {
-        ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
+        Source = c.Source, ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
     };
 }
 
@@ -207,6 +216,8 @@ public record AnalyticsDto(
     /// <summary>Unreplied cards whose visit was more than a week ago.</summary>
     public int WaitingOverAWeek { get; init; }
     public List<CountItem> ByReplyMethod { get; init; } = [];
+    /// <summary>How the comments came in (SMG survey, Culvers.com, phone), with how many were replied to.</summary>
+    public List<CountItem> BySource { get; init; } = [];
 }
 
 public record RestaurantRollup(

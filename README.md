@@ -13,7 +13,7 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 
 | Title (internal role) | Scope | Can |
 | --- | --- | --- |
-| **System Administrator** (`SuperAdmin`) | every investment group | everything; create groups and their administrators, pick a group with the `X-Group-Id` header |
+| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **View as admin** opens one group exactly as its Group Administrator sees it, under a yellow bar with **Exit to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
 | **Group Administrator** (`GroupAdmin`) | one investment group | every restaurant, every user account (owners and other administrators included) and the group settings |
 | **Restaurant Owner** (`Owner`) | the restaurants they own | everything at those restaurants: cards, analytics, export, audit, staffing and co-owners. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
 | **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus whatever is granted: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin. Permissions apply at every restaurant they work at |
@@ -61,9 +61,18 @@ address on file (`POST /api/auth/change-password/request`, then `POST /api/auth/
 current password, new password and code; codes last 10 minutes, 5 attempts, one resend per minute).
 Administrators can reset anyone's password in their scope, and owners can reset the managers and team
 logins at their restaurants (managers with `ManageTeamLogin` can reset the team login). A reset by someone else forces a new password at the next login, except for team logins, which
-usually have no email and are managed by the owner/manager.
+usually have no email and are managed by the owner/manager. System and Group Administrators can untick
+**Require a new password at next sign-in** (`requirePasswordChange: false`) to set a password the person keeps.
 
 ## The card
+
+Signing in lands everyone on **Enter card**, since entering cards is the main job (System Administrators
+land on the group overview).
+
+The first question is **how the comment came in**: an SMG survey, the Contact Us form on Culvers.com, or a
+phone call. A phone call asks for the guest's phone number and will not save without it. The source shows
+on the card, in the comments list, in the export ("Came In Via") and in Analytics ("How comments came in",
+with replied and waiting counts). Cards entered before this was asked show "not recorded".
 
 The entry form mirrors the physical postcard: coupon offer ("Please enjoy ___"), date issued, expiry
 (issue date + the group's validity months, 3 by default), authorized by; guest name, street, city/state/zip,

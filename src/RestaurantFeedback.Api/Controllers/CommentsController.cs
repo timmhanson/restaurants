@@ -205,7 +205,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         var me = await users.GetAsync();
         if (!me.CanAccessRestaurant(req.RestaurantId)) return Forbid();
         var settings = await settingsStore.GetAsync(me.GroupId ?? 0, ct);
-        var validation = Validate(req, settings);
+        var validation = Validate(req, settings, isNew: true, null);
         if (validation is not null) return BadRequest(new { message = validation });
 
         var check = await Detect(me, req, settings, excludeId: null, ct);
@@ -217,7 +217,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         db.Comments.Add(c);
         await db.SaveChangesAsync();
         await audit.LogAsync(me, "CommentCreated", "Comment", c.Id,
-            new { Guest = $"{c.GuestFirstName} {c.GuestLastName}", c.VisitDate, c.Reason, c.CouponOffer, Forced = req.Force, check.PriorCount }, c.RestaurantId);
+            new { Guest = $"{c.GuestFirstName} {c.GuestLastName}", c.Source, c.VisitDate, c.Reason, c.CouponOffer, Forced = req.Force, check.PriorCount }, c.RestaurantId);
         c.Restaurant = await db.Restaurants.FindAsync([c.RestaurantId], ct) ?? new Restaurant();
         return CreatedAtAction(nameof(Get), new { id = c.Id }, CommentSummary.From(c, check.PriorCount + 1));
     }
@@ -230,7 +230,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         var c = await db.Comments.Include(x => x.Restaurant).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c is null || !me.CanAccessRestaurant(c.RestaurantId) || !me.CanAccessRestaurant(req.RestaurantId)) return NotFound();
         var settings = await settingsStore.GetAsync(me.GroupId ?? 0, ct);
-        var validation = Validate(req, settings);
+        var validation = Validate(req, settings, isNew: false, c.Source);
         if (validation is not null) return BadRequest(new { message = validation });
 
         var check = await Detect(me, req, settings, excludeId: id, ct);
@@ -308,12 +308,12 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 $"{a.CreatedAt:yyyy-MM-dd} {a.CreatedByName}: {a.Kind}{(a.Method is null ? "" : $" ({a.Method})")}{(a.Text is null ? "" : $" - {a.Text}")}")));
 
         var sb = new StringBuilder();
-        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
+        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
         foreach (var c in rows)
         {
             sb.AppendLine(string.Join(',', new[]
             {
-                c.Id.ToString(), Csv(c.Restaurant.Name), c.VisitDate.ToString("yyyy-MM-dd"), c.VisitDate.DayOfWeek.ToString(),
+                c.Id.ToString(), Csv(c.Restaurant.Name), c.VisitDate.ToString("yyyy-MM-dd"), c.VisitDate.DayOfWeek.ToString(), Csv(c.Source),
                 Csv(c.GuestFirstName), Csv(c.GuestLastName), Csv(c.Phone), Csv(c.StreetAddress), Csv(c.City), Csv(c.State), Csv(c.Zip),
                 Csv(c.Reason), Csv(c.ReasonDetails), Csv(c.CouponOffer), c.DateIssued.ToString("yyyy-MM-dd"), c.ExpiresOn.ToString("yyyy-MM-dd"),
                 Csv(c.AuthorizedBy), c.Responded ? "Yes" : "No", Csv(c.ReplyMethod), c.RepliedOn?.ToString("yyyy-MM-dd") ?? "",
@@ -360,7 +360,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
 
     private static object Trim(CommentSummary s) => new
     {
-        s.GuestFirstName, s.GuestLastName, s.Phone, s.StreetAddress, s.City, s.State, s.Zip, s.VisitDate, s.Reason, s.ReasonDetails,
+        s.GuestFirstName, s.GuestLastName, s.Source, s.Phone, s.StreetAddress, s.City, s.State, s.Zip, s.VisitDate, s.Reason, s.ReasonDetails,
         s.CouponOffer, s.DateIssued, s.ExpiresOn, s.AuthorizedBy, s.Notes, s.RestaurantId
     };
 
@@ -370,8 +370,16 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         return me.CanAccessRestaurant(restaurantId.Value) ? [restaurantId.Value] : null;
     }
 
-    private static string? Validate(CommentRequest req, GroupSettings settings)
+    /// <param name="existingSource">The card's current source when editing; older cards entered without one may stay without one.</param>
+    private static string? Validate(CommentRequest req, GroupSettings settings, bool isNew, string? existingSource)
     {
+        var source = CommentSources.Match(req.Source);
+        if (!string.IsNullOrWhiteSpace(req.Source) && source is null)
+            return $"How the comment came in must be one of: {string.Join(", ", CommentSources.All)}.";
+        if (source is null && (isNew || existingSource is not null))
+            return "Choose how the comment came in: SMG survey, Culvers.com Contact Us or a phone call.";
+        if (source == CommentSources.Phone && GuestMatcher.NormalizePhone(req.Phone) is null)
+            return "The comment came in by phone, so enter the guest's phone number.";
         if (settings.RequirePhoneOrAddress && GuestMatcher.NormalizePhone(req.Phone) is null && GuestMatcher.NormalizeAddress(req.StreetAddress) is null)
             return "Enter the guest's phone number or street address so repeat guests can be recognised.";
         if (!settings.ReasonCategories.Contains(req.Reason, StringComparer.OrdinalIgnoreCase))
@@ -390,6 +398,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         c.State = req.State?.Trim();
         c.Zip = req.Zip?.Trim();
         c.Phone = req.Phone?.Trim();
+        c.Source = CommentSources.Match(req.Source) ?? c.Source;
         c.CouponOffer = req.CouponOffer?.Trim();
         c.DateIssued = req.DateIssued ?? req.VisitDate;
         c.ExpiresOn = c.DateIssued.AddMonths(settings.CouponValidityMonths);

@@ -1,62 +1,88 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { roleTitle } from '../auth/roles'
 
 export default function Layout() {
-  const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, selectGroup, settings, restaurants } = useAuth()
+  const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup } = useAuth()
   const [open, setOpen] = useState(false)
   const nav = useNavigate()
+  const bar = useRef<HTMLDivElement>(null)
+
+  // The topbar sticks just under the yellow bar, whose height changes when it wraps on a phone.
+  useEffect(() => {
+    const el = bar.current
+    const root = document.documentElement
+    if (!el) {
+      root.style.removeProperty('--viewing-bar-h')
+      return
+    }
+    const ro = new ResizeObserver(() => root.style.setProperty('--viewing-bar-h', `${el.offsetHeight}px`))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [viewingAs])
+
   if (!user) return null
 
-  const links: { to: string; label: string; show: boolean }[] = [
-    { to: '/enter', label: 'Enter card', show: true },
-    { to: '/comments', label: 'Comments', show: has('ViewComments') },
-    { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
-    { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
-    { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },
-    { to: '/settings', label: 'Settings', show: isGroupWide },
-    { to: '/audit', label: 'Audit log', show: has('ViewAudit') },
-    { to: '/groups', label: 'Groups', show: isSuperAdmin },
-  ]
+  // A system administrator either oversees every group (Groups, all users, the whole audit log) or views one
+  // group exactly as its Group Administrator would, with the yellow bar to get back out.
+  const links: { to: string; label: string; show: boolean }[] = overseeing
+    ? [
+        { to: '/groups', label: 'Investment groups', show: true },
+        { to: '/users', label: 'All users', show: true },
+        { to: '/audit', label: 'Audit log', show: true },
+      ]
+    : [
+        { to: '/enter', label: 'Enter card', show: true },
+        { to: '/comments', label: 'Comments', show: has('ViewComments') },
+        { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
+        { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
+        { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },
+        { to: '/settings', label: 'Settings', show: isGroupWide },
+        { to: '/audit', label: 'Audit log', show: has('ViewAudit') },
+      ]
 
   const groupName = isSuperAdmin ? groups.find((g) => g.id === groupId)?.name : user.groupName
-  const context = isTeamMember
-    ? restaurants.map((r) => r.name).join(', ')
-    : [settings?.groupDisplayName || groupName, restaurants.length === 1 ? restaurants[0].name : restaurants.length ? `${restaurants.length} restaurants` : null]
-        .filter(Boolean)
-        .join(' · ')
+  const context = overseeing
+    ? 'System administration'
+    : isTeamMember
+      ? restaurants.map((r) => r.name).join(', ')
+      : [settings?.groupDisplayName || groupName, restaurants.length === 1 ? restaurants[0].name : restaurants.length ? `${restaurants.length} restaurants` : null]
+          .filter(Boolean)
+          .join(' · ')
+
+  const exit = () => {
+    exitGroup()
+    nav('/groups')
+  }
 
   return (
-    <div className="app">
+    <div className={`app ${viewingAs ? 'viewing-as' : ''}`}>
+      {viewingAs && (
+        <div className="viewing-bar" role="status" ref={bar}>
+          <span>
+            You are viewing <strong>{groupName ?? 'this group'}</strong> as a Group Administrator. Everything you do here is real and is audited under
+            your name.
+          </span>
+          <button type="button" className="btn btn-sm" onClick={exit}>
+            Exit to System Administration
+          </button>
+        </div>
+      )}
       <header className="topbar">
         <button type="button" className="btn-icon nav-toggle" aria-label="Menu" onClick={() => setOpen((o) => !o)}>
           ☰
         </button>
-        <div className="brand" onClick={() => nav('/enter')}>
+        <div className="brand" onClick={() => nav(overseeing ? '/groups' : '/enter')}>
           <span className="brand-mark" />
           <div>
             <div className="brand-title">Guest Feedback</div>
             <div className="brand-sub">{context || 'No restaurant assigned'}</div>
           </div>
         </div>
-        {isSuperAdmin && (
-          <label className="group-switch">
-            <span>Group</span>
-            <select value={groupId ?? ''} onChange={(e) => selectGroup(e.target.value ? Number(e.target.value) : null)}>
-              <option value="">— none —</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                  {g.isActive ? '' : ' (inactive)'}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <div className="user-menu">
           <span className="user-name">
-            {user.displayName} <small>({roleTitle(user.role)})</small>
+            {user.displayName} <small>({viewingAs ? 'System Administrator, viewing as Group Administrator' : roleTitle(user.role)})</small>
           </span>
           <NavLink to="/password" className="btn btn-sm">
             Password

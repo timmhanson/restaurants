@@ -139,6 +139,9 @@ public class GuestComment
     public DateOnly ExpiresOn { get; set; }
     public string? AuthorizedBy { get; set; }
 
+    /// <summary>How the comment reached the restaurant: one of <see cref="CommentSources.All"/>. Null on cards entered before it was asked.</summary>
+    public string? Source { get; set; }
+
     // What happened
     public DateOnly VisitDate { get; set; }
     /// <summary>Reason category. The allowed list lives in the group's settings blob.</summary>
@@ -215,4 +218,17 @@ public class AuditLog
     public string? EntityId { get; set; }
     public string? Details { get; set; }
     public string? IpAddress { get; set; }
+}
+
+/// <summary>The ways a guest comment comes in. When it came by phone, the guest's phone number is required.</summary>
+public static class CommentSources
+{
+    public const string Smg = "SMG survey";
+    public const string Website = "Culvers.com Contact Us";
+    public const string Phone = "Phone call";
+    public static readonly string[] All = [Smg, Website, Phone];
+
+    /// <summary>The canonical spelling of a source, or null when it is not one of <see cref="All"/>.</summary>
+    public static string? Match(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : All.FirstOrDefault(s => s.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
 }

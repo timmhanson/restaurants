@@ -177,7 +177,7 @@ public class OwnershipTests(ApiFactory factory)
         var team = await factory.LoginAsync("live-team", "Crew!12345");
         var card = new CommentRequest
         {
-            RestaurantId = rid, GuestFirstName = "Pat", GuestLastName = "Live", Phone = "815-555-7000", VisitDate = DateOnly.Parse("2026-11-02"), Reason = "Wait time"
+            RestaurantId = rid, Source = "Culvers.com Contact Us", GuestFirstName = "Pat", GuestLastName = "Live", Phone = "815-555-7000", VisitDate = DateOnly.Parse("2026-11-02"), Reason = "Wait time"
         };
 
         // Take the crew login off the restaurant: its existing token loses access immediately.

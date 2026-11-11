@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { Alert, Badge, Empty, Field, Modal, Spinner, fmtDate } from '../components/ui'
 
 export default function GroupsPage() {
-  const { refreshGroups, selectGroup, groupId } = useAuth()
+  const { refreshGroups, selectGroup } = useAuth()
   const navigate = useNavigate()
   const [list, setList] = useState<GroupDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -25,10 +25,12 @@ export default function GroupsPage() {
     void load()
   }, [load])
 
-  const setUp = (g: GroupDto, page = '/restaurants') => {
+  /** Opens the group exactly as its Group Administrator sees it; the yellow bar leads back here. */
+  const viewAs = (g: GroupDto, page = '/enter') => {
     selectGroup(g.id)
     navigate(page)
   }
+  const setUp = (g: GroupDto) => viewAs(g, '/restaurants')
 
   return (
     <>
@@ -39,7 +41,8 @@ export default function GroupsPage() {
       </div>
       <p className="muted">
         Each investment group has its own group administrators, restaurant owners, managers, team logins and settings. Create a group with its
-        administrators, owners and restaurants in one step, then use <strong>Set up</strong> to adjust who owns and manages each restaurant.
+        administrators, owners and restaurants in one step. <strong>View as admin</strong> opens the group just as its Group Administrator sees
+        it (starting on Enter card); <strong>Set up</strong> opens its restaurants and staff. A yellow bar at the top takes you back here.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind="success" onClose={() => setNotice(null)}>{notice}</Alert>}
@@ -54,7 +57,14 @@ export default function GroupsPage() {
             <tbody>
               {list.map((g) => (
                 <tr key={g.id} className={g.isActive ? '' : 'inactive'}>
-                  <td><strong>{g.name}</strong> {g.id === groupId && <Badge kind="accent">selected</Badge>}</td>
+                  <td>
+                    <strong>{g.name}</strong>
+                    <div>
+                      <button type="button" className="btn btn-sm btn-primary view-as" onClick={() => viewAs(g)} title="See this group as its Group Administrator does">
+                        View as admin
+                      </button>
+                    </div>
+                  </td>
                   <td>{g.adminNames.length ? <div className="people">{g.adminNames.map((n) => <Badge key={n} kind="accent">{n}</Badge>)}</div> : <Badge kind="warn">None yet</Badge>}</td>
                   <td>{g.ownerNames.length ? <div className="people">{g.ownerNames.map((n) => <Badge key={n}>{n}</Badge>)}</div> : <span className="muted">none</span>}</td>
                   <td className="num">{g.restaurantCount}</td>
@@ -64,8 +74,8 @@ export default function GroupsPage() {
                   <td>{g.isActive ? <Badge kind="ok">Active</Badge> : <Badge kind="neutral">Inactive</Badge>}</td>
                   <td>
                     <div className="row-actions">
-                      <button type="button" className="btn btn-sm btn-primary" onClick={() => setUp(g)}>Set up</button>
-                      <button type="button" className="btn btn-sm" onClick={() => setUp(g, '/users')}>Users</button>
+                      <button type="button" className="btn btn-sm" onClick={() => setUp(g)}>Set up</button>
+                      <button type="button" className="btn btn-sm" onClick={() => viewAs(g, '/users')}>Users</button>
                       <button type="button" className="btn btn-sm" onClick={() => setEditing(g)}>Edit</button>
                     </div>
                   </td>

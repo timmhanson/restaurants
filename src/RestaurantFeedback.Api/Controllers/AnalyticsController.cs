@@ -104,7 +104,8 @@ public class AnalyticsController(AppDbContext db, CurrentUserProvider users) : C
             CrossRestaurantGuests = byGuest.Count(g => g.Select(x => x.RestaurantId).Distinct().Count() > 1),
             AvgDaysToReply = AvgReplyDays(rows),
             WaitingOverAWeek = rows.Count(c => !c.Responded && WaitingDays(c) > 7),
-            ByReplyMethod = Counts(rows.Where(c => c.Responded), c => c.ReplyMethod ?? "Not recorded")
+            ByReplyMethod = Counts(rows.Where(c => c.Responded), c => c.ReplyMethod ?? "Not recorded"),
+            BySource = Counts(rows, c => c.Source ?? "Not recorded")
         };
     }
 

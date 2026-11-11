@@ -171,6 +171,23 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <div className="panel">
+              <h2>How comments came in</h2>
+              {data.bySource.length === 0 ? (
+                <Empty>No comments in this range.</Empty>
+              ) : (
+                <div className="chart-box">
+                  <ResponsiveContainer>
+                    <BarChart data={withOpen(data.bySource)} layout="vertical" margin={{ left: 30 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="label" width={150} /><Tooltip /><Legend />
+                      <Bar dataKey="responded" name="Replied" stackId="a" fill={REPLIED} />
+                      <Bar dataKey="open" name="Waiting" stackId="a" fill={WAITING} radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+            <div className="panel">
               <h2>How we replied</h2>
               {data.byReplyMethod.length === 0 ? (
                 <Empty>No replies recorded in this range yet.</Empty>

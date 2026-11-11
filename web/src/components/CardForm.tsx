@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { api, ApiError } from '../api/client'
-import type { CommentRequest, CommentSummary, DuplicateCheckResult } from '../api/types'
+import { COMMENT_SOURCES, PHONE_SOURCE, type CommentRequest, type CommentSummary, type DuplicateCheckResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { Alert, Field, addMonths, fmtDate, today } from './ui'
 
@@ -10,6 +10,7 @@ export function emptyCard(restaurantId: number, offer = ''): CardFormValues {
   const t = today()
   return {
     restaurantId,
+    source: '',
     guestFirstName: '',
     guestLastName: '',
     streetAddress: '',
@@ -30,6 +31,7 @@ export function emptyCard(restaurantId: number, offer = ''): CardFormValues {
 export function cardFromSummary(c: CommentSummary): CardFormValues {
   return {
     restaurantId: c.restaurantId,
+    source: c.source ?? '',
     guestFirstName: c.guestFirstName,
     guestLastName: c.guestLastName,
     streetAddress: c.streetAddress ?? '',
@@ -114,6 +116,9 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   const expires = useMemo(() => (v.dateIssued ? addMonths(v.dateIssued, validity) : ''), [v.dateIssued, validity])
   const reasons = settings?.reasonCategories ?? []
   const offers = settings?.couponOffers ?? []
+  const byPhone = v.source === PHONE_SOURCE
+  // Cards entered before "how it came in" was asked may be edited without choosing one.
+  const hadSource = Boolean(initial.source)
 
   const canCheck = v.guestFirstName.trim() && v.guestLastName.trim() && (v.phone?.trim() || v.streetAddress?.trim()) && v.visitDate && v.restaurantId
 
@@ -150,12 +155,14 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
     e.preventDefault()
     setError(null)
     if (!v.restaurantId) return setError('Pick a restaurant.')
+    if (!v.source && (!editingId || hadSource)) return setError('Choose how the comment came in: SMG survey, Culvers.com or a phone call.')
+    if (byPhone && !v.phone?.trim()) return setError("The guest called, so enter their phone number.")
     if (!v.reason) return setError('Pick a reason.')
     if (settings?.requirePhoneOrAddress && !v.phone?.trim() && !v.streetAddress?.trim())
       return setError("Enter the guest's phone number or street address so repeat guests can be recognised.")
     setBusy(true)
     try {
-      const body: CommentRequest = { ...v, force: needsForce }
+      const body: CommentRequest = { ...v, source: v.source || null, force: needsForce }
       const saved = editingId ? await api.put<CommentSummary>(`/comments/${editingId}`, body) : await api.post<CommentSummary>('/comments', body)
       onSaved(saved)
     } catch (err) {
@@ -173,11 +180,40 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   }
 
   const blocking = check && (check.exactDuplicate || check.likelyDuplicate)
+  const phoneInput = (autoFocus: boolean) => (
+    <input
+      value={v.phone ?? ''}
+      onChange={(e) => set('phone', e.target.value)}
+      inputMode="tel"
+      autoComplete="off"
+      placeholder="(815) 555-1234"
+      required={byPhone}
+      autoFocus={autoFocus}
+    />
+  )
 
   return (
     <form onSubmit={submit}>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {check && <DuplicateAlert check={check} showDetails={canSeeDetails} />}
+
+      <fieldset className="panel source-panel">
+        <legend>How did this comment come in?</legend>
+        <div className="source-choice" role="radiogroup">
+          {COMMENT_SOURCES.map((s) => (
+            <label key={s.value} className={v.source === s.value ? 'selected' : ''}>
+              <input type="radio" name="source" value={s.value} checked={v.source === s.value} onChange={() => set('source', s.value)} />
+              <span className="source-label">{s.label}</span>
+              <span className="source-hint">{s.hint}</span>
+            </label>
+          ))}
+        </div>
+        {byPhone && (
+          <Field label="Guest's phone number" hint="Required for phone calls so a manager can call back.">
+            {phoneInput(!editingId)}
+          </Field>
+        )}
+      </fieldset>
 
       <div className="postcard">
         <div className="postcard-left">
@@ -235,9 +271,11 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
               <input value={v.zip ?? ''} onChange={(e) => set('zip', e.target.value)} inputMode="numeric" autoComplete="off" />
             </Field>
           </div>
-          <Field label="Guest's phone number" hint={settings?.requirePhoneOrAddress ? 'Phone or street address is required to spot repeat guests.' : undefined}>
-            <input value={v.phone ?? ''} onChange={(e) => set('phone', e.target.value)} inputMode="tel" autoComplete="off" placeholder="(815) 555-1234" />
-          </Field>
+          {!byPhone && (
+            <Field label="Guest's phone number" hint={settings?.requirePhoneOrAddress ? 'Phone or street address is required to spot repeat guests.' : undefined}>
+              {phoneInput(false)}
+            </Field>
+          )}
         </div>
       </div>
 

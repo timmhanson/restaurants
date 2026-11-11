@@ -17,7 +17,7 @@ export default function LoginPage() {
     setError(null)
     try {
       const res = await login(username, password)
-      nav(res.mustChangePassword ? '/password' : '/enter', { replace: true })
+      nav(res.mustChangePassword ? '/password' : '/', { replace: true })
     } catch (err) {
       setError((err as Error).message)
     } finally {
