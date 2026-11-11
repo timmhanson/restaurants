@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GuestComment> Comments => Set<GuestComment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<CommentActivity> CommentActivities => Set<CommentActivity>();
+    public DbSet<InteractionLog> InteractionLogs => Set<InteractionLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -35,5 +36,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         b.Entity<AuditLog>().HasIndex(a => a.Timestamp);
         b.Entity<AuditLog>().HasIndex(a => new { a.GroupId, a.RestaurantId });
+
+        var log = b.Entity<InteractionLog>();
+        log.HasIndex(l => l.At);
+        log.HasIndex(l => new { l.GroupId, l.At });
+        log.HasIndex(l => new { l.RestaurantId, l.At });
+        log.HasIndex(l => new { l.UserId, l.At });
+        log.Property(l => l.Kind).HasMaxLength(20);
+        log.Property(l => l.UserName).HasMaxLength(100);
+        log.Property(l => l.DisplayName).HasMaxLength(200);
+        log.Property(l => l.Method).HasMaxLength(10);
+        log.Property(l => l.Path).HasMaxLength(400);
+        log.Property(l => l.Action).HasMaxLength(200);
+        log.Property(l => l.Detail).HasMaxLength(500);
+        log.Property(l => l.SessionId).HasMaxLength(64);
+        log.Property(l => l.IpAddress).HasMaxLength(64);
+        log.Property(l => l.UserAgent).HasMaxLength(300);
     }
 }

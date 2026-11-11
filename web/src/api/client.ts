@@ -31,6 +31,42 @@ export const groupStore = {
   set: (id: number | null) => (id ? localStorage.setItem(GROUP_KEY, String(id)) : localStorage.removeItem(GROUP_KEY)),
 }
 
+/** Random id per browser tab, sent with every request so one visit can be followed in the interaction log. */
+export const sessionId: string = (() => {
+  const KEY = 'gf.session'
+  try {
+    const existing = sessionStorage.getItem(KEY)
+    if (existing) return existing
+    const id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    sessionStorage.setItem(KEY, id)
+    return id
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  }
+})()
+
+// The server stamps every API response with the build it is running. When that changes while this tab is open,
+// a new version was deployed; the app reloads itself at the next page change so nobody keeps using a stale copy.
+let firstVersion: string | null = null
+let newVersionReady = false
+function noteVersion(res: Response) {
+  const v = res.headers.get('X-App-Version')
+  if (!v) return
+  if (firstVersion === null) firstVersion = v
+  else if (v !== firstVersion) newVersionReady = true
+}
+export const isNewVersionReady = () => newVersionReady
+
+/** Headers every API call carries: the token, the group a System Administrator is viewing, and the tab's session. */
+export function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'X-Session-Id': sessionId }
+  const token = tokenStore.get()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const gid = groupStore.get()
+  if (gid) headers['X-Group-Id'] = String(gid)
+  return headers
+}
+
 type Listener = (event: 'unauthorized' | 'password-change-required') => void
 let listener: Listener | null = null
 export function onAuthEvent(fn: Listener | null) {
@@ -54,14 +90,11 @@ function extractMessage(status: number, body: unknown): string {
 }
 
 async function request<T>(method: string, path: string, body?: unknown, raw = false): Promise<T> {
-  const headers: Record<string, string> = {}
-  const token = tokenStore.get()
-  if (token) headers.Authorization = `Bearer ${token}`
-  const gid = groupStore.get()
-  if (gid) headers['X-Group-Id'] = String(gid)
+  const headers = authHeaders()
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+  const res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' })
+  noteVersion(res)
   if (res.status === 204) return undefined as T
   if (raw && res.ok) return (await res.blob()) as T
 

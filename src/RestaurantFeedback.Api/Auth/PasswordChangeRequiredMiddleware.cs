@@ -6,7 +6,7 @@ namespace RestaurantFeedback.Api.Auth;
 /// </summary>
 public class PasswordChangeRequiredMiddleware(RequestDelegate next)
 {
-    private static readonly string[] Allowed = ["/api/auth/login", "/api/auth/me", "/api/auth/change-password", "/api/auth/change-password/request", "/api/health", "/api/info"];
+    private static readonly string[] Allowed = ["/api/auth/login", "/api/auth/me", "/api/auth/change-password", "/api/auth/change-password/request", "/api/health", "/api/info", "/api/activity"];
 
     public async Task InvokeAsync(HttpContext ctx)
     {

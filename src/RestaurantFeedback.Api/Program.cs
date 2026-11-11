@@ -71,6 +71,10 @@ else
 builder.Services.AddScoped<PasswordCodeService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AuditService>();
+// Every user interaction (API calls here, page views and clicks from the browser) for the System Administrator.
+builder.Services.AddSingleton(config.GetSection("InteractionLog").Get<InteractionLogOptions>() ?? new InteractionLogOptions());
+builder.Services.AddSingleton<InteractionLogQueue>();
+builder.Services.AddHostedService<InteractionLogWriter>();
 builder.Services.AddScoped<CurrentUserProvider>();
 builder.Services.AddControllers().AddJsonOptions(o =>
 {
@@ -84,11 +88,14 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
+var appVersion = CachePolicy.AppVersion(app.Environment);
 app.UseCors();
+app.UseApiNoStore(appVersion);
 app.UseMiddleware<AccountUnavailableMiddleware>();
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(CachePolicy.StaticFiles());
 app.UseAuthentication();
+app.UseMiddleware<InteractionLoggingMiddleware>();
 app.UseAuthorization();
 app.UseMiddleware<PasswordChangeRequiredMiddleware>();
 app.MapControllers();
@@ -99,10 +106,11 @@ app.MapGet("/api/info", (IGroupSettingsStore store, IEmailSender mail, IWebHostE
     environment = env.EnvironmentName,
     settingsStore = store.Description,
     email = mail.Description,
+    version = appVersion,
     utc = DateTime.UtcNow
 });
 // Serve the React app for any non-API route (client-side routing).
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", CachePolicy.StaticFiles());
 
 await DbSeeder.SeedAsync(app.Services);
 app.Run();

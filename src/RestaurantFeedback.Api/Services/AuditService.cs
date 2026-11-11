@@ -15,6 +15,7 @@ public class AuditService(AppDbContext db, IHttpContextAccessor http)
 
     public async Task LogRawAsync(int? userId, string userName, UserRole? role, int? groupId, string action, string? entityType = null, object? entityId = null, object? details = null, int? restaurantId = null)
     {
+        InteractionContext.Note(http.HttpContext, action, restaurantId, groupId, (userId, userName, role));
         db.AuditLogs.Add(new AuditLog
         {
             UserId = userId,

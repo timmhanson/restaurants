@@ -7,10 +7,7 @@ import { Alert, Badge, Empty, Spinner, daysAgo, fmtDate } from '../components/ui
 
 const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 /** Categorical palette, fixed order, validated for colour-vision deficiency. Never cycled: extra series fold into "Other". */
-const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6']
-const OTHER = '#8d99ae'
-const REPLIED = '#1baf7a'
-const WAITING = '#eb6834'
+import { OTHER, REPLIED, SERIES, WAITING } from '../components/palette'
 
 function withOpen(items: CountItem[]) {
   return items.map((i) => ({ ...i, responded: i.responded ?? 0, open: i.count - (i.responded ?? 0) }))

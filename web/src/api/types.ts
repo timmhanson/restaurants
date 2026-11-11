@@ -310,3 +310,64 @@ export interface AuditDto {
   details?: string | null
   ipAddress?: string | null
 }
+
+// ---- System Administrator: interaction log and reports ----
+export type InteractionKind = 'Api' | 'Page' | 'Click' | 'Choice' | 'SignOut'
+export interface InteractionDto {
+  id: number
+  at: string
+  kind: InteractionKind
+  userId?: number | null
+  userName?: string | null
+  displayName?: string | null
+  roleTitle?: string | null
+  groupId?: number | null
+  groupName?: string | null
+  restaurantId?: number | null
+  restaurantName?: string | null
+  viewingAs: boolean
+  method?: string | null
+  path: string
+  action?: string | null
+  detail?: string | null
+  status?: number | null
+  durationMs?: number | null
+  sessionId?: string | null
+  ipAddress?: string | null
+  userAgent?: string | null
+}
+export interface InteractionPage { total: number; page: number; pageSize: number; items: InteractionDto[] }
+export interface SystemCatalog {
+  groups: { id: number; name: string; isActive: boolean }[]
+  restaurants: { id: number; name: string; groupId: number; isActive: boolean }[]
+  users: { id: number; username: string; displayName: string; roleTitle: string; groupId?: number | null }[]
+}
+export interface CardStats {
+  cards: number
+  replied: number
+  waiting: number
+  waitingOverAWeek: number
+  avgDaysToReply?: number | null
+  smg: number
+  website: number
+  phone: number
+  sourceNotRecorded: number
+}
+export interface GroupReportRow {
+  id: number; name: string; isActive: boolean; restaurants: number; users: number; activeUsers: number; signIns: number; interactions: number
+  lastActivity?: string | null; stats: CardStats
+}
+export interface RestaurantReportRow {
+  id: number; name: string; groupId: number; groupName: string; isActive: boolean; staff: number; activeUsers: number; interactions: number
+  lastActivity?: string | null; lastVisit?: string | null; stats: CardStats
+}
+export interface UserReportRow {
+  id: number; displayName: string; username: string; roleTitle: string; groupId?: number | null; groupName?: string | null
+  interactions: number; signIns: number; pageViews: number; cardsEntered: number; lastSeen?: string | null
+}
+export interface DailyReportRow { date: string; groupId?: number | null; interactions: number; activeUsers: number; cards: number }
+export interface SystemReport {
+  from: string; to: string; totals: CardStats; groups: number; restaurants: number; users: number; activeUsers: number; signIns: number
+  failedSignIns: number; interactions: number; byGroup: GroupReportRow[]; byRestaurant: RestaurantReportRow[]; topUsers: UserReportRow[]
+  daily: DailyReportRow[]; byKind: CountItem[]
+}

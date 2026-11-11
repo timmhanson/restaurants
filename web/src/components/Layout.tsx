@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { roleTitle } from '../auth/roles'
+import { track } from '../api/tracker'
 
 export default function Layout() {
   const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup } = useAuth()
@@ -29,6 +30,8 @@ export default function Layout() {
   const links: { to: string; label: string; show: boolean }[] = overseeing
     ? [
         { to: '/groups', label: 'Investment groups', show: true },
+        { to: '/reports', label: 'Reports', show: true },
+        { to: '/activity', label: 'Activity log', show: true },
         { to: '/users', label: 'All users', show: true },
         { to: '/audit', label: 'Audit log', show: true },
       ]
@@ -87,7 +90,14 @@ export default function Layout() {
           <NavLink to="/password" className="btn btn-sm">
             Password
           </NavLink>
-          <button type="button" className="btn btn-sm" onClick={logout}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              track('SignOut')
+              logout()
+            }}
+          >
             Sign out
           </button>
         </div>

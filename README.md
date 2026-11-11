@@ -88,6 +88,44 @@ analytics and filterable in the comments view.
 
 Every login, card, edit, response, export, user, restaurant and settings change is written to the audit log.
 
+## Interaction log and System Administrator reports
+
+Every user interaction is logged and tagged with the person, their investment group and (where known) the
+restaurant:
+
+- **Server requests:** every `/api` call, with method, path, result, duration and the audited action it
+  performed (`InteractionLoggingMiddleware`). Request and response bodies are never stored.
+- **Browser events:** pages opened, buttons and links clicked, and choices made in drop-downs, checkboxes
+  and radio buttons (`web/src/api/tracker.ts`, sent in batches to `POST /api/activity`). What people type
+  into fields is never recorded.
+- **Sign-ins:** both successful and failed, with the account they were for.
+
+Rows are written in the background, so logging never slows anyone down. They are kept for
+`InteractionLog__RetentionDays` (730 by default). A System Administrator viewing a group as its admin is
+tagged to that group and marked "viewing as".
+
+**Only System Administrators can see the log.** On **Reports** they get, for any date range, any set of
+investment groups and any set of restaurants:
+
+- headline figures;
+- a day-by-day chart per group (active people, interactions or cards entered);
+- tables by group, by restaurant and of the most active people, each sortable and downloadable as CSV.
+
+**Activity log** filters the raw log by group, restaurant, person, kind, date and text, and can follow one
+browser visit end to end. It also downloads as CSV.
+
+New endpoints and screens are logged automatically. Keep it that way: don't bypass the middleware, and don't
+put typed values into logged labels or paths.
+
+## Caching
+
+The site always loads its live version:
+
+- `index.html`, every page route and every API response are sent with `Cache-Control: no-store`.
+- The fingerprinted files under `/assets` are cached for a year; their names change with every build.
+- Each API response carries `X-App-Version`, the build's index hash. A tab left open across a deploy
+  reloads itself at the next page change.
+
 ## Run locally
 
 ```bash

@@ -232,3 +232,48 @@ public static class CommentSources
     public static string? Match(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : All.FirstOrDefault(s => s.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
 }
+
+/// <summary>
+/// One user interaction: every API call (recorded by the server), plus page views, clicks and choices the browser
+/// reports. Tagged with the investment group and, where known, the restaurant, so the System Administrator can
+/// filter and report by either. Only System Administrators can read these. Never holds passwords, codes or
+/// anything typed into a field.
+/// </summary>
+public class InteractionLog
+{
+    public long Id { get; set; }
+    public DateTime At { get; set; } = DateTime.UtcNow;
+    /// <summary>See <see cref="InteractionKinds"/>.</summary>
+    public string Kind { get; set; } = InteractionKinds.Api;
+    public int? UserId { get; set; }
+    public string? UserName { get; set; }
+    public string? DisplayName { get; set; }
+    public UserRole? Role { get; set; }
+    public int? GroupId { get; set; }
+    public int? RestaurantId { get; set; }
+    /// <summary>A System Administrator acting inside a group ("View as admin").</summary>
+    public bool ViewingAs { get; set; }
+    public string? Method { get; set; }
+    /// <summary>API path with its query string, or the page the browser was on.</summary>
+    public string Path { get; set; } = "";
+    /// <summary>The audited action this request performed (e.g. CommentCreated), or what was clicked.</summary>
+    public string? Action { get; set; }
+    public string? Detail { get; set; }
+    public int? Status { get; set; }
+    public int? DurationMs { get; set; }
+    /// <summary>Random id per browser tab, to follow one visit.</summary>
+    public string? SessionId { get; set; }
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+}
+
+public static class InteractionKinds
+{
+    public const string Api = "Api";
+    public const string Page = "Page";
+    public const string Click = "Click";
+    public const string Choice = "Choice";
+    public const string SignOut = "SignOut";
+    public static readonly string[] FromBrowser = [Page, Click, Choice, SignOut];
+    public static readonly string[] All = [Api, Page, Click, Choice, SignOut];
+}

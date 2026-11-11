@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, groupStore, onAuthEvent, tokenStore } from '../api/client'
+import { flush } from '../api/tracker'
 import type { GroupDto, GroupSettings, LoginResponse, Permission, RestaurantDto, UserDto } from '../api/types'
 
 interface AuthState {
@@ -56,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [groupId, setGroupId] = useState<number | null>(groupStore.get())
 
   const logout = useCallback(() => {
+    flush() // send the last clicks while the token is still valid
     tokenStore.set(null)
     setUser(null)
     setRestaurants([])

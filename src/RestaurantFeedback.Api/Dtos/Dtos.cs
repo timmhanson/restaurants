@@ -229,3 +229,34 @@ public record RestaurantMonth(string Month, int RestaurantId, string Restaurant,
 
 public record CountItem(string Label, int Count, int? Responded = null);
 public record RepeatGuestItem(string GuestKey, string Name, string? Phone, string? Address, int Count, DateOnly LastVisit, string[] Restaurants, string[] Reasons);
+
+// ---- Interaction log and System Administrator reports ----------------------------------------------------
+
+/// <summary>A browser event: Page (a page was opened), Click (a button or link), Choice (a select, checkbox or radio), SignOut.</summary>
+public record ActivityEvent(string Kind, string Path, string? Label, string? Detail, DateTime? At, int? RestaurantId);
+public record ActivityBatch(string? SessionId, List<ActivityEvent> Events);
+
+public record InteractionDto(long Id, DateTime At, string Kind, int? UserId, string? UserName, string? DisplayName, string? RoleTitle,
+    int? GroupId, string? GroupName, int? RestaurantId, string? RestaurantName, bool ViewingAs, string? Method, string Path,
+    string? Action, string? Detail, int? Status, int? DurationMs, string? SessionId, string? IpAddress, string? UserAgent);
+public record InteractionPage(int Total, int Page, int PageSize, List<InteractionDto> Items);
+
+public record CatalogGroup(int Id, string Name, bool IsActive);
+public record CatalogRestaurant(int Id, string Name, int GroupId, bool IsActive);
+public record CatalogUser(int Id, string Username, string DisplayName, string RoleTitle, int? GroupId);
+public record SystemCatalog(List<CatalogGroup> Groups, List<CatalogRestaurant> Restaurants, List<CatalogUser> Users);
+
+/// <summary>Card and reply figures shared by the group and restaurant rows.</summary>
+public record CardStats(int Cards, int Replied, int Waiting, int WaitingOverAWeek, double? AvgDaysToReply, int Smg, int Website, int Phone, int SourceNotRecorded);
+
+public record GroupReportRow(int Id, string Name, bool IsActive, int Restaurants, int Users, int ActiveUsers, int SignIns, int Interactions,
+    DateTime? LastActivity, CardStats Stats);
+public record RestaurantReportRow(int Id, string Name, int GroupId, string GroupName, bool IsActive, int Staff, int ActiveUsers, int Interactions,
+    DateTime? LastActivity, DateOnly? LastVisit, CardStats Stats);
+public record UserReportRow(int Id, string DisplayName, string Username, string RoleTitle, int? GroupId, string? GroupName, int Interactions,
+    int SignIns, int PageViews, int CardsEntered, DateTime? LastSeen);
+public record DailyReportRow(DateOnly Date, int? GroupId, int Interactions, int ActiveUsers, int Cards);
+
+public record SystemReport(DateOnly From, DateOnly To, CardStats Totals, int Groups, int Restaurants, int Users, int ActiveUsers, int SignIns,
+    int FailedSignIns, int Interactions, List<GroupReportRow> ByGroup, List<RestaurantReportRow> ByRestaurant, List<UserReportRow> TopUsers,
+    List<DailyReportRow> Daily, List<CountItem> ByKind);
