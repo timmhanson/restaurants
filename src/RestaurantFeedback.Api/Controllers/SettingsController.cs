@@ -20,7 +20,7 @@ public class SettingsController(IGroupSettingsStore store, AuditService audit, C
         return await store.GetAsync(me.GroupId.Value, ct);
     }
 
-    /// <summary>Settings apply to every restaurant in the group, so only system and group administrators change them.</summary>
+    /// <summary>Settings apply to every restaurant in the group, so only system and investment group administrators change them.</summary>
     [HttpPut]
     [Authorize(Roles = "GroupAdmin,SuperAdmin")]
     public async Task<ActionResult<GroupSettings>> Put(GroupSettings settings, CancellationToken ct)

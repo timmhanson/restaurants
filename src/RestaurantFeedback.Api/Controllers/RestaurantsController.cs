@@ -11,11 +11,11 @@ namespace RestaurantFeedback.Api.Controllers;
 
 /// <summary>
 /// Restaurants and who works at them.
-///  - System and group administrators manage every restaurant in the group and decide who owns each one.
+///  - System and investment group administrators manage every restaurant in the group and decide who owns each one.
 ///  - Owners manage (edit, staff, add co-owners to) only the restaurants they own. In a group with no group
 ///    administrator, owners may also claim restaurants that have no owner yet.
 ///  - Everyone else just sees the restaurants they belong to.
-/// A restaurant must keep an owner unless the group has a group administrator to run it directly.
+/// A restaurant must keep an owner unless the group has an investment group administrator to run it directly.
 /// </summary>
 [ApiController]
 [Route("api/restaurants")]
@@ -176,7 +176,7 @@ public class RestaurantsController(AppDbContext db, AuditService audit, CurrentU
         if (req.Owned && mine is null)
         {
             if (hasAdmin)
-                return StatusCode(403, new { message = $"Your group administrators decide who owns {r.Name}. Ask one of them, or an owner of {r.Name}, to add you on its Staff screen." });
+                return StatusCode(403, new { message = $"Your investment group administrators decide who owns {r.Name}. Ask one of them, or an owner of {r.Name}, to add you on its Staff screen." });
             if (r.UserRestaurants.Any(ur => ur.User.Role == UserRole.Owner && ur.User.IsActive))
                 return StatusCode(403, new { message = $"{r.Name} already has an owner. Ask them to add you as a co-owner on its Staff screen." });
             r.UserRestaurants.Add(new UserRestaurant { UserId = me.Id, RestaurantId = r.Id });
@@ -196,7 +196,7 @@ public class RestaurantsController(AppDbContext db, AuditService audit, CurrentU
     }
 
     private ObjectResult NotOwned(Restaurant r) =>
-        StatusCode(403, new { message = $"Only owners of {r.Name} or a group administrator can change it." });
+        StatusCode(403, new { message = $"Only owners of {r.Name} or an investment group administrator can change it." });
 
     private async Task<StaffResponse> BuildStaff(CurrentUser me, Restaurant r)
     {

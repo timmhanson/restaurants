@@ -39,7 +39,7 @@ public class UserRequest
     public bool IsActive { get; set; } = true;
     /// <summary>
     /// When a password is set for someone else, make them choose a new one at next sign-in (the default).
-    /// Only System and Group Administrators may turn this off; team logins never have to.
+    /// Only System and Investment Group Administrators may turn this off; team logins never have to.
     /// </summary>
     public bool RequirePasswordChange { get; set; } = true;
 }
@@ -61,7 +61,7 @@ public class GroupRequest
     public bool IsActive { get; set; } = true;
     /// <summary>Optionally create the group's first owner at the same time (kept for older clients; prefer Owners).</summary>
     public UserRequest? FirstOwner { get; set; }
-    /// <summary>Group administrators to create with the group. A new group needs at least one.</summary>
+    /// <summary>Investment Group administrators to create with the group. A new group needs at least one.</summary>
     public List<UserRequest> Admins { get; set; } = [];
     /// <summary>Restaurant owners to create with the group. Which restaurants each owns is set on each restaurant.</summary>
     public List<UserRequest> Owners { get; set; } = [];
@@ -82,7 +82,7 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
     public int? TeamLoginCount { get; init; }
     public bool? OwnedByMe { get; init; }
     public bool? CanManage { get; init; }
-    /// <summary>An owner may mark this restaurant as theirs (no owner yet, and no group administrator to decide).</summary>
+    /// <summary>An owner may mark this restaurant as theirs (no owner yet, and no investment group administrator to decide).</summary>
     public bool? CanClaim { get; init; }
 
     public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive);
@@ -91,9 +91,9 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
 public record StaffMember(int Id, string DisplayName, string Username, string? Email, string Role, string[] PermissionNames, bool Assigned, bool IsActive, string[] OtherRestaurants);
 public record StaffResponse(RestaurantDto Restaurant, bool CanManage, List<StaffMember> Owners, List<StaffMember> Managers, List<StaffMember> TeamLogins)
 {
-    /// <summary>Group administrators see every restaurant without being assigned; listed for information.</summary>
+    /// <summary>Investment Group administrators see every restaurant without being assigned; listed for information.</summary>
     public List<PersonRef> GroupAdmins { get; init; } = [];
-    /// <summary>False when the group has a group administrator, so a restaurant may have no specific owner.</summary>
+    /// <summary>False when the group has an investment group administrator, so a restaurant may have no specific owner.</summary>
     public bool OwnerRequired { get; init; } = true;
 }
 public record StaffRequest(int[] UserIds);

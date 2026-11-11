@@ -42,9 +42,9 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
     }
 
     /// <summary>
-    /// Creates an investment group with its group administrators (at least one), and optionally its restaurant
+    /// Creates an investment group with its investment group administrators (at least one), and optionally its restaurant
     /// owners and restaurants, in one step. Each restaurant lists which of the new owners own it (all of them when
-    /// not specified); restaurants with no owner are run by the group administrators.
+    /// not specified); restaurants with no owner are run by the investment group administrators.
     /// </summary>
     [HttpPost]
     [Authorize(Roles = "SuperAdmin")]
@@ -57,7 +57,7 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
         var ownerRequests = req.Owners.ToList();
         if (req.FirstOwner is not null) ownerRequests.Insert(0, req.FirstOwner);
         var people = req.Admins.Select(a => (req: a, role: UserRole.GroupAdmin)).Concat(ownerRequests.Select(o => (req: o, role: UserRole.Owner))).ToList();
-        if (req.Admins.Count == 0) return BadRequest(new { message = "Add at least one group administrator. They manage every account and restaurant in the group." });
+        if (req.Admins.Count == 0) return BadRequest(new { message = "Add at least one investment group administrator. They manage every account and restaurant in the group." });
         var usernames = people.Select(p => p.req.Username.Trim().ToLowerInvariant()).ToList();
         if (usernames.Distinct().Count() != usernames.Count) return BadRequest(new { message = "Each person needs a different username." });
         foreach (var (p, role) in people)

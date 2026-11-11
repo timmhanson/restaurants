@@ -109,6 +109,14 @@ public class InteractionLogTests(ApiFactory factory)
         Assert.Contains("no-store", res.Headers.CacheControl!.ToString());
         Assert.True(res.Headers.Contains("X-App-Version"));
 
+        // Copies of the site from before no-store (no X-Session-Id header) are told to clear their cached files.
+        var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
+        var old = await owner.GetAsync("/api/auth/me");
+        Assert.Equal("\"cache\"", Assert.Single(old.Headers.GetValues("Clear-Site-Data")));
+        var current = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        current.Headers.Add("X-Session-Id", "tab-1");
+        Assert.False((await owner.SendAsync(current)).Headers.Contains("Clear-Site-Data"));
+
         var page = await client.GetAsync("/comments");
         if (page.StatusCode == HttpStatusCode.OK) // only when the front end has been built into wwwroot
             Assert.Contains("no-store", page.Headers.CacheControl!.ToString());

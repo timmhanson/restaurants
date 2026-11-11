@@ -1,7 +1,15 @@
 import type { DuplicateCheckResult } from './types'
 
 const TOKEN_KEY = 'gf.token'
-const GROUP_KEY = 'gf.groupId'
+// The group a System Administrator chose to view as its admin. Kept per browser tab (sessionStorage) so a new
+// tab or a new visit always starts in system administration, never inside a restaurant. Earlier versions kept
+// an automatically chosen group in localStorage under 'gf.groupId'; that is removed so it can't reopen a group.
+const GROUP_KEY = 'gf.viewingGroup'
+try {
+  localStorage.removeItem('gf.groupId')
+} catch {
+  /* storage unavailable */
+}
 
 export class ApiError extends Error {
   status: number
@@ -25,10 +33,21 @@ export const tokenStore = {
 
 export const groupStore = {
   get: (): number | null => {
-    const v = localStorage.getItem(GROUP_KEY)
-    return v ? Number(v) : null
+    try {
+      const v = sessionStorage.getItem(GROUP_KEY)
+      return v ? Number(v) : null
+    } catch {
+      return null
+    }
   },
-  set: (id: number | null) => (id ? localStorage.setItem(GROUP_KEY, String(id)) : localStorage.removeItem(GROUP_KEY)),
+  set: (id: number | null) => {
+    try {
+      if (id) sessionStorage.setItem(GROUP_KEY, String(id))
+      else sessionStorage.removeItem(GROUP_KEY)
+    } catch {
+      /* storage unavailable */
+    }
+  },
 }
 
 /** Random id per browser tab, sent with every request so one visit can be followed in the interaction log. */

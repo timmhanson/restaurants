@@ -26,7 +26,7 @@ export default function Layout() {
   if (!user) return null
 
   // A system administrator either oversees every group (Groups, all users, the whole audit log) or views one
-  // group exactly as its Group Administrator would, with the yellow bar to get back out.
+  // group exactly as its Investment Group Administrator would, with the yellow bar to get back out.
   const links: { to: string; label: string; show: boolean }[] = overseeing
     ? [
         { to: '/groups', label: 'Investment groups', show: true },
@@ -64,7 +64,7 @@ export default function Layout() {
       {viewingAs && (
         <div className="viewing-bar" role="status" ref={bar}>
           <span>
-            You are viewing <strong>{groupName ?? 'this group'}</strong> as a Group Administrator. Everything you do here is real and is audited under
+            You are viewing <strong>{groupName ?? 'this group'}</strong> as an Investment Group Administrator. Everything you do here is real and is audited under
             your name.
           </span>
           <button type="button" className="btn btn-sm" onClick={exit}>
@@ -85,7 +85,7 @@ export default function Layout() {
         </div>
         <div className="user-menu">
           <span className="user-name">
-            {user.displayName} <small>({viewingAs ? 'System Administrator, viewing as Group Administrator' : roleTitle(user.role)})</small>
+            {user.displayName} <small>({viewingAs ? 'System Administrator, viewing as Investment Group Administrator' : roleTitle(user.role)})</small>
           </span>
           <NavLink to="/password" className="btn btn-sm">
             Password

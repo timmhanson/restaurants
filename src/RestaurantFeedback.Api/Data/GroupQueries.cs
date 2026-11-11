@@ -6,7 +6,7 @@ namespace RestaurantFeedback.Api.Data;
 public static class GroupQueries
 {
     /// <summary>
-    /// True when the group has an active group administrator (optionally other than one user). Such a group can run
+    /// True when the group has an active investment group administrator (optionally other than one user). Such a group can run
     /// restaurants with no specific owner, and administrators, not owners, decide who owns what.
     /// </summary>
     public static Task<bool> GroupHasAdminAsync(this AppDbContext db, int? groupId, int? exceptUserId = null) =>

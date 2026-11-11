@@ -12,7 +12,7 @@ namespace RestaurantFeedback.Api.Controllers;
 
 /// <summary>
 /// System Administrator only: the full interaction log and reports across investment groups and restaurants.
-/// Nobody else can read the interaction log, including group administrators.
+/// Nobody else can read the interaction log, including investment group administrators.
 /// </summary>
 [ApiController]
 [Route("api/system")]

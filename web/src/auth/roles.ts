@@ -3,7 +3,7 @@ import type { Role } from '../api/types'
 /** Display titles, widest role first. */
 export const ROLE_TITLES: Record<Role, string> = {
   SuperAdmin: 'System Administrator',
-  GroupAdmin: 'Group Administrator',
+  GroupAdmin: 'Investment Group Administrator',
   Owner: 'Restaurant Owner',
   Manager: 'Manager',
   TeamMember: 'Team Member',

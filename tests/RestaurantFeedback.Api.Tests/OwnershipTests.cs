@@ -7,7 +7,7 @@ using RestaurantFeedback.Api.Models;
 namespace RestaurantFeedback.Api.Tests;
 
 /// <summary>
-/// Group setup by a system administrator, group administrators, owners of specific restaurants, and the people
+/// Group setup by a system administrator, investment group administrators, owners of specific restaurants, and the people
 /// who work across several owners' restaurants. Each test runs in its own investment group.
 /// </summary>
 [Collection(ApiCollection.Name)]
@@ -37,10 +37,10 @@ public class OwnershipTests(ApiFactory factory)
     {
         var system = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
 
-        // A group needs at least one group administrator.
+        // A group needs at least one investment group administrator.
         Assert.Equal(HttpStatusCode.BadRequest, (await system.PostAsJsonAsync("/api/groups", new GroupRequest { Name = "No Admin Group" })).StatusCode);
 
-        // Lockport is Alice's, Romeoville is Bob's, Joliet has no specific owner and is run by the group administrator.
+        // Lockport is Alice's, Romeoville is Bob's, Joliet has no specific owner and is run by the investment group administrator.
         var created = await system.PostAsJsonAsync("/api/groups", new GroupRequest
         {
             Name = "Ownership Group",
@@ -66,7 +66,7 @@ public class OwnershipTests(ApiFactory factory)
         Assert.All(all, r => Assert.True(r.CanManage));
         Assert.Equal("Alice Owner", Assert.Single(lockport.Owners!).DisplayName);
         Assert.Empty(joliet.Owners!);
-        // With a group administrator, a restaurant can be saved with no specific owner.
+        // With an investment group administrator, a restaurant can be saved with no specific owner.
         Assert.Equal(HttpStatusCode.OK, (await gina.PutAsJsonAsync($"/api/restaurants/{joliet.Id}/staff", new StaffRequest([]))).StatusCode);
 
         // Alice manages Lockport only, and cannot claim Joliet: the administrators decide ownership.
@@ -78,7 +78,7 @@ public class OwnershipTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.Forbidden, (await alice.PutAsJsonAsync($"/api/restaurants/{joliet.Id}/ownership", new OwnershipRequest(true))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await alice.PutAsJsonAsync($"/api/restaurants/{romeoville.Id}", new RestaurantRequest { Name = "Renamed" })).StatusCode);
 
-        // Alice hires a manager at Lockport, but cannot place anyone at Romeoville or create a group administrator.
+        // Alice hires a manager at Lockport, but cannot place anyone at Romeoville or create an investment group administrator.
         var mgrRes = await alice.PostAsJsonAsync("/api/users", new UserRequest
         {
             Username = "shared-mgr", DisplayName = "Sam Shared", Email = "sam@test.local", Password = "Manager!123", Role = "Manager",
@@ -148,7 +148,7 @@ public class OwnershipTests(ApiFactory factory)
         var aliceAudit = (await alice.GetFromJsonAsync<PagedResult<AuditDto>>("/api/audit?pageSize=200"))!;
         Assert.DoesNotContain(aliceAudit.Items, a => a.RestaurantId == joliet.Id);
 
-        // The group always keeps a group administrator.
+        // The group always keeps an investment group administrator.
         var ginaId = ginaUsers.Single(u => u.Username == "gina-admin").Id;
         var scoped = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword, group.Id);
         Assert.Equal(HttpStatusCode.BadRequest, (await scoped.PutAsJsonAsync($"/api/users/{ginaId}/status", new UserStatusRequest(false))).StatusCode);

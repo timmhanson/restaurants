@@ -74,13 +74,13 @@ export default function RestaurantsPage() {
         <Alert kind="warn">Open a group with "View as admin" or "Set up" on Investment groups to manage its restaurants.</Alert>
       ) : isGroupWide ? (
         <p className="muted">
-          As {isSuperAdmin ? 'System Administrator' : 'Group Administrator'} you can edit and staff every restaurant in this group. Use <strong>Staff</strong> to
-          choose each restaurant's owners, managers and team login. A restaurant with no specific owner is run by the group administrators.
+          As {isSuperAdmin ? 'System Administrator' : 'Investment Group Administrator'} you can edit and staff every restaurant in this group. Use <strong>Staff</strong> to
+          choose each restaurant's owners, managers and team login. A restaurant with no specific owner is run by the investment group administrators.
         </p>
       ) : (
         <p className="muted">
           You manage the restaurants you own{mine.length ? ` (${mine.map((r) => r.name).join(', ')})` : ''}. Use <strong>Staff</strong> to choose who works at
-          each of them, including co-owners. Your group administrators decide who owns the other restaurants.
+          each of them, including co-owners. Your investment group administrators decide who owns the other restaurants.
         </p>
       )}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
@@ -106,7 +106,7 @@ export default function RestaurantsPage() {
                     {r.owners?.length ? (
                       <div className="people">{r.owners.map((o) => <Badge key={o.id} kind={o.id === user?.id ? 'accent' : 'neutral'}>{o.displayName}</Badge>)}</div>
                     ) : (
-                      <Badge kind="neutral" title="Run by the group administrators">No specific owner</Badge>
+                      <Badge kind="neutral" title="Run by the investment group administrators">No specific owner</Badge>
                     )}
                   </td>
                   <td className="num">{r.managerCount ?? 0}</td>
@@ -280,11 +280,11 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
         error ? <Alert kind="error">{error}</Alert> : <Spinner />
       ) : (
         <div className="grid">
-          {!canManage && <Alert kind="info">Only this restaurant's owners or a group administrator can change who works here.</Alert>}
+          {!canManage && <Alert kind="info">Only this restaurant's owners or an investment group administrator can change who works here.</Alert>}
           {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
           {data.groupAdmins.length > 0 && (
             <p className="muted" style={{ margin: 0 }}>
-              Group administrators ({data.groupAdmins.map((a) => a.displayName).join(', ')}) see and manage every restaurant, so they are not listed below.
+              Investment Group administrators ({data.groupAdmins.map((a) => a.displayName).join(', ')}) see and manage every restaurant, so they are not listed below.
             </p>
           )}
           {section(
@@ -292,7 +292,7 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
             'Owner',
             data.owners,
             'Owners see everything for this restaurant, decide who works here, and can reset or suspend its managers and team login. ' +
-              (data.ownerRequired ? 'Every restaurant needs at least one owner.' : 'Leave empty if the group administrators run it directly.'),
+              (data.ownerRequired ? 'Every restaurant needs at least one owner.' : 'Leave empty if the investment group administrators run it directly.'),
             '+ New owner',
           )}
           {section('Managers', 'Manager', data.managers, 'Managers can work at several restaurants, even ones with different owners. What each one may do is set on the Users page and applies everywhere they work.', '+ New manager')}

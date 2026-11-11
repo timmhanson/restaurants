@@ -18,14 +18,14 @@ interface AuthState {
   refreshContext: () => Promise<void>
   refreshGroups: () => Promise<void>
   has: (p: Permission) => boolean
-  /** System administrators, group administrators and restaurant owners (owners only for their restaurants). */
+  /** System administrators, investment group administrators and restaurant owners (owners only for their restaurants). */
   isAdmin: boolean
   isSuperAdmin: boolean
   isGroupAdmin: boolean
-  /** System or group administrator: everything in the group. */
+  /** System or investment group administrator: everything in the group. */
   isGroupWide: boolean
   isTeamMember: boolean
-  /** A system administrator looking at one group as its Group Administrator would (the yellow bar). */
+  /** A system administrator looking at one group as its Investment Group Administrator would (the yellow bar). */
   viewingAs: boolean
   /** A system administrator with no group open: the oversight pages only. */
   overseeing: boolean
@@ -135,6 +135,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api
       .get<UserDto>('/auth/me')
       .then((u) => {
+        if (u.role !== 'SuperAdmin' && groupStore.get() !== null) {
+          groupStore.set(null)
+          setGroupId(null)
+        }
         setUser(u)
         setMustChange(u.mustChangePassword)
       })

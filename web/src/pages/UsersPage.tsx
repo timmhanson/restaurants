@@ -55,7 +55,7 @@ export default function UsersPage() {
   const canRemove = (u: UserDto) => canEdit(u) && u.id !== me?.id && (!ownerScoped || u.restaurantIds.every(owns))
   const notMine = (u: UserDto) =>
     ownerScoped && (u.role === 'Owner' || u.role === 'GroupAdmin')
-      ? 'Managed by your group administrators'
+      ? 'Managed by your investment group administrators'
       : `Managed by the owners of ${u.restaurantIds.map(restaurantName).join(', ')}`
 
   const setStatus = async () => {
@@ -102,7 +102,7 @@ export default function UsersPage() {
       {ownerScoped && (
         <Alert kind="info">
           You manage the managers and team logins at the restaurants you own: edit them, reset passwords, and suspend access, even if they also work at
-          other owners' restaurants. Other owners and group administrators are managed by your group administrators.
+          other owners' restaurants. Other owners and investment group administrators are managed by your investment group administrators.
         </Alert>
       )}
       {isSuperAdmin && !groupId && <Alert kind="info">Everyone in every group. To add or change people in a group, open it with "View as admin" on Investment groups.</Alert>}
@@ -343,7 +343,7 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
             </select>
           </Field>
         </div>
-        <p className="muted" style={{ margin: 0 }}>{ROLE_HELP[v.role]}{roleLocked && user && user.id !== meId ? ' Only a group administrator can change roles.' : ''}</p>
+        <p className="muted" style={{ margin: 0 }}>{ROLE_HELP[v.role]}{roleLocked && user && user.id !== meId ? ' Only an investment group administrator can change roles.' : ''}</p>
         {elsewhere.length > 0 && (
           <Alert kind="info">
             {user!.displayName} also works at {elsewhere.map(restaurantName).join(', ')}. Those assignments stay as they are, but permission changes and
@@ -383,7 +383,7 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
         </div>
         {groupWideRole(v.role) ? (
           <p className="muted" style={{ margin: 0 }}>
-            {v.role === 'GroupAdmin' ? 'Group administrators see and manage every restaurant in the group, so they are not assigned to particular ones.' : 'System Administrators are not part of any group.'}
+            {v.role === 'GroupAdmin' ? 'Investment Group administrators see and manage every restaurant in the group, so they are not assigned to particular ones.' : 'System Administrators are not part of any group.'}
           </p>
         ) : (
           <Field
@@ -425,7 +425,7 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
   )
 }
 
-/** System and group administrators may set a password the person keeps (no forced change at next sign-in). */
+/** System and investment group administrators may set a password the person keeps (no forced change at next sign-in). */
 function canWaive(role?: Role) {
   return role === 'SuperAdmin' || role === 'GroupAdmin'
 }

@@ -14,7 +14,7 @@ namespace RestaurantFeedback.Api.Controllers;
 public class AuditController(AppDbContext db, CurrentUserProvider users) : ControllerBase
 {
     /// <summary>
-    /// System and group administrators see the whole group. Owners see rows for the restaurants they own, changes to
+    /// System and investment group administrators see the whole group. Owners see rows for the restaurants they own, changes to
     /// the people who work there, and their own actions. Managers with ViewAudit see rows for their restaurants plus their own actions.
     /// </summary>
     [HttpGet]

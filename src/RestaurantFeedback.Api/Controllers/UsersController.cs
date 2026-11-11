@@ -13,14 +13,14 @@ namespace RestaurantFeedback.Api.Controllers;
 /// <summary>
 /// User management.
 ///  - System administrators manage everyone, in every group.
-///  - Group administrators manage every account in their group, including owners and other group administrators.
+///  - Investment Group administrators manage every account in their group, including owners and other investment group administrators.
 ///  - Restaurant owners manage the managers and team logins who work at any restaurant they own: edit, set
 ///    permissions, reset passwords, and suspend or restore access, even when that person also works at
 ///    restaurants with other owners. They assign people only to restaurants they own, and may add co-owners there,
-///    but changing another owner's account is for group administrators.
+///    but changing another owner's account is for investment group administrators.
 ///  - Managers holding ManageTeamLogin may only create / update / reset the team login for their restaurants.
 /// Any password set by someone else forces a change at next login, except for team logins.
-/// A group that has a group administrator must always keep at least one active.
+/// A group that has an investment group administrator must always keep at least one active.
 /// </summary>
 [ApiController]
 [Route("api/users")]
@@ -105,7 +105,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
             return BadRequest(new { message = "You cannot change your own role or deactivate your own account." });
         if (role != user.Role)
         {
-            if (!me.IsGroupWide) return StatusCode(403, new { message = "Only a group administrator can change someone's role." });
+            if (!me.IsGroupWide) return StatusCode(403, new { message = "Only an investment group administrator can change someone's role." });
             if ((user.Role == UserRole.SuperAdmin) != (role == UserRole.SuperAdmin))
                 return BadRequest(new { message = "Accounts cannot be moved into or out of System Administrator; create a new account instead." });
         }
@@ -225,7 +225,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (await LastGroupAdminBlock(user, stillAdmin: false) is { } adminBlock) return adminBlock;
         if (user.Role == UserRole.Owner && !await db.GroupHasAdminAsync(user.GroupId)
             && !await db.Users.AnyAsync(u => u.GroupId == user.GroupId && u.Role == UserRole.Owner && u.IsActive && u.Id != id))
-            return BadRequest(new { message = "A group must keep at least one active owner or group administrator." });
+            return BadRequest(new { message = "A group must keep at least one active owner or investment group administrator." });
         var orphaned = await RestaurantsLosingLastOwner(user, user.UserRestaurants.Select(ur => ur.RestaurantId));
         if (orphaned.Count > 0)
             return BadRequest(new { message = $"{string.Join(", ", orphaned)} would be left without an owner. Add another owner there first." });
@@ -282,11 +282,11 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (me.IsOwner)
         {
             if (target.Role is UserRole.GroupAdmin or UserRole.Owner)
-                return Denied($"Only a group administrator can change {target.DisplayName}'s account, because they are a {RoleTitles.Of(target.Role)}. You can still add or remove co-owners on a restaurant's Staff screen.");
+                return Denied($"Only an investment group administrator can change {target.DisplayName}'s account, because they are {RoleTitles.WithArticle(target.Role)}. You can still add or remove co-owners on a restaurant's Staff screen.");
             var shares = target.UserRestaurants.Count == 0 || target.UserRestaurants.Any(ur => me.CanManageRestaurant(ur.RestaurantId));
             if (shares) return null;
             var names = await RestaurantNames(target.UserRestaurants.Select(ur => ur.RestaurantId));
-            return Denied($"{target.DisplayName} only works at restaurants you do not own ({names}). Ask one of those restaurants' owners or a group administrator.");
+            return Denied($"{target.DisplayName} only works at restaurants you do not own ({names}). Ask one of those restaurants' owners or an investment group administrator.");
         }
         if (me.Role == UserRole.Manager && me.Has(ManagerPermission.ManageTeamLogin))
         {
@@ -305,7 +305,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (me.IsSuperAdmin) return true;
         if (role == UserRole.SuperAdmin) { why = "Only a System Administrator can create System Administrators."; return false; }
         if (me.IsGroupAdmin) return true;
-        if (role == UserRole.GroupAdmin) { why = "Only system and group administrators can make someone a group administrator."; return false; }
+        if (role == UserRole.GroupAdmin) { why = "Only system and investment group administrators can make someone an investment group administrator."; return false; }
         if (me.IsOwner) return true; // restaurant scope is checked by the caller
         if (me.Role == UserRole.Manager && me.Has(ManagerPermission.ManageTeamLogin))
         {
@@ -320,12 +320,12 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
 
     private ObjectResult Denied(string message) => StatusCode(403, new { message });
 
-    /// <summary>Stops the last active group administrator of a group from being demoted, suspended or removed.</summary>
+    /// <summary>Stops the last active investment group administrator of a group from being demoted, suspended or removed.</summary>
     private async Task<ObjectResult?> LastGroupAdminBlock(AppUser user, bool stillAdmin)
     {
         if (user.Role != UserRole.GroupAdmin || !user.IsActive || stillAdmin) return null;
         if (await db.GroupHasAdminAsync(user.GroupId, exceptUserId: user.Id)) return null;
-        return BadRequest(new { message = $"{user.DisplayName} is the group's only group administrator. Make someone else a group administrator first." });
+        return BadRequest(new { message = $"{user.DisplayName} is the group's only investment group administrator. Make someone else an investment group administrator first." });
     }
 
     private static object Snapshot(AppUser u) => new
@@ -368,7 +368,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
 
     /// <summary>
     /// Restaurants (by name) in which this owner is the last active owner, among those they would stop owning.
-    /// Only enforced in groups without a group administrator; with one, a restaurant may be run by the administrators directly.
+    /// Only enforced in groups without an investment group administrator; with one, a restaurant may be run by the administrators directly.
     /// </summary>
     private async Task<List<string>> RestaurantsLosingLastOwner(AppUser user, IEnumerable<int> stoppingAt)
     {

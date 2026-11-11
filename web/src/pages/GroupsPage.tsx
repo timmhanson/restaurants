@@ -25,7 +25,7 @@ export default function GroupsPage() {
     void load()
   }, [load])
 
-  /** Opens the group exactly as its Group Administrator sees it; the yellow bar leads back here. */
+  /** Opens the group exactly as its Investment Group Administrator sees it; the yellow bar leads back here. */
   const viewAs = (g: GroupDto, page = '/enter') => {
     selectGroup(g.id)
     navigate(page)
@@ -40,8 +40,8 @@ export default function GroupsPage() {
         <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>+ New group</button>
       </div>
       <p className="muted">
-        Each investment group has its own group administrators, restaurant owners, managers, team logins and settings. Create a group with its
-        administrators, owners and restaurants in one step. <strong>View as admin</strong> opens the group just as its Group Administrator sees
+        Each investment group has its own administrators, restaurant owners, managers, team logins and settings. Create a group with its
+        administrators, owners and restaurants in one step. <strong>View as admin</strong> opens the group just as its Investment Group Administrator sees
         it (starting on Enter card); <strong>Set up</strong> opens its restaurants and staff. A yellow bar at the top takes you back here.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
@@ -53,14 +53,14 @@ export default function GroupsPage() {
       ) : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Group</th><th>Group administrators</th><th>Restaurant owners</th><th className="num">Restaurants</th><th className="num">Users</th><th className="num">Cards</th><th>Created</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Group</th><th>Investment Group administrators</th><th>Restaurant owners</th><th className="num">Restaurants</th><th className="num">Users</th><th className="num">Cards</th><th>Created</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {list.map((g) => (
                 <tr key={g.id} className={g.isActive ? '' : 'inactive'}>
                   <td>
                     <strong>{g.name}</strong>
                     <div>
-                      <button type="button" className="btn btn-sm btn-primary view-as" onClick={() => viewAs(g)} title="See this group as its Group Administrator does">
+                      <button type="button" className="btn btn-sm btn-primary view-as" onClick={() => viewAs(g)} title="See this group as its Investment Group Administrator does">
                         View as admin
                       </button>
                     </div>
@@ -168,7 +168,7 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
         return onSaved(saved, `${saved.name} was updated.`, false)
       }
       if (adminRows.length === 0) {
-        setError('Add at least one group administrator. They manage every account and restaurant in the group.')
+        setError('Add at least one investment group administrator. They manage every account and restaurant in the group.')
         return
       }
       const body: GroupRequest = {
@@ -185,7 +185,7 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
       const saved = await api.post<GroupDto>('/groups', body)
       onSaved(
         saved,
-        `${saved.name} was created with ${adminRows.length} group administrator(s), ${ownerRows.length} owner(s) and ${restaurantRows.length} restaurant(s). ` +
+        `${saved.name} was created with ${adminRows.length} investment group administrator(s), ${ownerRows.length} owner(s) and ${restaurantRows.length} restaurant(s). ` +
           'Everyone chooses their own password at first sign-in.',
         true,
       )
@@ -228,7 +228,7 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
           </section>
 
           <PeopleSection
-            title="Group administrators"
+            title="Investment Group administrators"
             help="Run the whole group: every restaurant, every user account and the settings. At least one is required; the overall investor is usually one."
             people={admins}
             setPeople={setAdmins}
@@ -245,7 +245,7 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
           <section>
             <h3>Restaurants</h3>
             <p className="muted" style={{ marginTop: 0, fontSize: '0.85rem' }}>
-              Tick who owns each restaurant. A restaurant with no owner ticked is run by the group administrators. Afterwards, open a restaurant's
+              Tick who owns each restaurant. A restaurant with no owner ticked is run by the investment group administrators. Afterwards, open a restaurant's
               <strong> Staff</strong> screen to add managers.
             </p>
             <div className="grid" style={{ gap: '0.5rem' }}>

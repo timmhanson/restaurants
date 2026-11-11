@@ -10,7 +10,7 @@ export interface UserDto {
   displayName: string
   email?: string | null
   role: Role
-  /** Display title, e.g. "Group Administrator". */
+  /** Display title, e.g. "Investment Group Administrator". */
   roleTitle: string
   groupId?: number | null
   groupName?: string | null
@@ -62,7 +62,7 @@ export interface RestaurantDto {
   teamLoginCount?: number
   ownedByMe?: boolean
   canManage?: boolean
-  /** An owner may mark this restaurant as theirs (no owner yet, and no group administrator to decide). */
+  /** An owner may mark this restaurant as theirs (no owner yet, and no investment group administrator to decide). */
   canClaim?: boolean
 }
 
@@ -84,9 +84,9 @@ export interface StaffResponse {
   owners: StaffMember[]
   managers: StaffMember[]
   teamLogins: StaffMember[]
-  /** Group administrators see every restaurant without being assigned. */
+  /** Investment Group administrators see every restaurant without being assigned. */
   groupAdmins: PersonRef[]
-  /** False when the group has a group administrator, so a restaurant may have no specific owner. */
+  /** False when the group has an investment group administrator, so a restaurant may have no specific owner. */
   ownerRequired: boolean
 }
 

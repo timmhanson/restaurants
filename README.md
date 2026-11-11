@@ -13,21 +13,21 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 
 | Title (internal role) | Scope | Can |
 | --- | --- | --- |
-| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **View as admin** opens one group exactly as its Group Administrator sees it, under a yellow bar with **Exit to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
-| **Group Administrator** (`GroupAdmin`) | one investment group | every restaurant, every user account (owners and other administrators included) and the group settings |
+| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **View as admin** opens one group exactly as its Investment Group Administrator sees it, under a yellow bar with **Exit to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
+| **Investment Group Administrator** (`GroupAdmin`) | one investment group | every restaurant, every user account (owners and other administrators included) and the group settings |
 | **Restaurant Owner** (`Owner`) | the restaurants they own | everything at those restaurants: cards, analytics, export, audit, staffing and co-owners. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
 | **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus whatever is granted: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin. Permissions apply at every restaurant they work at |
 | **Team Member** (`TeamMember`) | the shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
 
 Rules worth knowing:
 
-- A group always keeps at least one active Group Administrator; the last one cannot be suspended, removed or demoted.
+- A group always keeps at least one active Investment Group Administrator; the last one cannot be suspended, removed or demoted.
 - Only administrators change roles, change another owner's account or edit group settings.
 - Suspending (`PUT /api/users/{id}/status`) blocks the whole account at once and is audited with every
   restaurant affected, so the other owners see it. Removing someone who also works for other owners is
   left to them or the administrators.
 - Owners see the audit log for their restaurants and the people who work there, not the whole group.
-- With a Group Administrator in the group, a restaurant may have no specific owner (the administrators run
+- With an Investment Group Administrator in the group, a restaurant may have no specific owner (the administrators run
   it) and owners cannot claim restaurants themselves. In an older group without one, owners can still
   claim a restaurant that has no owner, and every restaurant must keep one.
 
@@ -61,7 +61,7 @@ address on file (`POST /api/auth/change-password/request`, then `POST /api/auth/
 current password, new password and code; codes last 10 minutes, 5 attempts, one resend per minute).
 Administrators can reset anyone's password in their scope, and owners can reset the managers and team
 logins at their restaurants (managers with `ManageTeamLogin` can reset the team login). A reset by someone else forces a new password at the next login, except for team logins, which
-usually have no email and are managed by the owner/manager. System and Group Administrators can untick
+usually have no email and are managed by the owner/manager. System and Investment Group Administrators can untick
 **Require a new password at next sign-in** (`requirePasswordChange: false`) to set a password the person keeps.
 
 ## The card

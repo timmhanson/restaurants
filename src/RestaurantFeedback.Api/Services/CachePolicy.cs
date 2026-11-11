@@ -49,8 +49,13 @@ public static class CachePolicy
     {
         if (ctx.Request.Path.StartsWithSegments("/api"))
         {
+            // Copies of the site from before pages were sent no-store may still sit in a browser's cache. They are
+            // the only callers that don't send X-Session-Id, so tell those browsers to drop their cached files;
+            // the next load then gets the live version.
+            var outdatedClient = !ctx.Request.Headers.ContainsKey("X-Session-Id") && ctx.Request.Headers.ContainsKey(HeaderNames.Authorization);
             ctx.Response.OnStarting(() =>
             {
+                if (outdatedClient) ctx.Response.Headers["Clear-Site-Data"] = "\"cache\"";
                 NoStore(ctx.Response.Headers);
                 ctx.Response.Headers[VersionHeader] = version;
                 ctx.Response.Headers[HeaderNames.AccessControlExposeHeaders] = VersionHeader;

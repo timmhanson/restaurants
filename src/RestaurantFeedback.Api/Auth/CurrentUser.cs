@@ -54,7 +54,7 @@ public class CurrentUser
 
     public bool IsSuperAdmin => Role == UserRole.SuperAdmin;
     public bool IsGroupAdmin => Role == UserRole.GroupAdmin;
-    /// <summary>System and group administrators: everything in the group, whoever owns each restaurant.</summary>
+    /// <summary>System and investment group administrators: everything in the group, whoever owns each restaurant.</summary>
     public bool IsGroupWide => Role is UserRole.SuperAdmin or UserRole.GroupAdmin;
     public bool IsOwner => Role == UserRole.Owner;
     /// <summary>Administrators and owners: the people allowed to manage users and restaurants (owners only their own).</summary>
@@ -65,7 +65,7 @@ public class CurrentUser
 
     /// <summary>
     /// Restaurants whose details and staffing this user may change: every restaurant in the group for system and
-    /// group administrators, the restaurants they own for an owner, nothing for anyone else.
+    /// investment group administrators, the restaurants they own for an owner, nothing for anyone else.
     /// </summary>
     public bool CanManageRestaurant(int restaurantId) => IsAdmin && RestaurantIds.Contains(restaurantId);
 }

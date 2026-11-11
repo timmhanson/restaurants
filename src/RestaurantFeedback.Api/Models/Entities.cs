@@ -14,16 +14,19 @@ public enum UserRole
     Manager = 2,
     /// <summary>Team Member: a shared login that can only enter guest cards.</summary>
     TeamMember = 3,
-    /// <summary>Group Administrator: everything in one investment group, including every user account.</summary>
+    /// <summary>Investment Group Administrator: everything in one investment group, including every user account.</summary>
     GroupAdmin = 4
 }
 
 public static class RoleTitles
 {
+    /// <summary>The title with "a" or "an" in front, e.g. "an Investment Group Administrator".</summary>
+    public static string WithArticle(UserRole role) => ("AEIOU".Contains(Of(role)[0]) ? "an " : "a ") + Of(role);
+
     public static string Of(UserRole role) => role switch
     {
         UserRole.SuperAdmin => "System Administrator",
-        UserRole.GroupAdmin => "Group Administrator",
+        UserRole.GroupAdmin => "Investment Group Administrator",
         UserRole.Owner => "Restaurant Owner",
         UserRole.Manager => "Manager",
         UserRole.TeamMember => "Team Member",
