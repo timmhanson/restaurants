@@ -109,13 +109,16 @@ public class InteractionLogTests(ApiFactory factory)
         Assert.Contains("no-store", res.Headers.CacheControl!.ToString());
         Assert.True(res.Headers.Contains("X-App-Version"));
 
-        // Copies of the site from before no-store (no X-Session-Id header) are told to clear their cached files.
+        // A stale cached copy of the site (it sends no X-Session-Id) is refused with a message to reload and is
+        // told to clear its cached files, so nobody keeps working in an out-of-date screen.
+        var stale = factory.Server.CreateClient();
+        var refused = await stale.PostAsJsonAsync("/api/auth/login", new LoginRequest(ApiFactory.OwnerUser, ApiFactory.OwnerPassword));
+        Assert.Equal(HttpStatusCode.UpgradeRequired, refused.StatusCode);
+        Assert.Contains("old copy", await refused.Content.ReadAsStringAsync());
+        Assert.Equal("\"cache\"", Assert.Single(refused.Headers.GetValues("Clear-Site-Data")));
+        Assert.Equal(HttpStatusCode.OK, (await stale.GetAsync("/api/health")).StatusCode);
         var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
-        var old = await owner.GetAsync("/api/auth/me");
-        Assert.Equal("\"cache\"", Assert.Single(old.Headers.GetValues("Clear-Site-Data")));
-        var current = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
-        current.Headers.Add("X-Session-Id", "tab-1");
-        Assert.False((await owner.SendAsync(current)).Headers.Contains("Clear-Site-Data"));
+        Assert.False((await owner.GetAsync("/api/auth/me")).Headers.Contains("Clear-Site-Data"));
 
         var page = await client.GetAsync("/comments");
         if (page.StatusCode == HttpStatusCode.OK) // only when the front end has been built into wwwroot

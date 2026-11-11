@@ -96,6 +96,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles(CachePolicy.StaticFiles());
 app.UseAuthentication();
 app.UseMiddleware<InteractionLoggingMiddleware>();
+app.UseCurrentClientOnly();
 app.UseAuthorization();
 app.UseMiddleware<PasswordChangeRequiredMiddleware>();
 app.MapControllers();

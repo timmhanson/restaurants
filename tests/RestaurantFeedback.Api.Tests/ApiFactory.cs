@@ -50,6 +50,13 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.ConfigureServices(services => services.AddSingleton<IEmailSender>(Emails));
     }
 
+    /// <summary>Every client behaves like the current site, which always sends its session id.</summary>
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.Add("X-Session-Id", "test-session");
+    }
+
     /// <summary>Runs the two-step flow: request a code, read it from the captured email, submit the change.</summary>
     public async Task<HttpResponseMessage> ChangePasswordAsync(HttpClient client, string current, string next)
     {

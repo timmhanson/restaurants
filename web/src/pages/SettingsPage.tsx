@@ -110,7 +110,7 @@ export default function SettingsPage() {
             <div className="panel">
               <h2>Appearance</h2>
               <div className="grid">
-                <Field label="Group display name"><input value={s.groupDisplayName} onChange={(e) => setS({ ...s, groupDisplayName: e.target.value })} /></Field>
+                <Field label="Investment group name" hint="Renamed by a System Administrator on Investment groups."><input value={s.groupDisplayName} readOnly disabled /></Field>
                 <Field label="Accent colour">
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <input type="color" value={s.accentColor} onChange={(e) => setS({ ...s, accentColor: e.target.value })} style={{ width: 56, padding: 2 }} />

@@ -20,4 +20,5 @@ See README.md for the architecture, roles and deployment.
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use
   `appsettings.Local.json` (git-ignored) or App Service settings.
-- **Commits:** end commit messages with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **Stale copies:** every API call from the site carries `X-Session-Id`; callers without it are refused as
+  out-of-date copies. New fetches must go through `web/src/api/client.ts` (or send `authHeaders()`).

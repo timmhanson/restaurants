@@ -37,6 +37,31 @@ public static class CachePolicy
         }
     };
 
+    public const string SessionHeader = "X-Session-Id";
+    public const string OutdatedMessage = "This page is an old copy of the site. Reload it to get the current version, then sign in again. (Mac: Cmd+Shift+R. Windows: Ctrl+F5.)";
+    private static readonly string[] OpenToAnyone = ["/api/health", "/api/info"];
+
+    /// <summary>Every current copy of the site sends X-Session-Id; a caller without it is a stale cached copy.</summary>
+    public static bool IsOutdatedClient(HttpRequest request) =>
+        request.Path.StartsWithSegments("/api") && !request.Headers.ContainsKey(SessionHeader)
+        && !OpenToAnyone.Any(p => request.Path.Equals(p, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Refuses API calls from stale copies of the site with a message their own error display will show, so nobody
+    /// keeps working in an out-of-date screen (wrong menus, missing roles) without knowing. Runs after request
+    /// logging so the attempts appear in the interaction log.
+    /// </summary>
+    public static IApplicationBuilder UseCurrentClientOnly(this IApplicationBuilder app) => app.Use(async (ctx, next) =>
+    {
+        if (IsOutdatedClient(ctx.Request))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status426UpgradeRequired;
+            await ctx.Response.WriteAsJsonAsync(new { code = "OutdatedClient", message = OutdatedMessage });
+            return;
+        }
+        await next();
+    });
+
     public static void NoStore(IHeaderDictionary headers)
     {
         headers[HeaderNames.CacheControl] = "no-store, no-cache, must-revalidate, max-age=0";
@@ -52,7 +77,7 @@ public static class CachePolicy
             // Copies of the site from before pages were sent no-store may still sit in a browser's cache. They are
             // the only callers that don't send X-Session-Id, so tell those browsers to drop their cached files;
             // the next load then gets the live version.
-            var outdatedClient = !ctx.Request.Headers.ContainsKey("X-Session-Id") && ctx.Request.Headers.ContainsKey(HeaderNames.Authorization);
+            var outdatedClient = IsOutdatedClient(ctx.Request);
             ctx.Response.OnStarting(() =>
             {
                 if (outdatedClient) ctx.Response.Headers["Clear-Site-Data"] = "\"cache\"";

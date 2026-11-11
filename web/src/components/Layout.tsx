@@ -50,7 +50,7 @@ export default function Layout() {
     ? 'System administration'
     : isTeamMember
       ? restaurants.map((r) => r.name).join(', ')
-      : [settings?.groupDisplayName || groupName, restaurants.length === 1 ? restaurants[0].name : restaurants.length ? `${restaurants.length} restaurants` : null]
+      : [groupName || settings?.groupDisplayName, restaurants.length === 1 ? restaurants[0].name : restaurants.length ? `${restaurants.length} restaurants` : null]
           .filter(Boolean)
           .join(' · ')
 

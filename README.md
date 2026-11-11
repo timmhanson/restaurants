@@ -125,6 +125,13 @@ The site always loads its live version:
 - The fingerprinted files under `/assets` are cached for a year; their names change with every build.
 - Each API response carries `X-App-Version`, the build's index hash. A tab left open across a deploy
   reloads itself at the next page change.
+- Every current copy of the site sends `X-Session-Id` with each API call. A caller without it is a stale
+  cached copy from before pages were `no-store`: it gets `426` with a "reload this page" message and
+  `Clear-Site-Data: "cache"`, so nobody keeps working in out-of-date screens. Scripts calling the API must
+  send the header too.
+
+The investment group's name is stored once, on the group (renamed by a System Administrator on Investment
+groups); settings and the top bar echo it.
 
 ## Run locally
 
