@@ -29,7 +29,7 @@ public class CurrentUser
         DisplayName = principal.FindFirstValue("name") ?? Username;
         Role = Enum.TryParse<UserRole>(principal.FindFirstValue(ClaimTypes.Role), out var r) ? r : UserRole.TeamMember;
         GroupId = int.TryParse(principal.FindFirstValue("gid"), out var g) ? g : null;
-        Permissions = Role is UserRole.Owner or UserRole.SuperAdmin
+        Permissions = RoleTitles.HasAllPermissions(Role)
             ? ManagerPermission.All
             : (ManagerPermission)(int.TryParse(principal.FindFirstValue("perm"), out var p) ? p : 0);
         RestaurantIds = (principal.FindFirstValue("rids") ?? "")
@@ -47,22 +47,25 @@ public class CurrentUser
         DisplayName = user.DisplayName;
         Role = user.Role;
         GroupId = groupId;
-        Permissions = user.Role is UserRole.Owner or UserRole.SuperAdmin ? ManagerPermission.All : user.Permissions;
+        Permissions = RoleTitles.HasAllPermissions(user.Role) ? ManagerPermission.All : user.Permissions;
         RestaurantIds = restaurantIds.ToHashSet();
         MustChangePassword = user.MustChangePassword;
     }
 
     public bool IsSuperAdmin => Role == UserRole.SuperAdmin;
+    public bool IsGroupAdmin => Role == UserRole.GroupAdmin;
+    /// <summary>System and group administrators: everything in the group, whoever owns each restaurant.</summary>
+    public bool IsGroupWide => Role is UserRole.SuperAdmin or UserRole.GroupAdmin;
     public bool IsOwner => Role == UserRole.Owner;
-    /// <summary>Owners and super admins: the people allowed to manage users, restaurants and settings.</summary>
-    public bool IsAdmin => Role is UserRole.Owner or UserRole.SuperAdmin;
+    /// <summary>Administrators and owners: the people allowed to manage users and restaurants (owners only their own).</summary>
+    public bool IsAdmin => Role is UserRole.Owner or UserRole.SuperAdmin or UserRole.GroupAdmin;
     public bool IsTeamMember => Role == UserRole.TeamMember;
     public bool Has(ManagerPermission p) => IsAdmin || (Role == UserRole.Manager && Permissions.HasFlag(p));
     public bool CanAccessRestaurant(int restaurantId) => RestaurantIds.Contains(restaurantId);
 
     /// <summary>
-    /// Restaurants whose details and staffing this user may change: every restaurant in the group for a
-    /// super admin, the restaurants they own for an owner, nothing for anyone else.
+    /// Restaurants whose details and staffing this user may change: every restaurant in the group for system and
+    /// group administrators, the restaurants they own for an owner, nothing for anyone else.
     /// </summary>
     public bool CanManageRestaurant(int restaurantId) => IsAdmin && RestaurantIds.Contains(restaurantId);
 }
@@ -91,6 +94,11 @@ public class CurrentUserProvider(IHttpContextAccessor http, AppDbContext db)
             int? gid = int.TryParse(raw, out var g) ? g : null;
             var rids = gid is null ? [] : await db.Restaurants.Where(r => r.GroupId == gid).Select(r => r.Id).ToListAsync();
             return _cached = new CurrentUser(user, gid, rids);
+        }
+        if (user.Role == UserRole.GroupAdmin)
+        {
+            var rids = await db.Restaurants.Where(r => r.GroupId == user.GroupId).Select(r => r.Id).ToListAsync();
+            return _cached = new CurrentUser(user, user.GroupId, rids);
         }
         return _cached = new CurrentUser(user, user.GroupId, user.UserRestaurants.Select(x => x.RestaurantId));
     }

@@ -11,6 +11,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<UserRestaurant> UserRestaurants => Set<UserRestaurant>();
     public DbSet<GuestComment> Comments => Set<GuestComment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<CommentActivity> CommentActivities => Set<CommentActivity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -26,6 +27,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<GuestComment>().HasIndex(c => c.GuestKey);
         b.Entity<GuestComment>().HasIndex(c => c.PhoneNormalized);
         b.Entity<GuestComment>().HasQueryFilter(c => !c.IsDeleted);
+
+        // Comments are only ever soft-deleted, so activity rows keep a plain id rather than a navigation.
+        b.Entity<CommentActivity>().HasIndex(a => new { a.CommentId, a.CreatedAt });
+        b.Entity<CommentActivity>().Property(a => a.Text).HasMaxLength(2000);
+        b.Entity<CommentActivity>().Property(a => a.Method).HasMaxLength(100);
 
         b.Entity<AuditLog>().HasIndex(a => a.Timestamp);
         b.Entity<AuditLog>().HasIndex(a => new { a.GroupId, a.RestaurantId });

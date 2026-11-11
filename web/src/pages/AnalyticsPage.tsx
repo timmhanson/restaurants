@@ -1,20 +1,34 @@
-import { useEffect, useState } from 'react'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { api, qs } from '../api/client'
-import type { AnalyticsDto, CountItem } from '../api/types'
+import { useEffect, useMemo, useState } from 'react'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { api, downloadBlob, qs } from '../api/client'
+import type { AnalyticsDto, CountItem, RestaurantRollup } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
-import { Alert, Badge, Empty, Field, Spinner, daysAgo, fmtDate } from '../components/ui'
+import { Alert, Badge, Empty, Spinner, daysAgo, fmtDate } from '../components/ui'
 
 const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-const PALETTE = ['#005daa', '#e4572e', '#17a398', '#f3a712', '#7b61ff', '#a1c181', '#8d99ae', '#ef476f', '#06d6a0', '#ffd166']
+/** Categorical palette, fixed order, validated for colour-vision deficiency. Never cycled: extra series fold into "Other". */
+const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6']
+const OTHER = '#8d99ae'
+const REPLIED = '#1baf7a'
+const WAITING = '#eb6834'
 
 function withOpen(items: CountItem[]) {
   return items.map((i) => ({ ...i, responded: i.responded ?? 0, open: i.count - (i.responded ?? 0) }))
 }
 
+/** Keeps the largest categories and folds the rest into "Other" so colours never repeat. */
+function foldTop(items: CountItem[], keep = SERIES.length - 1) {
+  if (items.length <= SERIES.length) return items
+  const top = items.slice(0, keep)
+  const rest = items.slice(keep)
+  return [...top, { label: 'Other', count: rest.reduce((n, i) => n + i.count, 0) }]
+}
+
+type SortKey = keyof Pick<RestaurantRollup, 'name' | 'total' | 'responseRate' | 'waiting' | 'waitingOverAWeek' | 'oldestWaitingDays' | 'avgDaysToReply' | 'repeatGuests' | 'avgPerWeek'>
+
 export default function AnalyticsPage() {
   const { restaurants } = useAuth()
-  const [restaurantId, setRestaurantId] = useState<number | ''>('')
+  const [picked, setPicked] = useState<number[]>([])
   const [from, setFrom] = useState(daysAgo(180))
   const [to, setTo] = useState('')
   const [trend, setTrend] = useState<'week' | 'month'>('week')
@@ -25,14 +39,17 @@ export default function AnalyticsPage() {
   useEffect(() => {
     setLoading(true)
     api
-      .get<AnalyticsDto>(`/analytics${qs({ restaurantId, from, to })}`)
+      .get<AnalyticsDto>(`/analytics${qs({ restaurantIds: picked.join(','), from, to })}`)
       .then((d) => {
         setData(d)
         setError(null)
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false))
-  }, [restaurantId, from, to])
+  }, [picked, from, to])
+
+  const togglePick = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
+  const multi = (data?.restaurants.length ?? 0) > 1
 
   const days = data ? DAY_ORDER.map((d) => withOpen(data.byDayOfWeek).find((x) => x.label === d) ?? { label: d, count: 0, responded: 0, open: 0 }).map((d) => ({ ...d, label: d.label.slice(0, 3) })) : []
   const trendData = data ? withOpen(trend === 'week' ? data.byWeek : data.byMonth).map((x) => ({ ...x, label: trend === 'week' ? fmtDate(x.label) : x.label })) : []
@@ -44,20 +61,27 @@ export default function AnalyticsPage() {
         <h1>Analytics</h1>
       </div>
       <div className="filters">
-        <Field label="Restaurant">
-          <select value={restaurantId} onChange={(e) => setRestaurantId(e.target.value ? Number(e.target.value) : '')}>
-            <option value="">All my restaurants</option>
-            {restaurants.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Visits from">
+        {restaurants.length > 1 && (
+          <div className="field wide">
+            <span className="field-label">Restaurants</span>
+            <div className="chips" role="group" aria-label="Restaurants to include">
+              <button type="button" className={`chip ${picked.length === 0 ? 'on' : ''}`} onClick={() => setPicked([])}>All my restaurants ({restaurants.length})</button>
+              {restaurants.map((r) => (
+                <button key={r.id} type="button" className={`chip ${picked.includes(r.id) ? 'on' : ''}`} aria-pressed={picked.includes(r.id)} onClick={() => togglePick(r.id)}>
+                  {r.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <label className="field">
+          <span className="field-label">Visits from</span>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </Field>
-        <Field label="to">
+        </label>
+        <label className="field">
+          <span className="field-label">to</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </Field>
+        </label>
       </div>
       {error && <Alert kind="error">{error}</Alert>}
       {loading && !data ? (
@@ -68,10 +92,22 @@ export default function AnalyticsPage() {
         <>
           <div className="grid grid-4" style={{ marginBottom: '1rem' }}>
             <div className="stat"><div className="stat-value">{data.totalComments}</div><div className="stat-label">Cards issued</div></div>
-            <div className="stat"><div className="stat-value">{data.unresponded}</div><div className="stat-label">Not yet responded ({100 - pct}%)</div></div>
-            <div className="stat"><div className="stat-value">{data.repeatGuests}<small className="muted"> / {data.distinctGuests}</small></div><div className="stat-label">Repeat guests / distinct guests</div></div>
-            <div className="stat"><div className="stat-value">{data.avgPerWeek}</div><div className="stat-label">Average cards per week</div></div>
+            <div className="stat">
+              <div className="stat-value">{data.unresponded}</div>
+              <div className="stat-label">Waiting for a reply ({100 - pct}%){data.waitingOverAWeek > 0 && <> · <strong className="text-danger">{data.waitingOverAWeek} over a week</strong></>}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">{data.avgDaysToReply ?? '—'}{data.avgDaysToReply != null && <small className="muted"> days</small>}</div>
+              <div className="stat-label">Average time from visit to reply</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">{data.repeatGuests}<small className="muted"> / {data.distinctGuests}</small></div>
+              <div className="stat-label">Repeat guests / distinct guests{data.crossRestaurantGuests > 0 && ` · ${data.crossRestaurantGuests} at more than one restaurant`}</div>
+            </div>
           </div>
+
+          {multi && <Comparison rows={data.restaurants} from={from} to={to} />}
+          {multi && <MonthlyByRestaurant data={data} />}
 
           <div className="grid grid-2">
             <div className="panel">
@@ -81,8 +117,8 @@ export default function AnalyticsPage() {
                   <BarChart data={days}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" /><YAxis allowDecimals={false} /><Tooltip /><Legend />
-                    <Bar dataKey="responded" name="Responded" stackId="a" fill="#17a398" />
-                    <Bar dataKey="open" name="Not responded" stackId="a" fill="#e4572e" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="responded" name="Replied" stackId="a" fill={REPLIED} />
+                    <Bar dataKey="open" name="Waiting" stackId="a" fill={WAITING} radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -94,8 +130,8 @@ export default function AnalyticsPage() {
                   <BarChart data={withOpen(data.byReason)} layout="vertical" margin={{ left: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="label" width={120} /><Tooltip /><Legend />
-                    <Bar dataKey="responded" name="Responded" stackId="a" fill="#17a398" />
-                    <Bar dataKey="open" name="Not responded" stackId="a" fill="#e4572e" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="responded" name="Replied" stackId="a" fill={REPLIED} />
+                    <Bar dataKey="open" name="Waiting" stackId="a" fill={WAITING} radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -114,8 +150,8 @@ export default function AnalyticsPage() {
                   <AreaChart data={trendData}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" /><YAxis allowDecimals={false} /><Tooltip /><Legend />
-                    <Area type="monotone" dataKey="count" name="Cards" stroke="var(--accent)" fill="var(--accent)" fillOpacity={0.15} />
-                    <Area type="monotone" dataKey="responded" name="Responded" stroke="#17a398" fill="#17a398" fillOpacity={0.15} />
+                    <Area type="monotone" dataKey="count" name="Cards" stroke={SERIES[0]} fill={SERIES[0]} fillOpacity={0.12} strokeWidth={2} />
+                    <Area type="monotone" dataKey="responded" name="Replied" stroke={REPLIED} fill={REPLIED} fillOpacity={0.15} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -125,8 +161,8 @@ export default function AnalyticsPage() {
               <div className="chart-box">
                 <ResponsiveContainer>
                   <PieChart>
-                    <Pie data={data.byCouponOffer} dataKey="count" nameKey="label" outerRadius={90} innerRadius={45} paddingAngle={2}>
-                      {data.byCouponOffer.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+                    <Pie data={foldTop(data.byCouponOffer)} dataKey="count" nameKey="label" outerRadius={90} innerRadius={45} paddingAngle={2}>
+                      {foldTop(data.byCouponOffer).map((c, i) => <Cell key={c.label} fill={c.label === 'Other' ? OTHER : SERIES[i]} />)}
                     </Pie>
                     <Tooltip />
                     <Legend />
@@ -135,14 +171,30 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <div className="panel">
-              <h2>{restaurantId ? 'Entered by' : 'By restaurant'}</h2>
+              <h2>How we replied</h2>
+              {data.byReplyMethod.length === 0 ? (
+                <Empty>No replies recorded in this range yet.</Empty>
+              ) : (
+                <div className="chart-box">
+                  <ResponsiveContainer>
+                    <BarChart data={data.byReplyMethod} layout="vertical" margin={{ left: 30 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="label" width={130} /><Tooltip />
+                      <Bar dataKey="count" name="Replies" fill={SERIES[0]} radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+            <div className="panel">
+              <h2>{multi ? 'By restaurant' : 'Entered by'}</h2>
               <div className="chart-box">
                 <ResponsiveContainer>
-                  <BarChart data={withOpen(restaurantId ? data.byEnteredBy : data.byRestaurant)}>
+                  <BarChart data={withOpen(multi ? data.byRestaurant : data.byEnteredBy)}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="label" /><YAxis allowDecimals={false} /><Tooltip /><Legend />
-                    <Bar dataKey="responded" name="Responded" stackId="a" fill="#17a398" />
-                    <Bar dataKey="open" name="Not responded" stackId="a" fill="#e4572e" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="responded" name="Replied" stackId="a" fill={REPLIED} />
+                    <Bar dataKey="open" name="Waiting" stackId="a" fill={WAITING} radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -179,5 +231,124 @@ export default function AnalyticsPage() {
         </>
       )}
     </>
+  )
+}
+
+/** Side-by-side figures for each restaurant in the roll-up, sortable, with a CSV download. */
+function Comparison({ rows, from, to }: { rows: RestaurantRollup[]; from: string; to: string }) {
+  const [sort, setSort] = useState<SortKey>('total')
+  const [desc, setDesc] = useState(true)
+  const sorted = useMemo(() => {
+    const val = (r: RestaurantRollup) => r[sort] ?? -1
+    return [...rows].sort((a, b) => {
+      const x = val(a), y = val(b)
+      const c = typeof x === 'string' ? x.localeCompare(String(y)) : (x as number) - (y as number)
+      return desc ? -c : c
+    })
+  }, [rows, sort, desc])
+  const head = (key: SortKey, label: string, num = true) => (
+    <th className={`sortable ${num ? 'num' : ''}`} onClick={() => (sort === key ? setDesc(!desc) : (setSort(key), setDesc(key !== 'name')))} aria-sort={sort === key ? (desc ? 'descending' : 'ascending') : 'none'}>
+      {label}{sort === key ? (desc ? ' ↓' : ' ↑') : ''}
+    </th>
+  )
+  const total = rows.reduce((n, r) => n + r.total, 0)
+
+  const download = () => {
+    const cols = ['Restaurant', 'Cards', 'Replied', 'Waiting', 'Reply rate %', 'Waiting over a week', 'Oldest wait (days)', 'Avg days to reply', 'Guests', 'Repeat guests', 'Cards per week', 'Top reason', 'Last visit']
+    const esc = (v: unknown) => {
+      const t = v == null ? '' : String(v)
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+    }
+    const lines = [cols.join(','), ...sorted.map((r) => [r.name, r.total, r.responded, r.waiting, r.responseRate, r.waitingOverAWeek, r.oldestWaitingDays, r.avgDaysToReply, r.guests, r.repeatGuests, r.avgPerWeek, r.topReason, r.lastVisit].map(esc).join(','))]
+    downloadBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), `restaurant-rollup-${from || 'start'}-to-${to || 'today'}.csv`)
+  }
+
+  return (
+    <div className="panel">
+      <div className="page-head">
+        <h2 style={{ margin: 0 }}>Restaurant comparison</h2>
+        <span className="grow" />
+        <button type="button" className="btn btn-sm" onClick={download}>⬇ Download roll-up</button>
+      </div>
+      <p className="legend-note">Each restaurant's cards and how quickly they were answered. Click a column to sort.</p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {head('name', 'Restaurant', false)}
+              {head('total', 'Cards')}
+              {head('responseRate', 'Replied')}
+              {head('waiting', 'Waiting')}
+              {head('waitingOverAWeek', 'Over a week')}
+              {head('oldestWaitingDays', 'Oldest wait')}
+              {head('avgDaysToReply', 'Days to reply')}
+              {head('repeatGuests', 'Repeat guests')}
+              {head('avgPerWeek', 'Per week')}
+              <th>Top reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r) => (
+              <tr key={r.restaurantId}>
+                <td><strong>{r.name}</strong>{r.lastVisit && <div className="muted small">last visit {fmtDate(r.lastVisit)}</div>}</td>
+                <td className="num">
+                  {r.total}
+                  <div className="share" aria-hidden="true"><span style={{ width: `${total ? (100 * r.total) / total : 0}%` }} /></div>
+                </td>
+                <td className="num">{r.total ? `${r.responseRate}%` : '—'}</td>
+                <td className="num">{r.waiting}</td>
+                <td className="num">{r.waitingOverAWeek > 0 ? <Badge kind="danger">{r.waitingOverAWeek}</Badge> : 0}</td>
+                <td className="num">{r.oldestWaitingDays != null ? `${r.oldestWaitingDays} d` : '—'}</td>
+                <td className="num">{r.avgDaysToReply ?? '—'}</td>
+                <td className="num">{r.repeatGuests}<span className="muted"> / {r.guests}</span></td>
+                <td className="num">{r.avgPerWeek}</td>
+                <td>{r.topReason ?? <span className="muted">—</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/** Cards per month, one line per restaurant. Beyond seven restaurants the smallest fold into "Other". */
+function MonthlyByRestaurant({ data }: { data: AnalyticsDto }) {
+  const { chartRows, series } = useMemo(() => {
+    const totals = data.restaurants.filter((r) => r.total > 0).sort((a, b) => b.total - a.total)
+    const shown = totals.length > SERIES.length ? totals.slice(0, SERIES.length - 1) : totals
+    const shownIds = new Set(shown.map((r) => r.restaurantId))
+    const keyOf = (id: number) => (shownIds.has(id) ? `r${id}` : 'other')
+    const months = [...new Set(data.monthlyByRestaurant.map((m) => m.month))].sort()
+    const rows = months.map((month) => {
+      const row: Record<string, string | number> = { month }
+      shown.forEach((r) => (row[`r${r.restaurantId}`] = 0))
+      if (totals.length > shown.length) row.other = 0
+      data.monthlyByRestaurant.filter((m) => m.month === month).forEach((m) => (row[keyOf(m.restaurantId)] = Number(row[keyOf(m.restaurantId)] ?? 0) + m.count))
+      return row
+    })
+    const s = shown.map((r, i) => ({ key: `r${r.restaurantId}`, name: r.name, color: SERIES[i] }))
+    if (totals.length > shown.length) s.push({ key: 'other', name: `Other restaurants (${totals.length - shown.length})`, color: OTHER })
+    return { chartRows: rows, series: s }
+  }, [data])
+
+  if (chartRows.length < 2) return null
+  return (
+    <div className="panel">
+      <h2>Cards per month by restaurant</h2>
+      <div className="chart-box">
+        <ResponsiveContainer>
+          <LineChart data={chartRows} margin={{ right: 16 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="month" /><YAxis allowDecimals={false} />
+            <Tooltip />
+            <Legend />
+            {series.map((s) => (
+              <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={{ r: 4, fill: s.color, strokeWidth: 2, stroke: 'var(--surface)' }} activeDot={{ r: 5, fill: s.color, stroke: 'var(--surface)', strokeWidth: 2 }} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   )
 }

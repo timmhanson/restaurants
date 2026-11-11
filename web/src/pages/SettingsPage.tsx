@@ -89,6 +89,8 @@ export default function SettingsPage() {
             <div className="panel">
               <h2>Reasons</h2>
               <ListEditor label="Reason categories" items={s.reasonCategories} onChange={(v) => setS({ ...s, reasonCategories: v })} placeholder="Order mistake" hint="Why the guest received a card. Drives the dropdown and the analytics charts." />
+              <br />
+              <ListEditor label="Reply methods" items={s.replyMethods ?? []} onChange={(v) => setS({ ...s, replyMethods: v })} placeholder="Phone call" hint="How managers can reply to a guest. They pick one when they confirm a reply or log an attempt." />
             </div>
             <div className="panel">
               <h2>Duplicate &amp; repeat guest detection</h2>

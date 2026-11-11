@@ -22,6 +22,12 @@ public class GroupSettings
         "Order mistake", "Missing item", "Wait time", "Food quality", "Food temperature", "Service", "Cleanliness", "Drive-thru", "Compliment", "Other"
     ];
 
+    /// <summary>How a manager can reply to a guest. Drives the "How did you reply?" choice on each comment.</summary>
+    public List<string> ReplyMethods { get; set; } =
+    [
+        "Mailed coupon card", "Phone call", "Email", "Text message", "In person"
+    ];
+
     /// <summary>"This coupon is good for 3 months from date of issue."</summary>
     public int CouponValidityMonths { get; set; } = 3;
 

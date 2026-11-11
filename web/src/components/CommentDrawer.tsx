@@ -2,17 +2,21 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { CommentSummary } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import FollowUpPanel from './FollowUp'
 import { Badge, Spinner, fmtDate, fmtDateTime } from './ui'
 
 interface Props {
   comment: CommentSummary
   onClose: () => void
   onEdit?: (c: CommentSummary) => void
-  onToggleResponded?: (c: CommentSummary) => void
+  /** Called after a reply, attempt, reopen or note so the list can refresh the row. */
+  onChanged: (c: CommentSummary) => void
   onDelete?: (c: CommentSummary) => void
+  /** Open straight into the reply form. */
+  startReply?: boolean
 }
 
-export default function CommentDrawer({ comment, onClose, onEdit, onToggleResponded, onDelete }: Props) {
+export default function CommentDrawer({ comment, onClose, onEdit, onChanged, onDelete, startReply }: Props) {
   const { has } = useAuth()
   const [history, setHistory] = useState<CommentSummary[] | null>(null)
 
@@ -41,11 +45,6 @@ export default function CommentDrawer({ comment, onClose, onEdit, onToggleRespon
           </button>
         </div>
         <div className="row-actions" style={{ marginBottom: '1rem' }}>
-          {onToggleResponded && has('MarkResponded') && (
-            <button type="button" className={`btn btn-sm ${comment.responded ? '' : 'btn-primary'}`} onClick={() => onToggleResponded(comment)}>
-              {comment.responded ? 'Mark not responded' : 'Mark responded'}
-            </button>
-          )}
           {onEdit && has('EditComments') && (
             <button type="button" className="btn btn-sm" onClick={() => onEdit(comment)}>
               Edit
@@ -80,17 +79,7 @@ export default function CommentDrawer({ comment, onClose, onEdit, onToggleRespon
           <dd>{comment.phone || <span className="muted">—</span>}</dd>
           <dt>Address</dt>
           <dd>{address || <span className="muted">—</span>}</dd>
-          <dt>Responded</dt>
-          <dd>
-            {comment.responded ? (
-              <>
-                <Badge kind="ok">Yes</Badge> {comment.respondedByName} · {fmtDateTime(comment.respondedAt)}
-              </>
-            ) : (
-              <Badge kind="danger">Not yet</Badge>
-            )}
-          </dd>
-          <dt>Notes</dt>
+          <dt>Card notes</dt>
           <dd>{comment.notes || <span className="muted">—</span>}</dd>
           <dt>Entered</dt>
           <dd>
@@ -98,6 +87,8 @@ export default function CommentDrawer({ comment, onClose, onEdit, onToggleRespon
             {comment.updatedAt && <div className="muted">updated {fmtDateTime(comment.updatedAt)}</div>}
           </dd>
         </dl>
+
+        <FollowUpPanel key={comment.id} comment={comment} onChanged={onChanged} startWith={startReply ? 'reply' : null} />
 
         <h3 style={{ marginTop: '1.25rem' }}>Guest history</h3>
         {history === null ? (
@@ -107,7 +98,7 @@ export default function CommentDrawer({ comment, onClose, onEdit, onToggleRespon
             {history.map((h) => (
               <li key={h.id} className={h.id === comment.id ? 'current' : ''}>
                 <strong>{fmtDate(h.visitDate)}</strong> · {h.restaurantName} · {h.reason}
-                {h.couponOffer ? ` · ${h.couponOffer}` : ''} {h.responded ? <Badge kind="ok">responded</Badge> : <Badge kind="danger">open</Badge>}
+                {h.couponOffer ? ` · ${h.couponOffer}` : ''} {h.responded ? <Badge kind="ok">replied{h.replyMethod ? ` · ${h.replyMethod}` : ''}</Badge> : <Badge kind="danger">needs reply</Badge>}
                 {h.reasonDetails && <div className="muted">{h.reasonDetails}</div>}
               </li>
             ))}

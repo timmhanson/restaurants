@@ -2,17 +2,13 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import type { Permission, PermissionInfo, RestaurantDto, Role, UserDto, UserRequest } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { ROLE_HELP, roleTitle } from '../auth/roles'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, fmtDateTime } from '../components/ui'
 
-const ROLE_HELP: Record<Role, string> = {
-  SuperAdmin: 'Administers every investment group. Not tied to a restaurant.',
-  Owner: 'Sees everything for their restaurants, manages users, restaurants and settings.',
-  Manager: 'Enters cards for their restaurants; owners pick which other features they can use.',
-  TeamMember: 'One shared login per restaurant for crew members. Can only enter cards; sees nothing else.',
-}
+const groupWideRole = (r: Role) => r === 'SuperAdmin' || r === 'GroupAdmin'
 
 export default function UsersPage() {
-  const { user: me, isAdmin, isSuperAdmin, groupId } = useAuth()
+  const { user: me, isAdmin, isSuperAdmin, isGroupWide, groupId } = useAuth()
   const [users, setUsers] = useState<UserDto[] | null>(null)
   const [restaurants, setRestaurants] = useState<RestaurantDto[]>([])
   const [catalog, setCatalog] = useState<PermissionInfo[]>([])
@@ -21,6 +17,7 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<UserDto | 'new' | null>(null)
   const [resetting, setResetting] = useState<UserDto | null>(null)
   const [removing, setRemoving] = useState<UserDto | null>(null)
+  const [suspending, setSuspending] = useState<UserDto | null>(null)
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
@@ -44,11 +41,38 @@ export default function UsersPage() {
   }, [load, groupId])
 
   const restaurantName = (id: number) => restaurants.find((r) => r.id === id)?.name ?? `#${id}`
-  // Owners manage people at restaurants they own (mirrors the API rules); super admins and managers are scoped by the API list.
+  // Mirrors the API rules. Administrators manage everyone in the group; owners manage the managers and team logins
+  // at any restaurant they own (even if those people also work elsewhere); managers only see team logins.
   const ownerScoped = me?.role === 'Owner'
   const owns = (id: number) => restaurants.some((r) => r.id === id && r.canManage)
-  const canEdit = (u: UserDto) => !ownerScoped || u.id === me?.id || u.restaurantIds.length === 0 || u.restaurantIds.some(owns)
-  const canRemove = (u: UserDto) => canEdit(u) && (!ownerScoped || u.restaurantIds.every(owns))
+  const canEdit = (u: UserDto) => {
+    if (isSuperAdmin) return true
+    if (u.role === 'SuperAdmin') return false
+    if (isGroupWide || u.id === me?.id) return true
+    if (ownerScoped) return (u.role === 'Manager' || u.role === 'TeamMember') && (u.restaurantIds.length === 0 || u.restaurantIds.some(owns))
+    return true
+  }
+  const canRemove = (u: UserDto) => canEdit(u) && u.id !== me?.id && (!ownerScoped || u.restaurantIds.every(owns))
+  const notMine = (u: UserDto) =>
+    ownerScoped && (u.role === 'Owner' || u.role === 'GroupAdmin')
+      ? 'Managed by your group administrators'
+      : `Managed by the owners of ${u.restaurantIds.map(restaurantName).join(', ')}`
+
+  const setStatus = async () => {
+    if (!suspending) return
+    setBusy(true)
+    try {
+      await api.put(`/users/${suspending.id}/status`, { active: !suspending.isActive })
+      setNotice(suspending.isActive ? `${suspending.displayName} is suspended and can no longer sign in anywhere.` : `${suspending.displayName}'s access is restored.`)
+      setSuspending(null)
+      await load()
+    } catch (e) {
+      setError((e as Error).message)
+      setSuspending(null)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const remove = async () => {
     if (!removing) return
@@ -74,8 +98,14 @@ export default function UsersPage() {
           + Add user
         </button>
       </div>
-      {!isAdmin && <Alert kind="info">As a manager you can create and reset the shared team-member login for your restaurants.</Alert>}
-      {isSuperAdmin && !groupId && <Alert kind="warn">Select an investment group in the top bar to manage its owners, managers and team logins.</Alert>}
+      {!isAdmin && <Alert kind="info">As a manager you can create and reset the shared team login for your restaurants.</Alert>}
+      {ownerScoped && (
+        <Alert kind="info">
+          You manage the managers and team logins at the restaurants you own: edit them, reset passwords, and suspend access, even if they also work at
+          other owners' restaurants. Other owners and group administrators are managed by your group administrators.
+        </Alert>
+      )}
+      {isSuperAdmin && !groupId && <Alert kind="warn">Select an investment group in the top bar to manage its administrators, owners, managers and team logins.</Alert>}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind="success" onClose={() => setNotice(null)}>{notice}</Alert>}
       {users === null ? (
@@ -95,14 +125,28 @@ export default function UsersPage() {
                 <tr key={u.id} className={u.isActive ? '' : 'inactive'}>
                   <td>
                     <strong>{u.displayName}</strong> {u.id === me?.id && <Badge kind="accent">you</Badge>}{' '}
-                    {!u.isActive && <Badge kind="neutral">inactive</Badge>} {u.mustChangePassword && <Badge kind="warn" title="Must pick a new password at next login">password reset</Badge>}
+                    {!u.isActive && <Badge kind="danger">suspended</Badge>} {u.mustChangePassword && <Badge kind="warn" title="Must pick a new password at next login">password reset</Badge>}
                     <div className="muted" style={{ fontSize: '0.8rem' }}>{u.username}{u.email ? ` · ${u.email}` : ''}</div>
                   </td>
                   <td>
-                    {u.role === 'TeamMember' ? <Badge kind="neutral">Team login</Badge> : u.role === 'SuperAdmin' ? <Badge kind="accent">Super admin</Badge> : u.role}
-                    {u.role === 'SuperAdmin' && u.groupName && <div className="muted">{u.groupName}</div>}
+                    {groupWideRole(u.role) ? <Badge kind="accent">{roleTitle(u.role)}</Badge> : u.role === 'TeamMember' ? <Badge kind="neutral">Team login</Badge> : roleTitle(u.role)}
                   </td>
-                  <td>{u.role === 'SuperAdmin' ? <span className="muted">all</span> : u.restaurantIds.length ? u.restaurantIds.map(restaurantName).join(', ') : <span className="muted">none</span>}</td>
+                  <td>
+                    {u.role === 'SuperAdmin' ? (
+                      <span className="muted">every group</span>
+                    ) : u.role === 'GroupAdmin' ? (
+                      <span className="muted">every restaurant in the group</span>
+                    ) : u.restaurantIds.length ? (
+                      u.restaurantIds.map((id) => (
+                        <span key={id} className={ownerScoped && !owns(id) ? 'muted' : undefined} title={ownerScoped && !owns(id) ? 'Owned by someone else' : undefined}>
+                          {restaurantName(id)}
+                          {id !== u.restaurantIds[u.restaurantIds.length - 1] ? ', ' : ''}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="muted">none</span>
+                    )}
+                  </td>
                   <td style={{ maxWidth: 280 }}>
                     {u.role === 'Manager' ? (
                       u.permissionNames.length ? <span style={{ fontSize: '0.82rem' }}>{u.permissionNames.map(pretty).join(', ')}</span> : <span className="muted">Enter cards only</span>
@@ -118,12 +162,17 @@ export default function UsersPage() {
                       <div className="row-actions">
                         <button type="button" className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
                         <button type="button" className="btn btn-sm" onClick={() => setResetting(u)}>Reset password</button>
-                        {u.id !== me?.id && canRemove(u) && (
+                        {u.id !== me?.id && (
+                          <button type="button" className={`btn btn-sm ${u.isActive ? '' : 'btn-primary'}`} onClick={() => setSuspending(u)}>
+                            {u.isActive ? 'Suspend' : 'Restore'}
+                          </button>
+                        )}
+                        {canRemove(u) && (
                           <button type="button" className="btn btn-sm btn-danger" onClick={() => setRemoving(u)}>Remove</button>
                         )}
                       </div>
                     ) : (
-                      <span className="muted" style={{ fontSize: '0.8rem' }}>Managed by the owners of {u.restaurantIds.map(restaurantName).join(', ')}</span>
+                      <span className="muted" style={{ fontSize: '0.8rem' }}>{notMine(u)}</span>
                     )}
                   </td>
                 </tr>
@@ -138,9 +187,9 @@ export default function UsersPage() {
           user={editing === 'new' ? null : editing}
           restaurants={restaurants.filter((r) => r.isActive || (editing !== 'new' && editing.restaurantIds.includes(r.id)))}
           catalog={catalog}
-          canPickRole={isAdmin}
-          canPickSuperAdmin={isSuperAdmin}
-          ownerScoped={me?.role === 'Owner'}
+          myRole={me?.role ?? 'TeamMember'}
+          ownerScoped={ownerScoped}
+          restaurantName={restaurantName}
           meId={me?.id}
           onClose={() => setEditing(null)}
           onSaved={(msg) => {
@@ -165,13 +214,30 @@ export default function UsersPage() {
           }}
         />
       )}
+      {suspending && (
+        <Confirm
+          title={suspending.isActive ? `Suspend ${suspending.displayName}?` : `Restore ${suspending.displayName}?`}
+          danger={suspending.isActive}
+          busy={busy}
+          confirmLabel={suspending.isActive ? 'Suspend access' : 'Restore access'}
+          message={
+            suspending.isActive
+              ? `${suspending.displayName} will be signed out and blocked from every restaurant they work at` +
+                (suspending.restaurantIds.length ? ` (${suspending.restaurantIds.map(restaurantName).join(', ')})` : '') +
+                '. Their entries and history are kept, and the owners of those restaurants see the suspension in the audit log.'
+              : `${suspending.displayName} will be able to sign in again with their current password.`
+          }
+          onCancel={() => setSuspending(null)}
+          onConfirm={() => void setStatus()}
+        />
+      )}
       {removing && (
         <Confirm
           title="Remove user?"
           danger
           busy={busy}
           confirmLabel="Remove"
-          message={`Remove ${removing.displayName} (${removing.username})? They will no longer be able to sign in. Their past entries and audit history are kept.`}
+          message={`Remove ${removing.displayName} (${removing.username}) for good? They are taken off every restaurant and the username is freed. Their past entries and audit history are kept. To block someone temporarily, use Suspend instead.`}
           onCancel={() => setRemoving(null)}
           onConfirm={() => void remove()}
         />
@@ -182,14 +248,14 @@ export default function UsersPage() {
 
 const pretty = (p: string) => p.replace(/([A-Z])/g, ' $1').trim()
 
-function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin, ownerScoped, meId, onClose, onSaved }: {
+function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurantName, meId, onClose, onSaved }: {
   user: UserDto | null
   restaurants: RestaurantDto[]
   catalog: PermissionInfo[]
-  canPickRole: boolean
-  canPickSuperAdmin: boolean
+  myRole: Role
   /** Owners may only assign people to restaurants they own (their own account excepted). */
   ownerScoped: boolean
+  restaurantName: (id: number) => string
   meId?: number
   onClose: () => void
   onSaved: (message: string) => void
@@ -199,7 +265,7 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
     displayName: user?.displayName ?? '',
     email: user?.email ?? '',
     password: '',
-    role: user?.role ?? (canPickRole ? 'Manager' : 'TeamMember'),
+    role: user?.role ?? (myRole === 'Manager' ? 'TeamMember' : 'Manager'),
     permissions: user?.role === 'Manager' ? user.permissionNames : ['ViewComments', 'MarkResponded'],
     restaurantIds: user?.restaurantIds ?? (lockable(restaurants).length === 1 ? [lockable(restaurants)[0].id] : []),
     isActive: user?.isActive ?? true,
@@ -209,7 +275,7 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
 
   // Restaurants this editor may tick or untick for this user.
   function lockable(list: RestaurantDto[]) {
-    return list.filter((r) => !ownerScoped || r.canManage || (user !== null && user.id === meId))
+    return list.filter((r) => !ownerScoped || r.canManage)
   }
   const editable = new Set(lockable(restaurants).map((r) => r.id))
 
@@ -222,10 +288,10 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
     e.preventDefault()
     setError(null)
     if (!user && !v.password) return setError('A password is required for a new user.')
-    if (v.role !== 'SuperAdmin' && v.restaurantIds.length === 0) return setError('Pick at least one restaurant.')
+    if (!groupWideRole(v.role) && v.restaurantIds.length === 0) return setError('Pick at least one restaurant.')
     setBusy(true)
     try {
-      const body: UserRequest = { ...v, email: v.email || null, password: v.password || null }
+      const body: UserRequest = { ...v, email: v.email || null, password: v.password || null, restaurantIds: groupWideRole(v.role) ? [] : v.restaurantIds }
       if (user) await api.put(`/users/${user.id}`, body)
       else await api.post('/users', body)
       onSaved(
@@ -242,8 +308,14 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
     }
   }
 
-  const roles: Role[] = canPickRole ? (canPickSuperAdmin ? ['Owner', 'Manager', 'TeamMember', 'SuperAdmin'] : ['Owner', 'Manager', 'TeamMember']) : ['TeamMember']
-  const roleLocked = !!user && (user.role === 'SuperAdmin' || !canPickRole)
+  // Which roles this person may hand out. Only administrators change an existing account's role.
+  const roles: Role[] =
+    myRole === 'SuperAdmin' ? ['SuperAdmin', 'GroupAdmin', 'Owner', 'Manager', 'TeamMember']
+      : myRole === 'GroupAdmin' ? ['GroupAdmin', 'Owner', 'Manager', 'TeamMember']
+        : myRole === 'Owner' ? ['Owner', 'Manager', 'TeamMember']
+          : ['TeamMember']
+  const roleLocked = !!user && (user.role === 'SuperAdmin' || (myRole !== 'SuperAdmin' && myRole !== 'GroupAdmin'))
+  const elsewhere = user && ownerScoped && user.id !== meId ? user.restaurantIds.filter((id) => !editable.has(id)) : []
 
   return (
     <Modal title={user ? `Edit ${user.displayName}` : 'Add user'} onClose={onClose} wide>
@@ -253,18 +325,24 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
           <Field label="Role">
             <select value={v.role} onChange={(e) => setV((s) => ({ ...s, role: e.target.value as Role }))} disabled={roleLocked}>
               {roles.map((r) => (
-                <option key={r} value={r}>{r === 'TeamMember' ? 'Team member (shared login)' : r === 'SuperAdmin' ? 'Super admin' : r}</option>
+                <option key={r} value={r}>{r === 'TeamMember' ? 'Team Member (shared login)' : roleTitle(r)}</option>
               ))}
-              {roleLocked && !roles.includes(v.role) && <option value={v.role}>{v.role}</option>}
+              {roleLocked && !roles.includes(v.role) && <option value={v.role}>{roleTitle(v.role)}</option>}
             </select>
           </Field>
-          <Field label="Active">
-            <select value={v.isActive ? '1' : '0'} onChange={(e) => setV((s) => ({ ...s, isActive: e.target.value === '1' }))}>
-              <option value="1">Active</option><option value="0">Inactive</option>
+          <Field label="Access">
+            <select value={v.isActive ? '1' : '0'} onChange={(e) => setV((s) => ({ ...s, isActive: e.target.value === '1' }))} disabled={user?.id === meId}>
+              <option value="1">Active</option><option value="0">Suspended</option>
             </select>
           </Field>
         </div>
-        <p className="muted" style={{ margin: 0 }}>{ROLE_HELP[v.role]}</p>
+        <p className="muted" style={{ margin: 0 }}>{ROLE_HELP[v.role]}{roleLocked && user && user.id !== meId ? ' Only a group administrator can change roles.' : ''}</p>
+        {elsewhere.length > 0 && (
+          <Alert kind="info">
+            {user!.displayName} also works at {elsewhere.map(restaurantName).join(', ')}. Those assignments stay as they are, but permission changes and
+            suspension apply everywhere they work.
+          </Alert>
+        )}
         <div className="form-row">
           <Field label="Username" hint={v.role === 'TeamMember' ? 'e.g. team-joliet' : 'Email address or short name'}>
             <input value={v.username} onChange={(e) => setV((s) => ({ ...s, username: e.target.value }))} required minLength={3} autoComplete="off" />
@@ -281,11 +359,15 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
             <input type="password" value={v.password ?? ''} onChange={(e) => setV((s) => ({ ...s, password: e.target.value }))} minLength={8} autoComplete="new-password" required={!user} />
           </Field>
         </div>
-        {v.role !== 'SuperAdmin' && (
+        {groupWideRole(v.role) ? (
+          <p className="muted" style={{ margin: 0 }}>
+            {v.role === 'GroupAdmin' ? 'Group administrators see and manage every restaurant in the group, so they are not assigned to particular ones.' : 'System Administrators are not part of any group.'}
+          </p>
+        ) : (
           <Field
             label="Restaurants"
             hint={
-              (v.role === 'TeamMember' ? 'Usually one restaurant per team login.' : 'Owners and managers can belong to several restaurants in the group.') +
+              (v.role === 'TeamMember' ? 'Usually one restaurant per team login.' : v.role === 'Owner' ? 'The restaurants this person owns.' : 'Managers can work at several restaurants, including ones with different owners.') +
               (editable.size < restaurants.length ? ' Restaurants you do not own are greyed out; their owners manage who works there.' : '')
             }
           >
@@ -301,7 +383,7 @@ function UserModal({ user, restaurants, catalog, canPickRole, canPickSuperAdmin,
           </Field>
         )}
         {v.role === 'Manager' && (
-          <Field label="Manager permissions" hint="Every manager can enter cards. Tick what else this manager may do.">
+          <Field label="Manager permissions" hint="Every manager can enter cards. Tick what else this manager may do; it applies at every restaurant they work at.">
             <div className="check-list">
               {catalog.map((p) => (
                 <label key={p.name} className="check">

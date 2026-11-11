@@ -10,7 +10,7 @@ using RestaurantFeedback.Api.Services;
 
 namespace RestaurantFeedback.Api.Controllers;
 
-/// <summary>Investment groups. Super admins only; owners see just their own group via /api/groups/mine.</summary>
+/// <summary>Investment groups. System administrators only; everyone else sees just their own group via /api/groups/mine.</summary>
 [ApiController]
 [Route("api/groups")]
 [Authorize]
@@ -24,7 +24,8 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
             g.Id, g.Name, g.IsActive, g.CreatedAt, g.Restaurants.Count, g.Users.Count(u => u.IsActive),
             db.Comments.Count(c => c.Restaurant.GroupId == g.Id))
         {
-            OwnerNames = g.Users.Where(u => u.Role == UserRole.Owner && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList()
+            OwnerNames = g.Users.Where(u => u.Role == UserRole.Owner && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList(),
+            AdminNames = g.Users.Where(u => u.Role == UserRole.GroupAdmin && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList()
         }).ToListAsync();
         return groups;
     }
@@ -41,8 +42,9 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
     }
 
     /// <summary>
-    /// Creates an investment group, optionally with its owners and restaurants in one step.
-    /// Every owner created here owns every restaurant created here; adjust afterwards on each restaurant's Staff screen.
+    /// Creates an investment group with its group administrators (at least one), and optionally its restaurant
+    /// owners and restaurants, in one step. Each restaurant lists which of the new owners own it (all of them when
+    /// not specified); restaurants with no owner are run by the group administrators.
     /// </summary>
     [HttpPost]
     [Authorize(Roles = "SuperAdmin")]
@@ -54,14 +56,19 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
 
         var ownerRequests = req.Owners.ToList();
         if (req.FirstOwner is not null) ownerRequests.Insert(0, req.FirstOwner);
-        var usernames = ownerRequests.Select(o => o.Username.Trim().ToLowerInvariant()).ToList();
-        if (usernames.Distinct().Count() != usernames.Count) return BadRequest(new { message = "Each owner needs a different username." });
-        foreach (var o in ownerRequests)
+        var people = req.Admins.Select(a => (req: a, role: UserRole.GroupAdmin)).Concat(ownerRequests.Select(o => (req: o, role: UserRole.Owner))).ToList();
+        if (req.Admins.Count == 0) return BadRequest(new { message = "Add at least one group administrator. They manage every account and restaurant in the group." });
+        var usernames = people.Select(p => p.req.Username.Trim().ToLowerInvariant()).ToList();
+        if (usernames.Distinct().Count() != usernames.Count) return BadRequest(new { message = "Each person needs a different username." });
+        foreach (var (p, role) in people)
         {
-            if (string.IsNullOrWhiteSpace(o.Password) || o.Password.Length < 8)
-                return BadRequest(new { message = $"Owner {o.DisplayName} needs a temporary password of at least 8 characters." });
-            if (string.IsNullOrWhiteSpace(o.DisplayName)) return BadRequest(new { message = "Every owner needs a display name." });
+            if (string.IsNullOrWhiteSpace(p.DisplayName)) return BadRequest(new { message = "Every person needs a name." });
+            if (string.IsNullOrWhiteSpace(p.Password) || p.Password.Length < 8)
+                return BadRequest(new { message = $"{RoleTitles.Of(role)} {p.DisplayName} needs a temporary password of at least 8 characters." });
         }
+        var ownerNames = ownerRequests.Select(o => o.Username.Trim().ToLowerInvariant()).ToHashSet();
+        var unknown = req.Restaurants.SelectMany(r => r.OwnerUsernames ?? []).Select(u => u.Trim().ToLowerInvariant()).Where(u => !ownerNames.Contains(u)).Distinct().ToList();
+        if (unknown.Count > 0) return BadRequest(new { message = $"Restaurant owners must be among the owners being created: {string.Join(", ", unknown)}." });
         var taken = await db.Users.Where(u => usernames.Contains(u.Username)).Select(u => u.Username).ToListAsync();
         if (taken.Count > 0) return Conflict(new { message = $"Username already taken: {string.Join(", ", taken)}." });
         if (req.Restaurants.Any(r => string.IsNullOrWhiteSpace(r.Name))) return BadRequest(new { message = "Every restaurant needs a name." });
@@ -74,27 +81,43 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
         }).ToList();
         db.Restaurants.AddRange(restaurants);
 
-        var owners = new List<AppUser>();
-        foreach (var o in ownerRequests)
+        var created = new List<AppUser>();
+        foreach (var (p, role) in people)
         {
-            var owner = new AppUser
+            var username = p.Username.Trim().ToLowerInvariant();
+            var user = new AppUser
             {
-                Group = group, Username = o.Username.Trim().ToLowerInvariant(), DisplayName = o.DisplayName.Trim(), Email = string.IsNullOrWhiteSpace(o.Email) ? null : o.Email.Trim(),
-                Role = UserRole.Owner, Permissions = ManagerPermission.All, IsActive = true, MustChangePassword = true
+                Group = group, Username = username, DisplayName = p.DisplayName.Trim(), Email = string.IsNullOrWhiteSpace(p.Email) ? null : p.Email.Trim(),
+                Role = role, Permissions = ManagerPermission.None, IsActive = true, MustChangePassword = true
             };
-            owner.PasswordHash = hasher.HashPassword(owner, o.Password!);
-            foreach (var r in restaurants) owner.UserRestaurants.Add(new UserRestaurant { Restaurant = r });
-            owners.Add(owner);
+            user.PasswordHash = hasher.HashPassword(user, p.Password!);
+            if (role == UserRole.Owner)
+                for (var i = 0; i < restaurants.Count; i++)
+                {
+                    var listed = req.Restaurants[i].OwnerUsernames;
+                    if (listed is null || listed.Any(u => u.Trim().ToLowerInvariant() == username))
+                        user.UserRestaurants.Add(new UserRestaurant { Restaurant = restaurants[i] });
+                }
+            created.Add(user);
         }
-        db.Users.AddRange(owners);
+        db.Users.AddRange(created);
         await db.SaveChangesAsync();
+        var owners = created.Where(u => u.Role == UserRole.Owner).ToList();
+        var admins = created.Where(u => u.Role == UserRole.GroupAdmin).ToList();
 
         await settings.SaveAsync(group.Id, new GroupSettings { GroupDisplayName = group.Name, UpdatedAt = DateTime.UtcNow, UpdatedBy = me.Username });
         await audit.LogAsync(me, "GroupCreated", "Group", group.Id,
-            new { group.Name, Owners = owners.Select(o => o.Username).ToArray(), Restaurants = restaurants.Select(r => r.Name).ToArray() }, groupId: group.Id);
-        return new GroupDto(group.Id, group.Name, group.IsActive, group.CreatedAt, restaurants.Count, owners.Count, 0)
+            new
+            {
+                group.Name,
+                Administrators = admins.Select(o => o.Username).ToArray(),
+                Owners = owners.Select(o => new { o.Username, Restaurants = o.UserRestaurants.Select(ur => ur.Restaurant.Name).ToArray() }).ToArray(),
+                Restaurants = restaurants.Select(r => r.Name).ToArray()
+            }, groupId: group.Id);
+        return new GroupDto(group.Id, group.Name, group.IsActive, group.CreatedAt, restaurants.Count, created.Count, 0)
         {
-            OwnerNames = owners.Select(o => o.DisplayName).OrderBy(n => n).ToList()
+            OwnerNames = owners.Select(o => o.DisplayName).OrderBy(n => n).ToList(),
+            AdminNames = admins.Select(o => o.DisplayName).OrderBy(n => n).ToList()
         };
     }
 
@@ -117,6 +140,7 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
         g.Id, g.Name, g.IsActive, g.CreatedAt, g.Restaurants.Count, g.Users.Count(u => u.IsActive),
         db.Comments.Count(c => c.Restaurant.GroupId == g.Id))
     {
-        OwnerNames = g.Users.Where(u => u.Role == UserRole.Owner && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList()
+        OwnerNames = g.Users.Where(u => u.Role == UserRole.Owner && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList(),
+        AdminNames = g.Users.Where(u => u.Role == UserRole.GroupAdmin && u.IsActive).OrderBy(u => u.DisplayName).Select(u => u.DisplayName).ToList()
     }).FirstAsync();
 }

@@ -20,14 +20,17 @@ public class SettingsController(IGroupSettingsStore store, AuditService audit, C
         return await store.GetAsync(me.GroupId.Value, ct);
     }
 
+    /// <summary>Settings apply to every restaurant in the group, so only system and group administrators change them.</summary>
     [HttpPut]
-    [Authorize(Roles = "Owner,SuperAdmin")]
+    [Authorize(Roles = "GroupAdmin,SuperAdmin")]
     public async Task<ActionResult<GroupSettings>> Put(GroupSettings settings, CancellationToken ct)
     {
         var me = await users.GetAsync();
         if (me.GroupId is null) return BadRequest(new { message = "Select an investment group first." });
         settings.CouponOffers = Clean(settings.CouponOffers);
         settings.ReasonCategories = Clean(settings.ReasonCategories);
+        settings.ReplyMethods = Clean(settings.ReplyMethods);
+        if (settings.ReplyMethods.Count == 0) settings.ReplyMethods = new GroupSettings().ReplyMethods;
         if (settings.ReasonCategories.Count == 0) return BadRequest(new { message = "At least one reason category is required." });
         settings.CouponValidityMonths = Math.Clamp(settings.CouponValidityMonths, 1, 24);
         settings.DuplicateWindowDays = Math.Clamp(settings.DuplicateWindowDays, 0, 365);
@@ -40,7 +43,7 @@ public class SettingsController(IGroupSettingsStore store, AuditService audit, C
     }
 
     [HttpGet("storage")]
-    [Authorize(Roles = "Owner,SuperAdmin")]
+    [Authorize(Roles = "Owner,GroupAdmin,SuperAdmin")]
     public ActionResult<object> Storage() => new { store = store.Description };
 
 

@@ -181,6 +181,7 @@ public class ApiTests(ApiFactory factory)
         var created = await admin.PostAsJsonAsync("/api/groups", new GroupRequest
         {
             Name = "Second Group",
+            Admins = [new UserRequest { Username = "admin2", DisplayName = "Admin Two", Password = "Admin2Pass!", Role = "GroupAdmin" }],
             FirstOwner = new UserRequest { Username = "owner2", DisplayName = "Owner Two", Password = "Owner2Pass!", Role = "Owner" }
         });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);

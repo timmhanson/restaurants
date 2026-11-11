@@ -1,4 +1,4 @@
-export type Role = 'SuperAdmin' | 'Owner' | 'Manager' | 'TeamMember'
+export type Role = 'SuperAdmin' | 'GroupAdmin' | 'Owner' | 'Manager' | 'TeamMember'
 
 export type Permission =
   | 'ViewComments' | 'EditComments' | 'DeleteComments' | 'MarkResponded'
@@ -10,6 +10,8 @@ export interface UserDto {
   displayName: string
   email?: string | null
   role: Role
+  /** Display title, e.g. "Group Administrator". */
+  roleTitle: string
   groupId?: number | null
   groupName?: string | null
   permissions: number
@@ -58,6 +60,8 @@ export interface RestaurantDto {
   teamLoginCount?: number
   ownedByMe?: boolean
   canManage?: boolean
+  /** An owner may mark this restaurant as theirs (no owner yet, and no group administrator to decide). */
+  canClaim?: boolean
 }
 
 export interface StaffMember {
@@ -78,6 +82,10 @@ export interface StaffResponse {
   owners: StaffMember[]
   managers: StaffMember[]
   teamLogins: StaffMember[]
+  /** Group administrators see every restaurant without being assigned. */
+  groupAdmins: PersonRef[]
+  /** False when the group has a group administrator, so a restaurant may have no specific owner. */
+  ownerRequired: boolean
 }
 
 export interface RestaurantRequest {
@@ -88,6 +96,8 @@ export interface RestaurantRequest {
   zip?: string | null
   phone?: string | null
   isActive: boolean
+  /** Group creation only: usernames of the new owners who own this restaurant. */
+  ownerUsernames?: string[] | null
 }
 
 export interface GroupDto {
@@ -99,12 +109,14 @@ export interface GroupDto {
   userCount: number
   commentCount: number
   ownerNames: string[]
+  adminNames: string[]
 }
 
 export interface GroupRequest {
   name: string
   isActive: boolean
   firstOwner?: UserRequest | null
+  admins?: UserRequest[]
   owners?: UserRequest[]
   restaurants?: RestaurantRequest[]
 }
@@ -118,6 +130,7 @@ export interface GroupSettings {
   couponValidityMonths: number
   duplicateWindowDays: number
   repeatGuestAlertThreshold: number
+  replyMethods: string[]
   requirePhoneOrAddress: boolean
   updatedAt?: string | null
   updatedBy?: string | null
@@ -170,7 +183,36 @@ export interface CommentSummary {
   updatedAt?: string | null
   guestKey: string
   guestCommentCount: number
+  replyMethod?: string | null
+  repliedOn?: string | null
+  lastActivityAt?: string | null
+  noteCount: number
+  attemptCount: number
+  latestNote?: ActivityDto | null
 }
+
+export type ActivityKind = 'Note' | 'Attempt' | 'Replied' | 'Reopened'
+
+export interface ActivityDto {
+  id: number
+  kind: ActivityKind
+  method?: string | null
+  contactedOn?: string | null
+  text?: string | null
+  createdAt: string
+  createdByName: string
+  createdByRole: string
+}
+
+export interface FollowUpRequest {
+  kind: ActivityKind
+  method?: string | null
+  contactedOn?: string | null
+  text?: string | null
+  confirmed?: boolean
+}
+
+export interface FollowUpResponse { comment: CommentSummary; activity: ActivityDto[] }
 
 export interface DuplicateCheckResult {
   exactDuplicate: boolean
@@ -213,7 +255,33 @@ export interface AnalyticsDto {
   byMonth: CountItem[]
   byEnteredBy: CountItem[]
   topRepeatGuests: RepeatGuestItem[]
+  scope?: { id: number; name: string }[] | null
+  restaurants: RestaurantRollup[]
+  monthlyByRestaurant: RestaurantMonth[]
+  crossRestaurantGuests: number
+  avgDaysToReply?: number | null
+  waitingOverAWeek: number
+  byReplyMethod: CountItem[]
 }
+
+export interface RestaurantRollup {
+  restaurantId: number
+  name: string
+  total: number
+  responded: number
+  waiting: number
+  responseRate: number
+  guests: number
+  repeatGuests: number
+  avgPerWeek: number
+  avgDaysToReply?: number | null
+  waitingOverAWeek: number
+  oldestWaitingDays?: number | null
+  topReason?: string | null
+  lastVisit?: string | null
+}
+
+export interface RestaurantMonth { month: string; restaurantId: number; restaurant: string; count: number }
 
 export interface AuditDto {
   id: number

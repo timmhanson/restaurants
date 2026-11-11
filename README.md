@@ -11,22 +11,47 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 
 ## Roles and permissions
 
-| Role | Scope | Can |
+| Title (internal role) | Scope | Can |
 | --- | --- | --- |
-| **SuperAdmin** | every investment group | everything; create/administer groups, pick a group with the `X-Group-Id` header |
-| **Owner** | their group (many owners ↔ many restaurants) | enter cards, view/analyse/export, manage users, restaurants and settings |
-| **Manager** | one or more restaurants in the group | enter cards plus whatever an owner grants: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin |
-| **TeamMember** | the generic shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
+| **System Administrator** (`SuperAdmin`) | every investment group | everything; create groups and their administrators, pick a group with the `X-Group-Id` header |
+| **Group Administrator** (`GroupAdmin`) | one investment group | every restaurant, every user account (owners and other administrators included) and the group settings |
+| **Restaurant Owner** (`Owner`) | the restaurants they own | everything at those restaurants: cards, analytics, export, audit, staffing and co-owners. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
+| **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus whatever is granted: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin. Permissions apply at every restaurant they work at |
+| **Team Member** (`TeamMember`) | the shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
+
+Rules worth knowing:
+
+- A group always keeps at least one active Group Administrator; the last one cannot be suspended, removed or demoted.
+- Only administrators change roles, change another owner's account or edit group settings.
+- Suspending (`PUT /api/users/{id}/status`) blocks the whole account at once and is audited with every
+  restaurant affected, so the other owners see it. Removing someone who also works for other owners is
+  left to them or the administrators.
+- Owners see the audit log for their restaurants and the people who work there, not the whole group.
+- With a Group Administrator in the group, a restaurant may have no specific owner (the administrators run
+  it) and owners cannot claim restaurants themselves. In an older group without one, owners can still
+  claim a restaurant that has no owner, and every restaurant must keep one.
 
 ### Setting up a group
 
-1. A super admin creates the investment group on **Groups**, optionally with several owners and the
-   group's restaurants in the same step. Every owner created there starts out owning every restaurant.
+1. A System Administrator creates the investment group on **Groups** with at least one Group
+   Administrator, optional Restaurant Owners and the group's restaurants, ticking who owns each restaurant.
 2. **Set up** opens the group's **Restaurants & staff** page. Each restaurant's **Staff** screen lists the
    group's owners, managers and team logins as checkboxes, with quick-add for new people.
-3. Owners choose the restaurants they own (**I own this** / **Stop owning**) and can edit and staff only
-   those. They can add people only to restaurants they own, and every restaurant must keep at least one
-   owner. Super admins can edit and staff any restaurant.
+3. Owners staff only the restaurants they own; managers can be added at several owners' restaurants.
+
+### Following up on cards
+
+Each card has a follow-up history every manager of the restaurant can read:
+
+- **Record reply** asks how the guest was replied to (the group's reply methods, editable in Settings),
+  the date, what was sent or said, and a tick confirming the reply was actually sent or made.
+- **Log attempt** records a try that did not reach the guest, such as a voicemail.
+- **Reopen** puts a card back in the queue and needs a reason.
+- **Notes** are shared with the other managers and never change the status.
+
+The **Reply queue** on Comments lists every card still waiting, earliest visit first. Analytics rolls up
+all of a person's restaurants (or any chosen set) with a per-restaurant comparison, a monthly trend per
+restaurant, reply methods and the average days from visit to reply.
 
 Roles, permissions and restaurant assignments are read from the database on every request, so changes
 (including deactivating a user) take effect immediately without the person signing in again.
@@ -34,8 +59,8 @@ Roles, permissions and restaurant assignments are read from the database on ever
 Password rules: everyone can change their own password, but only with a 6-digit code emailed to the
 address on file (`POST /api/auth/change-password/request`, then `POST /api/auth/change-password` with the
 current password, new password and code; codes last 10 minutes, 5 attempts, one resend per minute).
-Owners and super admins can reset anyone's password (managers with `ManageTeamLogin` can reset the team
-login). A reset by someone else forces a new password at the next login, except for team logins, which
+Administrators can reset anyone's password in their scope, and owners can reset the managers and team
+logins at their restaurants (managers with `ManageTeamLogin` can reset the team login). A reset by someone else forces a new password at the next login, except for team logins, which
 usually have no email and are managed by the owner/manager.
 
 ## The card

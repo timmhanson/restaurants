@@ -9,13 +9,13 @@ public record ChangePasswordRequest([Required] string CurrentPassword, [Required
 public record CodeSentResponse(string EmailMasked, DateTime ExpiresAt, int ResendAfterSeconds);
 
 public record UserDto(
-    int Id, string Username, string DisplayName, string? Email, string Role, int? GroupId, string? GroupName, int Permissions, string[] PermissionNames,
+    int Id, string Username, string DisplayName, string? Email, string Role, string RoleTitle, int? GroupId, string? GroupName, int Permissions, string[] PermissionNames,
     int[] RestaurantIds, bool IsActive, bool MustChangePassword, DateTime CreatedAt, DateTime? LastLoginAt)
 {
     public static UserDto From(AppUser u) => new(
-        u.Id, u.Username, u.DisplayName, u.Email, u.Role.ToString(), u.GroupId, u.Group?.Name,
-        (int)(u.Role is UserRole.Owner or UserRole.SuperAdmin ? ManagerPermission.All : u.Permissions),
-        PermissionNamesOf(u.Role is UserRole.Owner or UserRole.SuperAdmin ? ManagerPermission.All : u.Permissions),
+        u.Id, u.Username, u.DisplayName, u.Email, u.Role.ToString(), RoleTitles.Of(u.Role), u.GroupId, u.Group?.Name,
+        (int)(RoleTitles.HasAllPermissions(u.Role) ? ManagerPermission.All : u.Permissions),
+        PermissionNamesOf(RoleTitles.HasAllPermissions(u.Role) ? ManagerPermission.All : u.Permissions),
         u.UserRestaurants.Select(x => x.RestaurantId).OrderBy(x => x).ToArray(),
         u.IsActive, u.MustChangePassword, u.CreatedAt, u.LastLoginAt);
 
@@ -40,10 +40,13 @@ public class UserRequest
 }
 
 public record SetPasswordRequest([Required, MinLength(8)] string Password);
+/// <summary>Suspend (Active = false) or restore someone's access to every restaurant they work at.</summary>
+public record UserStatusRequest(bool Active);
 
 public record GroupDto(int Id, string Name, bool IsActive, DateTime CreatedAt, int RestaurantCount, int UserCount, int CommentCount)
 {
     public List<string> OwnerNames { get; init; } = [];
+    public List<string> AdminNames { get; init; } = [];
 }
 
 public class GroupRequest
@@ -52,7 +55,9 @@ public class GroupRequest
     public bool IsActive { get; set; } = true;
     /// <summary>Optionally create the group's first owner at the same time (kept for older clients; prefer Owners).</summary>
     public UserRequest? FirstOwner { get; set; }
-    /// <summary>Owners to create with the group. Each owns every restaurant created with it.</summary>
+    /// <summary>Group administrators to create with the group. A new group needs at least one.</summary>
+    public List<UserRequest> Admins { get; set; } = [];
+    /// <summary>Restaurant owners to create with the group. Which restaurants each owns is set on each restaurant.</summary>
     public List<UserRequest> Owners { get; set; } = [];
     /// <summary>Restaurants to create with the group.</summary>
     public List<RestaurantRequest> Restaurants { get; set; } = [];
@@ -71,12 +76,20 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
     public int? TeamLoginCount { get; init; }
     public bool? OwnedByMe { get; init; }
     public bool? CanManage { get; init; }
+    /// <summary>An owner may mark this restaurant as theirs (no owner yet, and no group administrator to decide).</summary>
+    public bool? CanClaim { get; init; }
 
     public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive);
 }
 
 public record StaffMember(int Id, string DisplayName, string Username, string? Email, string Role, string[] PermissionNames, bool Assigned, bool IsActive, string[] OtherRestaurants);
-public record StaffResponse(RestaurantDto Restaurant, bool CanManage, List<StaffMember> Owners, List<StaffMember> Managers, List<StaffMember> TeamLogins);
+public record StaffResponse(RestaurantDto Restaurant, bool CanManage, List<StaffMember> Owners, List<StaffMember> Managers, List<StaffMember> TeamLogins)
+{
+    /// <summary>Group administrators see every restaurant without being assigned; listed for information.</summary>
+    public List<PersonRef> GroupAdmins { get; init; } = [];
+    /// <summary>False when the group has a group administrator, so a restaurant may have no specific owner.</summary>
+    public bool OwnerRequired { get; init; } = true;
+}
 public record StaffRequest(int[] UserIds);
 public record OwnershipRequest(bool Owned);
 
@@ -89,6 +102,8 @@ public class RestaurantRequest
     public string? Zip { get; set; }
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>Group creation only: usernames of the new owners who own this restaurant. Null means all of them.</summary>
+    public string[]? OwnerUsernames { get; set; }
 }
 
 public class CommentRequest
@@ -119,13 +134,48 @@ public record CommentSummary(
     bool Responded, DateTime? RespondedAt, string? RespondedByName, DateTime CreatedAt, string CreatedByName, DateTime? UpdatedAt,
     string GuestKey, int GuestCommentCount)
 {
+    public string? ReplyMethod { get; init; }
+    public DateOnly? RepliedOn { get; init; }
+    public DateTime? LastActivityAt { get; init; }
+    /// <summary>Follow-up counts and the latest note; filled in on lists and single reads.</summary>
+    public int NoteCount { get; init; }
+    public int AttemptCount { get; init; }
+    public ActivityDto? LatestNote { get; init; }
+
     public static CommentSummary From(GuestComment c, int guestCommentCount) => new(
         c.Id, c.RestaurantId, c.Restaurant?.Name ?? "", c.GuestFirstName, c.GuestLastName, c.Phone,
         c.StreetAddress, c.City, c.State, c.Zip, c.CouponOffer, c.DateIssued, c.ExpiresOn,
         c.AuthorizedBy, c.VisitDate, c.VisitDate.DayOfWeek.ToString(), c.Reason, c.ReasonDetails, c.Notes,
         c.Responded, c.RespondedAt, c.RespondedByName, c.CreatedAt, c.CreatedByName, c.UpdatedAt,
-        c.GuestKey, guestCommentCount);
+        c.GuestKey, guestCommentCount)
+    {
+        ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
+    };
 }
+
+public record ActivityDto(int Id, string Kind, string? Method, DateOnly? ContactedOn, string? Text, DateTime CreatedAt, string CreatedByName, string CreatedByRole)
+{
+    public static ActivityDto From(CommentActivity a) =>
+        new(a.Id, a.Kind.ToString(), a.Method, a.ContactedOn, a.Text, a.CreatedAt, a.CreatedByName, RoleTitles.Of(a.CreatedByRole));
+}
+
+/// <summary>
+/// Add to a comment's follow-up history.
+///  - Note: text for the other managers.
+///  - Attempt: tried to reach the guest (method, date, what happened).
+///  - Replied: confirms the reply was sent; needs a method, the date and Confirmed = true.
+///  - Reopened: the reply did not happen or needs redoing; needs a reason.
+/// </summary>
+public class FollowUpRequest
+{
+    [Required] public string Kind { get; set; } = "Note";
+    [MaxLength(100)] public string? Method { get; set; }
+    public DateOnly? ContactedOn { get; set; }
+    [MaxLength(2000)] public string? Text { get; set; }
+    public bool Confirmed { get; set; }
+}
+
+public record FollowUpResponse(CommentSummary Comment, List<ActivityDto> Activity);
 
 public record DuplicateCheckResult(
     bool ExactDuplicate, bool LikelyDuplicate, bool RepeatGuest, int PriorCount, int Threshold, string GuestKey,
@@ -142,7 +192,29 @@ public record AnalyticsDto(
     int TotalComments, int Responded, int Unresponded, int DistinctGuests, int RepeatGuests, double AvgPerWeek,
     List<CountItem> ByDayOfWeek, List<CountItem> ByReason, List<CountItem> ByCouponOffer, List<CountItem> ByRestaurant,
     List<CountItem> ByWeek, List<CountItem> ByMonth, List<CountItem> ByEnteredBy,
-    List<RepeatGuestItem> TopRepeatGuests);
+    List<RepeatGuestItem> TopRepeatGuests)
+{
+    /// <summary>Restaurants included in these figures.</summary>
+    public List<NamedRef>? Scope { get; init; }
+    /// <summary>Side-by-side comparison, one row per restaurant in scope (including ones with no cards).</summary>
+    public List<RestaurantRollup> Restaurants { get; init; } = [];
+    /// <summary>Cards per month per restaurant, for the trend chart.</summary>
+    public List<RestaurantMonth> MonthlyByRestaurant { get; init; } = [];
+    /// <summary>Guests with cards at more than one restaurant in scope.</summary>
+    public int CrossRestaurantGuests { get; init; }
+    /// <summary>Average days from the guest's visit to the reply, over replied cards with a reply date.</summary>
+    public double? AvgDaysToReply { get; init; }
+    /// <summary>Unreplied cards whose visit was more than a week ago.</summary>
+    public int WaitingOverAWeek { get; init; }
+    public List<CountItem> ByReplyMethod { get; init; } = [];
+}
+
+public record RestaurantRollup(
+    int RestaurantId, string Name, int Total, int Responded, int Waiting, double ResponseRate, int Guests, int RepeatGuests,
+    double AvgPerWeek, double? AvgDaysToReply, int WaitingOverAWeek, int? OldestWaitingDays, string? TopReason, DateOnly? LastVisit);
+
+public record NamedRef(int Id, string Name);
+public record RestaurantMonth(string Month, int RestaurantId, string Restaurant, int Count);
 
 public record CountItem(string Label, int Count, int? Responded = null);
 public record RepeatGuestItem(string GuestKey, string Name, string? Phone, string? Address, int Count, DateOnly LastVisit, string[] Restaurants, string[] Reasons);

@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { roleTitle } from '../auth/roles'
 
 export default function Layout() {
-  const { user, logout, has, isAdmin, isSuperAdmin, isTeamMember, groups, groupId, selectGroup, settings, restaurants } = useAuth()
+  const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, selectGroup, settings, restaurants } = useAuth()
   const [open, setOpen] = useState(false)
   const nav = useNavigate()
   if (!user) return null
@@ -14,7 +15,7 @@ export default function Layout() {
     { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
     { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
     { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },
-    { to: '/settings', label: 'Settings', show: isAdmin },
+    { to: '/settings', label: 'Settings', show: isGroupWide },
     { to: '/audit', label: 'Audit log', show: has('ViewAudit') },
     { to: '/groups', label: 'Groups', show: isSuperAdmin },
   ]
@@ -55,7 +56,7 @@ export default function Layout() {
         )}
         <div className="user-menu">
           <span className="user-name">
-            {user.displayName} <small>({user.role === 'TeamMember' ? 'Team' : user.role === 'SuperAdmin' ? 'Super admin' : user.role})</small>
+            {user.displayName} <small>({roleTitle(user.role)})</small>
           </span>
           <NavLink to="/password" className="btn btn-sm">
             Password

@@ -19,7 +19,7 @@ function Guard({ allow, children }: { allow: boolean; children: React.ReactEleme
 }
 
 export default function App() {
-  const { user, loading, mustChangePassword, has, isAdmin, isSuperAdmin } = useAuth()
+  const { user, loading, mustChangePassword, has, isAdmin, isSuperAdmin, isGroupWide } = useAuth()
   if (loading) return <Spinner label="Starting…" />
   if (!user) {
     return (
@@ -49,7 +49,7 @@ export default function App() {
         <Route path="/analytics" element={<Guard allow={perm('ViewAnalytics')}><AnalyticsPage /></Guard>} />
         <Route path="/users" element={<Guard allow={isAdmin || perm('ManageTeamLogin')}><UsersPage /></Guard>} />
         <Route path="/restaurants" element={<Guard allow={isAdmin}><RestaurantsPage /></Guard>} />
-        <Route path="/settings" element={<Guard allow={isAdmin}><SettingsPage /></Guard>} />
+        <Route path="/settings" element={<Guard allow={isGroupWide}><SettingsPage /></Guard>} />
         <Route path="/audit" element={<Guard allow={perm('ViewAudit')}><AuditPage /></Guard>} />
         <Route path="/groups" element={<Guard allow={isSuperAdmin}><GroupsPage /></Guard>} />
         <Route path="*" element={<Navigate to="/enter" replace />} />

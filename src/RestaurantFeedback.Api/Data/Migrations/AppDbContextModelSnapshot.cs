@@ -133,6 +133,49 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("AuditLogs");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CommentActivity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CommentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly?>("ContactedOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedByName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CreatedByRole")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Method")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommentId", "CreatedAt");
+
+                    b.ToTable("CommentActivities");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GuestComment", b =>
                 {
                     b.Property<int>("Id")
@@ -179,6 +222,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("LastActivityAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("NameNormalized")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -197,6 +243,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ReasonDetails")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("RepliedOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReplyMethod")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("Responded")

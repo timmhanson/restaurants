@@ -1,12 +1,37 @@
 namespace RestaurantFeedback.Api.Models;
 
+/// <summary>
+/// Roles, from widest to narrowest. Stored as numbers, so new roles are appended rather than inserted.
+/// Display titles live in RoleTitles.
+/// </summary>
 public enum UserRole
 {
-    /// <summary>Administers every investment group. Not a member of any group.</summary>
+    /// <summary>System Administrator: administers every investment group. Not a member of any group.</summary>
     SuperAdmin = 0,
+    /// <summary>Restaurant Owner: everything at the restaurants they own, including the people who work there.</summary>
     Owner = 1,
+    /// <summary>Manager: works at one or more restaurants, with the permissions the owners grant.</summary>
     Manager = 2,
-    TeamMember = 3
+    /// <summary>Team Member: a shared login that can only enter guest cards.</summary>
+    TeamMember = 3,
+    /// <summary>Group Administrator: everything in one investment group, including every user account.</summary>
+    GroupAdmin = 4
+}
+
+public static class RoleTitles
+{
+    public static string Of(UserRole role) => role switch
+    {
+        UserRole.SuperAdmin => "System Administrator",
+        UserRole.GroupAdmin => "Group Administrator",
+        UserRole.Owner => "Restaurant Owner",
+        UserRole.Manager => "Manager",
+        UserRole.TeamMember => "Team Member",
+        _ => role.ToString()
+    };
+
+    /// <summary>Roles that hold every manager permission automatically.</summary>
+    public static bool HasAllPermissions(UserRole role) => role is UserRole.SuperAdmin or UserRole.GroupAdmin or UserRole.Owner;
 }
 
 /// <summary>Fine-grained permissions an owner can grant to a manager. Owners always hold all of them.</summary>
@@ -121,11 +146,18 @@ public class GuestComment
     public string? ReasonDetails { get; set; }
     public string? Notes { get; set; }
 
-    // Follow-up
+    // Follow-up. The full history (attempts, replies, notes) lives in CommentActivity; these are the latest reply.
     public bool Responded { get; set; }
+    /// <summary>When the reply was confirmed in the app.</summary>
     public DateTime? RespondedAt { get; set; }
     public int? RespondedByUserId { get; set; }
     public string? RespondedByName { get; set; }
+    /// <summary>How the guest was replied to, e.g. "Mailed coupon card" or "Phone call".</summary>
+    public string? ReplyMethod { get; set; }
+    /// <summary>The day the reply was actually sent or made (may be earlier than RespondedAt).</summary>
+    public DateOnly? RepliedOn { get; set; }
+    /// <summary>Last note, attempt or reply, so lists can show what is new.</summary>
+    public DateTime? LastActivityAt { get; set; }
 
     // Duplicate detection keys (derived, see GuestMatcher)
     public string GuestKey { get; set; } = "";
@@ -139,6 +171,34 @@ public class GuestComment
     public DateTime? UpdatedAt { get; set; }
     public int? UpdatedByUserId { get; set; }
     public bool IsDeleted { get; set; }
+}
+
+public enum ActivityKind
+{
+    /// <summary>A note for the other managers. Does not change the reply status.</summary>
+    Note = 0,
+    /// <summary>Tried to reach the guest without completing the reply, e.g. left a voicemail.</summary>
+    Attempt = 1,
+    /// <summary>The manager confirmed the guest was replied to.</summary>
+    Replied = 2,
+    /// <summary>The reply was undone and the comment needs a reply again.</summary>
+    Reopened = 3
+}
+
+/// <summary>One entry in a comment's follow-up history, shared by every manager who can see the comment.</summary>
+public class CommentActivity
+{
+    public int Id { get; set; }
+    public int CommentId { get; set; }
+    public ActivityKind Kind { get; set; }
+    public string? Method { get; set; }
+    /// <summary>Day the guest was contacted (attempts and replies).</summary>
+    public DateOnly? ContactedOn { get; set; }
+    public string? Text { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public int CreatedByUserId { get; set; }
+    public string CreatedByName { get; set; } = "";
+    public UserRole CreatedByRole { get; set; }
 }
 
 public class AuditLog

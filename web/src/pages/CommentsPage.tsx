@@ -4,16 +4,18 @@ import type { CommentSummary, PagedResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import CardForm, { cardFromSummary } from '../components/CardForm'
 import CommentDrawer from '../components/CommentDrawer'
+import { FollowUpBadge } from '../components/FollowUp'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, daysAgo, fmtDate } from '../components/ui'
 
-type Sort = 'visitDate' | 'createdAt' | 'guest' | 'reason'
+type Sort = 'visitDate' | 'createdAt' | 'guest' | 'reason' | 'lastActivity'
+type Status = '' | 'waiting' | 'needs-reply' | 'attempted' | 'replied'
 
 export default function CommentsPage() {
   const { restaurants, settings, has } = useAuth()
   const [restaurantId, setRestaurantId] = useState<number | ''>('')
   const [from, setFrom] = useState(daysAgo(90))
   const [to, setTo] = useState('')
-  const [responded, setResponded] = useState<'' | 'true' | 'false'>('')
+  const [status, setStatus] = useState<Status>('')
   const [reason, setReason] = useState('')
   const [search, setSearch] = useState('')
   const [repeatOnly, setRepeatOnly] = useState(false)
@@ -25,6 +27,7 @@ export default function CommentsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<CommentSummary | null>(null)
+  const [replyFirst, setReplyFirst] = useState(false)
   const [editing, setEditing] = useState<CommentSummary | null>(null)
   const [deleting, setDeleting] = useState<CommentSummary | null>(null)
   const [busy, setBusy] = useState(false)
@@ -34,7 +37,7 @@ export default function CommentsPage() {
     setError(null)
     try {
       const res = await api.get<PagedResult<CommentSummary>>(
-        `/comments${qs({ restaurantId, from, to, responded, reason, search, repeatOnly, sort, dir, page, pageSize })}`,
+        `/comments${qs({ restaurantId, from, to, status, reason, search, repeatOnly, sort, dir, page, pageSize })}`,
       )
       setData(res)
     } catch (e) {
@@ -42,7 +45,7 @@ export default function CommentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [restaurantId, from, to, responded, reason, search, repeatOnly, sort, dir, page])
+  }, [restaurantId, from, to, status, reason, search, repeatOnly, sort, dir, page])
 
   useEffect(() => {
     const t = window.setTimeout(() => void load(), search ? 350 : 0)
@@ -63,12 +66,18 @@ export default function CommentsPage() {
     setSelected((s) => (s && s.id === c.id ? c : s))
   }
 
-  const toggleResponded = async (c: CommentSummary) => {
-    try {
-      replaceRow(await api.post<CommentSummary>(`/comments/${c.id}/responded`, { responded: !c.responded }))
-    } catch (e) {
-      setError((e as Error).message)
-    }
+  const openComment = (c: CommentSummary, reply = false) => {
+    setReplyFirst(reply)
+    setSelected(c)
+  }
+
+  /** The reply queue: everything still waiting, longest wait (earliest visit) first. */
+  const showQueue = () => {
+    setStatus('waiting')
+    setSort('visitDate')
+    setDir('asc')
+    setFrom('')
+    setPage(1)
   }
 
   const doDelete = async () => {
@@ -88,6 +97,7 @@ export default function CommentsPage() {
 
   const exportCsv = async () => {
     try {
+      const responded = status === 'replied' ? 'true' : status ? 'false' : ''
       const blob = await api.blob(`/comments/export${qs({ restaurantId, from, to, responded })}`)
       downloadBlob(blob, `guest-comments-${new Date().toISOString().slice(0, 10)}.csv`)
     } catch (e) {
@@ -103,6 +113,9 @@ export default function CommentsPage() {
       <div className="page-head">
         <h1>Guest comments</h1>
         <span className="grow" />
+        {has('MarkResponded') && (
+          <button type="button" className="btn" onClick={showQueue}>Reply queue</button>
+        )}
         {has('ExportComments') && (
           <button type="button" className="btn" onClick={exportCsv}>
             ⬇ Download CSV
@@ -125,11 +138,13 @@ export default function CommentsPage() {
         <Field label="to">
           <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1) }} />
         </Field>
-        <Field label="Responded">
-          <select value={responded} onChange={(e) => { setResponded(e.target.value as typeof responded); setPage(1) }}>
+        <Field label="Follow-up">
+          <select value={status} onChange={(e) => { setStatus(e.target.value as Status); setPage(1) }}>
             <option value="">Any</option>
-            <option value="false">Not responded</option>
-            <option value="true">Responded</option>
+            <option value="waiting">Waiting for a reply</option>
+            <option value="needs-reply">Not tried yet</option>
+            <option value="attempted">Tried, not reached</option>
+            <option value="replied">Replied</option>
           </select>
         </Field>
         <Field label="Reason">
@@ -163,14 +178,14 @@ export default function CommentsPage() {
                 <th className="sortable" onClick={() => toggleSort('guest')}>Guest{arrow('guest')}</th>
                 <th className="sortable" onClick={() => toggleSort('reason')}>Reason{arrow('reason')}</th>
                 <th>Sent</th>
-                <th>Responded</th>
+                <th className="sortable" onClick={() => toggleSort('lastActivity')}>Follow-up{arrow('lastActivity')}</th>
                 <th className="sortable" onClick={() => toggleSort('createdAt')}>Entered{arrow('createdAt')}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {data.items.map((c) => (
-                <tr key={c.id} className="clickable" onClick={() => setSelected(c)}>
+                <tr key={c.id} className="clickable" onClick={() => openComment(c)}>
                   <td>{fmtDate(c.visitDate)}</td>
                   <td>{c.dayOfWeek.slice(0, 3)}</td>
                   {!restaurantId && restaurants.length > 1 && <td>{c.restaurantName}</td>}
@@ -188,16 +203,12 @@ export default function CommentsPage() {
                     {c.reasonDetails && <div className="muted" style={{ fontSize: '0.8rem', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reasonDetails}</div>}
                   </td>
                   <td>{c.couponOffer || <span className="muted">—</span>}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    {has('MarkResponded') ? (
-                      <label className="check">
-                        <input type="checkbox" checked={c.responded} onChange={() => void toggleResponded(c)} />
-                        {c.responded ? <Badge kind="ok">Yes</Badge> : <Badge kind="danger">No</Badge>}
-                      </label>
-                    ) : c.responded ? (
-                      <Badge kind="ok">Yes</Badge>
-                    ) : (
-                      <Badge kind="danger">No</Badge>
+                  <td>
+                    <FollowUpBadge c={c} />
+                    {c.noteCount > 0 && (
+                      <div className="small muted" title={c.latestNote ? `${c.latestNote.createdByName}: ${c.latestNote.text}` : undefined}>
+                        💬 {c.noteCount} note{c.noteCount === 1 ? '' : 's'}
+                      </div>
                     )}
                   </td>
                   <td>
@@ -206,6 +217,9 @@ export default function CommentsPage() {
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div className="row-actions">
+                      {has('MarkResponded') && !c.responded && (
+                        <button type="button" className="btn btn-sm btn-primary" onClick={() => openComment(c, true)}>Reply</button>
+                      )}
                       {has('EditComments') && (
                         <button type="button" className="btn btn-sm" onClick={() => setEditing(c)}>Edit</button>
                       )}
@@ -220,7 +234,7 @@ export default function CommentsPage() {
           </table>
           <div className="table-foot">
             <span>
-              {data.total} comment{data.total === 1 ? '' : 's'} · {openCount} on this page not responded
+              {data.total} comment{data.total === 1 ? '' : 's'} · {openCount} on this page waiting for a reply
             </span>
             <span className="grow" />
             <button type="button" className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹ Prev</button>
@@ -235,8 +249,9 @@ export default function CommentsPage() {
           comment={selected}
           onClose={() => setSelected(null)}
           onEdit={(c) => setEditing(c)}
-          onToggleResponded={(c) => void toggleResponded(c)}
+          onChanged={replaceRow}
           onDelete={(c) => setDeleting(c)}
+          startReply={replyFirst}
         />
       )}
       {editing && (

@@ -8,7 +8,7 @@ const pretty = (p: string) => p.replace(/([A-Z])/g, ' $1').trim()
 const address = (r: RestaurantDto) => [r.streetAddress, [r.city, r.state].filter(Boolean).join(', '), r.zip].filter(Boolean).join(' · ')
 
 export default function RestaurantsPage() {
-  const { user, refreshContext, isSuperAdmin, groupId } = useAuth()
+  const { user, refreshContext, isSuperAdmin, isGroupWide, groupId } = useAuth()
   const [list, setList] = useState<RestaurantDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -72,12 +72,15 @@ export default function RestaurantsPage() {
       </div>
       {needsGroup ? (
         <Alert kind="warn">Pick an investment group in the top bar (or use "Set up" on the Groups page) to manage its restaurants.</Alert>
-      ) : isSuperAdmin ? (
-        <p className="muted">As super admin you can edit and staff every restaurant in this group. Use <strong>Staff</strong> to choose each restaurant's owners, managers and team login.</p>
+      ) : isGroupWide ? (
+        <p className="muted">
+          As {isSuperAdmin ? 'System Administrator' : 'Group Administrator'} you can edit and staff every restaurant in this group. Use <strong>Staff</strong> to
+          choose each restaurant's owners, managers and team login. A restaurant with no specific owner is run by the group administrators.
+        </p>
       ) : (
         <p className="muted">
-          You manage the restaurants you own{mine.length ? ` (${mine.map((r) => r.name).join(', ')})` : ''}. If you co-own another restaurant in the group,
-          click <strong>I own this</strong>. Use <strong>Staff</strong> to choose who works at each of your restaurants.
+          You manage the restaurants you own{mine.length ? ` (${mine.map((r) => r.name).join(', ')})` : ''}. Use <strong>Staff</strong> to choose who works at
+          each of them, including co-owners. Your group administrators decide who owns the other restaurants.
         </p>
       )}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
@@ -103,7 +106,7 @@ export default function RestaurantsPage() {
                     {r.owners?.length ? (
                       <div className="people">{r.owners.map((o) => <Badge key={o.id} kind={o.id === user?.id ? 'accent' : 'neutral'}>{o.displayName}</Badge>)}</div>
                     ) : (
-                      <Badge kind="warn">No owner yet</Badge>
+                      <Badge kind="neutral" title="Run by the group administrators">No specific owner</Badge>
                     )}
                   </td>
                   <td className="num">{r.managerCount ?? 0}</td>
@@ -120,12 +123,12 @@ export default function RestaurantsPage() {
                       ) : (
                         <button type="button" className="btn btn-sm" onClick={() => setStaffing(r)}>View staff</button>
                       )}
-                      {user?.role === 'Owner' &&
-                        (r.ownedByMe ? (
-                          <button type="button" className="btn btn-sm" onClick={() => void setOwnership(r, false)}>Stop owning</button>
-                        ) : (
-                          <button type="button" className="btn btn-sm" onClick={() => void setOwnership(r, true)}>I own this</button>
-                        ))}
+                      {user?.role === 'Owner' && r.ownedByMe && (
+                        <button type="button" className="btn btn-sm" onClick={() => void setOwnership(r, false)}>Stop owning</button>
+                      )}
+                      {user?.role === 'Owner' && !r.ownedByMe && r.canClaim && (
+                        <button type="button" className="btn btn-sm" onClick={() => void setOwnership(r, true)}>I own this</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -137,11 +140,11 @@ export default function RestaurantsPage() {
       {editing && (
         <RestaurantModal
           restaurant={editing === 'new' ? null : editing}
-          isSuperAdmin={isSuperAdmin}
+          isSuperAdmin={isGroupWide}
           onClose={() => setEditing(null)}
           onSaved={(saved, isNew) => {
             setEditing(null)
-            void changed(isNew ? `${saved.name} was added.${isSuperAdmin ? ' Next, choose its owners and managers.' : ' You own it; choose its managers next.'}` : `${saved.name} was updated.`)
+            void changed(isNew ? `${saved.name} was added.${isGroupWide ? ' Next, choose its owners and managers.' : ' You own it; choose its managers next.'}` : `${saved.name} was updated.`)
             if (isNew) setStaffing(saved)
           }}
         />
@@ -173,7 +176,7 @@ export default function RestaurantsPage() {
 
 /** Choose who works at one restaurant: owners, managers and the shared team login. */
 function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDto; onClose: () => void; onSaved: (message: string) => void }) {
-  const { user, isSuperAdmin } = useAuth()
+  const { user } = useAuth()
   const [data, setData] = useState<StaffResponse | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [catalog, setCatalog] = useState<PermissionInfo[]>([])
@@ -210,7 +213,7 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
   const save = async () => {
     if (!data) return
     setError(null)
-    if (!data.owners.some((o) => selected.has(o.id))) return setError('Every restaurant needs at least one owner. Tick an owner before saving.')
+    if (data.ownerRequired && !data.owners.some((o) => selected.has(o.id))) return setError('Every restaurant needs at least one owner. Tick an owner before saving.')
     setBusy(true)
     try {
       await api.put(`/restaurants/${restaurant.id}/staff`, { userIds: [...selected] })
@@ -277,10 +280,22 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
         error ? <Alert kind="error">{error}</Alert> : <Spinner />
       ) : (
         <div className="grid">
-          {!canManage && <Alert kind="info">Only this restaurant's owners{isSuperAdmin ? '' : ' or a super admin'} can change who works here. Click "I own this" on the list if you are one of its owners.</Alert>}
+          {!canManage && <Alert kind="info">Only this restaurant's owners or a group administrator can change who works here.</Alert>}
           {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
-          {section('Owners', 'Owner', data.owners, 'Owners see everything for this restaurant and decide who works here. A restaurant can have several owners.', '+ New owner')}
-          {section('Managers', 'Manager', data.managers, 'Managers can belong to several restaurants. What each one may do is set when you create or edit them.', '+ New manager')}
+          {data.groupAdmins.length > 0 && (
+            <p className="muted" style={{ margin: 0 }}>
+              Group administrators ({data.groupAdmins.map((a) => a.displayName).join(', ')}) see and manage every restaurant, so they are not listed below.
+            </p>
+          )}
+          {section(
+            'Owners',
+            'Owner',
+            data.owners,
+            'Owners see everything for this restaurant, decide who works here, and can reset or suspend its managers and team login. ' +
+              (data.ownerRequired ? 'Every restaurant needs at least one owner.' : 'Leave empty if the group administrators run it directly.'),
+            '+ New owner',
+          )}
+          {section('Managers', 'Manager', data.managers, 'Managers can work at several restaurants, even ones with different owners. What each one may do is set on the Users page and applies everywhere they work.', '+ New manager')}
           {section('Team login', 'TeamMember', data.teamLogins, 'One shared login for the crew at this restaurant. It can only enter cards.', '+ New team login')}
           <div className="actions">
             <button type="button" className="btn" onClick={onClose} disabled={busy}>{canManage ? 'Cancel' : 'Close'}</button>

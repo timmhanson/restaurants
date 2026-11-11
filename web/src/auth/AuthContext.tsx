@@ -17,8 +17,12 @@ interface AuthState {
   refreshContext: () => Promise<void>
   refreshGroups: () => Promise<void>
   has: (p: Permission) => boolean
+  /** System administrators, group administrators and restaurant owners (owners only for their restaurants). */
   isAdmin: boolean
   isSuperAdmin: boolean
+  isGroupAdmin: boolean
+  /** System or group administrator: everything in the group. */
+  isGroupWide: boolean
   isTeamMember: boolean
 }
 
@@ -33,7 +37,7 @@ const defaultSettings: GroupSettings = {
   couponValidityMonths: 3,
   duplicateWindowDays: 7,
   repeatGuestAlertThreshold: 2,
-  requirePhoneOrAddress: true,
+  requirePhoneOrAddress: true, replyMethods: [],
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -141,7 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [settings?.accentColor])
 
   const value = useMemo<AuthState>(() => {
-    const isAdmin = user?.role === 'Owner' || user?.role === 'SuperAdmin'
+    const isGroupWide = user?.role === 'SuperAdmin' || user?.role === 'GroupAdmin'
+    const isAdmin = isGroupWide || user?.role === 'Owner'
     return {
       user,
       loading,
@@ -159,6 +164,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       has: (p) => isAdmin || (user?.role === 'Manager' && user.permissionNames.includes(p)),
       isAdmin,
       isSuperAdmin: user?.role === 'SuperAdmin',
+      isGroupAdmin: user?.role === 'GroupAdmin',
+      isGroupWide,
       isTeamMember: user?.role === 'TeamMember',
     }
   }, [user, loading, mustChangePassword, restaurants, settings, groups, groupId, login, logout, applyLogin, selectGroup, refreshContext, refreshGroups])
