@@ -88,7 +88,7 @@ public class GroupsController(AppDbContext db, IPasswordHasher<AppUser> hasher, 
             var user = new AppUser
             {
                 Group = group, Username = username, DisplayName = p.DisplayName.Trim(), Email = string.IsNullOrWhiteSpace(p.Email) ? null : p.Email.Trim(),
-                Role = role, Permissions = ManagerPermission.None, IsActive = true, MustChangePassword = true
+                Role = role, Permissions = ManagerPermission.None, IsActive = true, MustChangePassword = !string.IsNullOrWhiteSpace(p.Email)
             };
             user.PasswordHash = hasher.HashPassword(user, p.Password!);
             if (role == UserRole.Owner)

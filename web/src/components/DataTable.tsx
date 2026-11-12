@@ -11,6 +11,8 @@ export interface Column<T> {
   /** Leave out of the CSV (e.g. action buttons). */
   noCsv?: boolean
   noSort?: boolean
+  /** In the CSV download only, not on screen (e.g. an email shown under the name). */
+  csvOnly?: boolean
 }
 
 /** A sortable table with a CSV download of exactly what is shown, in the shown order. */
@@ -34,6 +36,7 @@ export default function DataTable<T>({
   empty?: string
 }) {
   const [sort, setSort] = useState(defaultSort ?? { key: columns[0].key, desc: false })
+  const shown = columns.filter((c) => !c.csvOnly)
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sort.key)
     if (!col) return rows
@@ -75,7 +78,7 @@ export default function DataTable<T>({
           <table>
             <thead>
               <tr>
-                {columns.map((c) =>
+                {shown.map((c) =>
                   c.noSort ? (
                     <th key={c.key} className={c.num ? 'num' : ''}>{c.label}</th>
                   ) : (
@@ -95,7 +98,7 @@ export default function DataTable<T>({
             <tbody>
               {sorted.map((r) => (
                 <tr key={rowKey(r)}>
-                  {columns.map((c) => (
+                  {shown.map((c) => (
                     <td key={c.key} className={c.num ? 'num' : ''}>
                       {c.render ? c.render(r) : (c.value(r) ?? <span className="muted">—</span>)}
                     </td>

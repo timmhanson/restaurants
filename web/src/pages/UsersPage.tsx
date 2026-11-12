@@ -274,7 +274,10 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
     isActive: user?.isActive ?? true,
     requirePasswordChange: true,
   })
-  const showWaive = canWaive(myRole) && v.role !== 'TeamMember' && Boolean(v.password) && (!user || user.id !== meId)
+  // A new login starts with no kind chosen, so a shared team login is never created as a manager by accident.
+  const [rolePicked, setRolePicked] = useState(Boolean(user))
+  const hasEmail = Boolean(v.email?.trim())
+  const showWaive = canWaive(myRole) && v.role !== 'TeamMember' && hasEmail && Boolean(v.password) && (!user || user.id !== meId)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -292,6 +295,7 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
+    if (!rolePicked) return setError('Choose what kind of login this is.')
     if (!user && !v.password) return setError('A password is required for a new user.')
     if (!groupWideRole(v.role) && v.restaurantIds.length === 0) return setError('Pick at least one restaurant.')
     setBusy(true)
@@ -317,7 +321,7 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
 
   // Which roles this person may hand out. Only administrators change an existing account's role.
   const roles: Role[] =
-    myRole === 'SuperAdmin' ? ['SuperAdmin', 'GroupAdmin', 'Owner', 'Manager', 'TeamMember']
+    myRole === 'SuperAdmin' ? ['GroupAdmin', 'Owner', 'Manager', 'TeamMember'] // System Administrators are added on People
       : myRole === 'GroupAdmin' ? ['GroupAdmin', 'Owner', 'Manager', 'TeamMember']
         : myRole === 'Owner' ? ['Owner', 'Manager', 'TeamMember']
           : ['TeamMember']
@@ -328,7 +332,33 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
     <Modal title={user ? `Edit ${user.displayName}` : 'Add user'} onClose={onClose} wide>
       <form onSubmit={submit} className="grid">
         {error && <Alert kind="error">{error}</Alert>}
+        {!user && (
+          <fieldset className="role-choice">
+            <legend>What kind of login is this?</legend>
+            <div className="source-choice" role="radiogroup">
+              {[...roles].reverse().map((r) => (
+                <label key={r} className={rolePicked && v.role === r ? 'selected' : ''}>
+                  <input
+                    type="radio"
+                    name="new-role"
+                    value={r}
+                    checked={rolePicked && v.role === r}
+                    onChange={() => {
+                      setV((s) => ({ ...s, role: r }))
+                      setRolePicked(true)
+                    }}
+                  />
+                  <span className="source-label">{r === 'TeamMember' ? 'Team Member (shared login)' : roleTitle(r)}</span>
+                  <span className="source-hint">{ROLE_HELP[r]}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        {rolePicked && (
+        <>
         <div className="form-row">
+          {user && (
           <Field label="Role">
             <select value={v.role} onChange={(e) => setV((s) => ({ ...s, role: e.target.value as Role }))} disabled={roleLocked}>
               {roles.map((r) => (
@@ -337,13 +367,14 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
               {roleLocked && !roles.includes(v.role) && <option value={v.role}>{roleTitle(v.role)}</option>}
             </select>
           </Field>
+          )}
           <Field label="Access">
             <select value={v.isActive ? '1' : '0'} onChange={(e) => setV((s) => ({ ...s, isActive: e.target.value === '1' }))} disabled={user?.id === meId}>
               <option value="1">Active</option><option value="0">Suspended</option>
             </select>
           </Field>
         </div>
-        <p className="muted" style={{ margin: 0 }}>{ROLE_HELP[v.role]}{roleLocked && user && user.id !== meId ? ' Only an investment group administrator can change roles.' : ''}</p>
+        {user && <p className="muted" style={{ margin: 0 }}>{ROLE_HELP[v.role]}{roleLocked && user && user.id !== meId ? ' Only an investment group administrator can change roles.' : ''}</p>}
         {elsewhere.length > 0 && (
           <Alert kind="info">
             {user!.displayName} also works at {elsewhere.map(restaurantName).join(', ')}. Those assignments stay as they are, but permission changes and
@@ -359,7 +390,7 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
           </Field>
         </div>
         <div className="form-row">
-          <Field label="Email (optional)">
+          <Field label={v.role === 'TeamMember' ? 'Email (optional)' : 'Email'} hint={v.role === 'TeamMember' ? undefined : 'Needed for them to change their own password.'}>
             <input type="email" value={v.email ?? ''} onChange={(e) => setV((s) => ({ ...s, email: e.target.value }))} autoComplete="off" />
           </Field>
           <Field
@@ -367,9 +398,11 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
             hint={
               v.role === 'TeamMember'
                 ? 'Shared with the crew; they will not be asked to change it.'
-                : v.requirePasswordChange || !canWaive(myRole)
-                  ? 'They must change it at their next sign-in.'
-                  : 'They can keep this password.'
+                : !hasEmail
+                  ? 'With no email they keep this password (a new one needs a code sent by email).'
+                  : v.requirePasswordChange || !canWaive(myRole)
+                    ? 'They must change it at their next sign-in.'
+                    : 'They can keep this password.'
             }
           >
             <input type="password" value={v.password ?? ''} onChange={(e) => setV((s) => ({ ...s, password: e.target.value }))} minLength={8} autoComplete="new-password" required={!user} />
@@ -416,6 +449,8 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
             </div>
           </Field>
         )}
+        </>
+        )}
         <div className="actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : user ? 'Save' : 'Create user'}</button>
@@ -430,7 +465,7 @@ function canWaive(role?: Role) {
   return role === 'SuperAdmin' || role === 'GroupAdmin'
 }
 
-function ResetPasswordModal({ user, canWaive, onClose, onSaved }: { user: UserDto; canWaive: boolean; onClose: () => void; onSaved: (required: boolean) => void }) {
+export function ResetPasswordModal({ user, canWaive, onClose, onSaved }: { user: UserDto; canWaive: boolean; onClose: () => void; onSaved: (required: boolean) => void }) {
   const [password, setPassword] = useState('')
   const [requireChange, setRequireChange] = useState(true)
   const waivable = canWaive && user.role !== 'TeamMember'

@@ -260,3 +260,31 @@ public record DailyReportRow(DateOnly Date, int? GroupId, int Interactions, int 
 public record SystemReport(DateOnly From, DateOnly To, CardStats Totals, int Groups, int Restaurants, int Users, int ActiveUsers, int SignIns,
     int FailedSignIns, int Interactions, List<GroupReportRow> ByGroup, List<RestaurantReportRow> ByRestaurant, List<UserReportRow> TopUsers,
     List<DailyReportRow> Daily, List<CountItem> ByKind);
+
+// ---- System administration: overview, security, status, directories -------------------------------------
+
+/// <summary>Something the System Administrator should look at. Severity: high, medium or info. Link is a page in the site.</summary>
+public record AttentionItem(string Severity, string Title, string Detail, string? Link);
+public record GroupSnapshot(int Id, string Name, bool IsActive, int Restaurants, int People, int Admins, int ActivePeople7d, int Cards7d, int Waiting,
+    int WaitingOverAWeek, DateTime? LastActivity);
+public record SignInRow(DateTime At, string? UserName, string? DisplayName, string? RoleTitle, string? GroupName, bool Succeeded, string? IpAddress, string? UserAgent);
+public record SystemOverview(DateTime GeneratedAt, int Groups, int ActiveGroups, int Restaurants, int People, int SystemAdmins, int ActiveToday, int Active7d,
+    int SignInsToday, int FailedSignIns24h, int CardsToday, int Cards7d, int Waiting, int WaitingOverAWeek, int Errors24h,
+    List<AttentionItem> Attention, List<GroupSnapshot> GroupSnapshots, List<SignInRow> RecentSignIns);
+
+public record FailedSignInRow(string UserName, bool KnownAccount, int Attempts, DateTime Last, string[] IpAddresses);
+public record RefusedRow(string? UserName, string? DisplayName, string? RoleTitle, string? GroupName, int Count, DateTime Last, string[] Paths);
+public record AccountFlag(int Id, string DisplayName, string Username, string RoleTitle, int? GroupId, string? GroupName, string Issue, DateTime? Since);
+public record SystemSecurity(int Days, int SignIns, int FailedSignIns, int Refused, int StaleCopies, List<FailedSignInRow> Failed, List<RefusedRow> RefusedBy,
+    List<AccountFlag> Accounts, List<UserDto> SystemAdministrators, List<SignInRow> RecentSignIns);
+
+public record TableCount(string Name, int Rows);
+public record EndpointStat(string Endpoint, int Calls, int AvgMs, int MaxMs, int Errors);
+public record ErrorRow(DateTime At, string? UserName, string? GroupName, string Method, string Path, int Status, string? Detail);
+public record SystemStatus(string Version, string Environment, DateTime StartedAt, DateTime ServerTime, string Database, long DatabaseBytes,
+    string? LatestMigration, List<TableCount> Tables, string SettingsStore, string Email, bool EmailConfigured, string? TestEmailTo, int LogRetentionDays,
+    DateTime? OldestLogEntry, int Requests24h, int Errors24h, int Refused24h, int AvgMs24h, int P95Ms24h, List<EndpointStat> Slowest, List<ErrorRow> RecentErrors);
+
+public record DirectoryRestaurant(int Id, string Name, string? City, string? State, bool IsActive, int GroupId, string GroupName, bool GroupIsActive,
+    string[] Owners, int Managers, int TeamLogins, int Cards, int Waiting, int WaitingOverAWeek, DateOnly? LastVisit, DateTime CreatedAt);
+public record SystemPerson(UserDto User, string[] Restaurants, DateTime? LastSeen, int Interactions30d);

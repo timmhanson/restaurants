@@ -29,6 +29,9 @@ public class AuthController(AppDbContext db, TokenService tokens, IPasswordHashe
         }
 
         user.LastLoginAt = DateTime.UtcNow;
+        // A forced password change needs an emailed code. With no email on file it can never be completed, so
+        // release the account rather than trap the person on the password page.
+        if (user.MustChangePassword && string.IsNullOrWhiteSpace(user.Email)) user.MustChangePassword = false;
         await db.SaveChangesAsync();
         var (token, expires) = tokens.Create(user, user.UserRestaurants.Select(x => x.RestaurantId));
         await audit.LogRawAsync(user.Id, user.Username, user.Role, user.GroupId, "Login");

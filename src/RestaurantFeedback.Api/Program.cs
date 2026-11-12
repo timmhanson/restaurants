@@ -74,6 +74,7 @@ builder.Services.AddScoped<AuditService>();
 // Every user interaction (API calls here, page views and clicks from the browser) for the System Administrator.
 builder.Services.AddSingleton(config.GetSection("InteractionLog").Get<InteractionLogOptions>() ?? new InteractionLogOptions());
 builder.Services.AddSingleton<InteractionLogQueue>();
+builder.Services.AddSingleton(new AppInfo { ConnectionString = connection });
 builder.Services.AddHostedService<InteractionLogWriter>();
 builder.Services.AddScoped<CurrentUserProvider>();
 builder.Services.AddControllers().AddJsonOptions(o =>
@@ -89,6 +90,7 @@ builder.Services.AddHealthChecks();
 var app = builder.Build();
 
 var appVersion = CachePolicy.AppVersion(app.Environment);
+app.Services.GetRequiredService<AppInfo>().Version = appVersion;
 app.UseCors();
 app.UseApiNoStore(appVersion);
 app.UseMiddleware<AccountUnavailableMiddleware>();

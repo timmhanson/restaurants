@@ -90,3 +90,22 @@ public static class CachePolicy
         await next();
     });
 }
+
+/// <summary>Facts about this running copy of the site, for the System status page.</summary>
+public class AppInfo
+{
+    public string Version { get; set; } = "dev";
+    public DateTime StartedAt { get; } = DateTime.UtcNow;
+    public string ConnectionString { get; init; } = "";
+
+    /// <summary>The SQLite file and its size including the write-ahead log, or null for another database.</summary>
+    public (string File, long Bytes)? Database()
+    {
+        if (!ConnectionString.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase)) return null;
+        var path = ConnectionString["Data Source=".Length..].Split(';')[0];
+        long size = 0;
+        foreach (var f in new[] { path, path + "-wal" })
+            if (File.Exists(f)) size += new FileInfo(f).Length;
+        return (Path.GetFileName(path), size);
+    }
+}

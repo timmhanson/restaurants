@@ -118,11 +118,6 @@ export default function ChangePasswordPage({ forced = false }: { forced?: boolea
           <button className="btn btn-primary" type="submit" disabled={busy || !sent}>
             {busy ? 'Saving…' : 'Change password'}
           </button>
-          {forced && (
-            <button className="btn" type="button" onClick={logout}>
-              Sign out
-            </button>
-          )}
         </div>
       </form>
     </div>
@@ -132,8 +127,23 @@ export default function ChangePasswordPage({ forced = false }: { forced?: boolea
     return (
       <div className="login-wrap">
         <div className="login-card" style={{ maxWidth: 520 }}>
-          <h1>Choose a new password</h1>
-          <p className="muted">Hi {user?.displayName}. Your password was set by an administrator, so you need to pick a new one before continuing.</p>
+          <div className="page-head" style={{ marginBottom: '0.5rem' }}>
+            <h1 style={{ margin: 0 }}>Choose a new password</h1>
+            <span className="grow" />
+            <button className="btn" type="button" onClick={logout}>
+              Sign out
+            </button>
+          </div>
+          <p className="muted">
+            Hi {user?.displayName}. Your password was set by an administrator, so you need to pick a new one before continuing. Not you, or want
+            to use a different login? Choose <strong>Sign out</strong>.
+          </p>
+          {!user?.email && (
+            <Alert kind="warn">
+              This account has no email address, so a code cannot be sent. Sign out and sign in again to continue; if this page comes back, ask
+              an administrator to add your email.
+            </Alert>
+          )}
           {body}
         </div>
       </div>

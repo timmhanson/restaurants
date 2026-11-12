@@ -16,6 +16,13 @@ See README.md for the architecture, roles and deployment.
   the user decides otherwise.
 - **Reports for System Administrators must filter by investment group and/or restaurant.** When a feature adds
   data worth reporting on, add it to `GET /api/system/reports` and the Reports page.
+- **System Administrators oversee the site, not restaurants.** Their menu (Overview, Investment groups,
+  Restaurants, People, Reports, Activity log, Audit log, Security, System status) is entirely their own. Never
+  show them restaurant-level screens unless they chose "View as admin". Put new site-wide features in that area
+  (`SystemAdminController`, `/api/system/*`, `SuperAdmin` only) and surface anything needing action in the
+  Overview's "Needs your attention" list.
+- **Never create a dead end.** Every forced or modal screen needs a visible way out (Sign out / Cancel), and
+  nothing may require a step the person cannot complete (e.g. an emailed code with no email on file).
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use

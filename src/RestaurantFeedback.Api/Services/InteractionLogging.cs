@@ -99,7 +99,13 @@ public class InteractionLoggingMiddleware(RequestDelegate next, InteractionLogQu
         var failed = false;
         try { await next(ctx); }
         catch (AccountUnavailableException) { failed = true; ctx.Items["log.status"] = 401; throw; }
-        catch { failed = true; throw; }
+        catch (Exception ex)
+        {
+            failed = true;
+            // The error type and message only (never request data), so the System Administrator can see what broke.
+            ctx.Items["log.error"] = $"{ex.GetType().Name}: {(ex.InnerException ?? ex).Message}";
+            throw;
+        }
         finally
         {
             var row = InteractionLogQueue.Describe(ctx, InteractionKinds.Api);
@@ -108,6 +114,7 @@ public class InteractionLoggingMiddleware(RequestDelegate next, InteractionLogQu
             row.Status = failed ? (ctx.Items.TryGetValue("log.status", out var st) && st is int code ? code : 500) : ctx.Response.StatusCode;
             row.DurationMs = (int)Math.Min(int.MaxValue, clock.ElapsedMilliseconds);
             if (ctx.Items.TryGetValue(InteractionContext.Action, out var action)) row.Action = InteractionLogQueue.Clip(action as string, 200);
+            if (ctx.Items.TryGetValue("log.error", out var error)) row.Detail = InteractionLogQueue.Clip(error as string, 500);
             if (ctx.Items.TryGetValue(InteractionContext.RestaurantId, out var rid) && rid is int r) row.RestaurantId = r;
             if (row.GroupId is null && ctx.Items.TryGetValue(InteractionContext.GroupId, out var gid) && gid is int g) row.GroupId = g;
             // Sign-ins happen before there is a token, so take who it was from the audit.

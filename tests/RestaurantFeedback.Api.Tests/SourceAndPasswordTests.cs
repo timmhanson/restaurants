@@ -86,10 +86,46 @@ public class SourceAndPasswordTests(ApiFactory factory)
         var rid = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.First().Id;
         Assert.Equal(HttpStatusCode.Created, (await owner.PostAsJsonAsync("/api/users", new UserRequest
         {
-            Username = "noexp-mgr", DisplayName = "Owner's Manager", Password = "MgrPass!1", Role = "Manager", RestaurantIds = [rid], RequirePasswordChange = false
+            Username = "noexp-mgr", DisplayName = "Owner's Manager", Email = "noexp-mgr@test.local", Password = "MgrPass!1", Role = "Manager", RestaurantIds = [rid], RequirePasswordChange = false
         })).StatusCode);
         login = await (await factory.CreateClient().PostAsJsonAsync("/api/auth/login", new LoginRequest("noexp-mgr", "MgrPass!1")))
             .Content.ReadFromJsonAsync<LoginResponse>();
         Assert.True(login!.MustChangePassword);
+    }
+
+    [Fact]
+    public async Task An_account_with_no_email_is_never_trapped_on_the_password_page()
+    {
+        // The forced change needs an emailed code, so without an email it must not be required.
+        var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
+        var rid = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.First().Id;
+        var created = await owner.PostAsJsonAsync("/api/users", new UserRequest
+        {
+            Username = "noemail-mgr", DisplayName = "No Email Manager", Password = "MgrPass!1", Role = "Manager", RestaurantIds = [rid]
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var user = (await created.Content.ReadFromJsonAsync<UserDto>())!;
+        Assert.False(user.MustChangePassword);
+        var login = await (await factory.CreateClient().PostAsJsonAsync("/api/auth/login", new LoginRequest("noemail-mgr", "MgrPass!1")))
+            .Content.ReadFromJsonAsync<LoginResponse>();
+        Assert.False(login!.MustChangePassword);
+
+        // Giving them an email and resetting the password requires the change again...
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/users/{user.Id}", new UserRequest
+        {
+            Username = "noemail-mgr", DisplayName = "No Email Manager", Email = "noemail@test.local", Password = "MgrPass!2", Role = "Manager", RestaurantIds = [rid]
+        })).StatusCode);
+        login = await (await factory.CreateClient().PostAsJsonAsync("/api/auth/login", new LoginRequest("noemail-mgr", "MgrPass!2")))
+            .Content.ReadFromJsonAsync<LoginResponse>();
+        Assert.True(login!.MustChangePassword);
+
+        // ...and taking the email away again releases them at the next sign-in instead of locking them out.
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/users/{user.Id}", new UserRequest
+        {
+            Username = "noemail-mgr", DisplayName = "No Email Manager", Role = "Manager", RestaurantIds = [rid]
+        })).StatusCode);
+        login = await (await factory.CreateClient().PostAsJsonAsync("/api/auth/login", new LoginRequest("noemail-mgr", "MgrPass!2")))
+            .Content.ReadFromJsonAsync<LoginResponse>();
+        Assert.False(login!.MustChangePassword);
     }
 }

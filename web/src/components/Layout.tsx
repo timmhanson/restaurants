@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { roleTitle } from '../auth/roles'
@@ -27,13 +27,19 @@ export default function Layout() {
 
   // A system administrator either oversees every group (Groups, all users, the whole audit log) or views one
   // group exactly as its Investment Group Administrator would, with the yellow bar to get back out.
-  const links: { to: string; label: string; show: boolean }[] = overseeing
+  // The System Administrator has a menu of their own, about the whole site. Restaurant work (cards, comments,
+  // analytics) only appears while they view one group as its administrator, under the yellow bar.
+  const links: { to: string; label: string; show: boolean; section?: string }[] = overseeing
     ? [
+        { to: '/overview', label: 'Overview', show: true, section: 'Oversee' },
         { to: '/groups', label: 'Investment groups', show: true },
-        { to: '/reports', label: 'Reports', show: true },
+        { to: '/all-restaurants', label: 'Restaurants', show: true },
+        { to: '/people', label: 'People', show: true },
+        { to: '/reports', label: 'Reports', show: true, section: 'Insight' },
         { to: '/activity', label: 'Activity log', show: true },
-        { to: '/users', label: 'All users', show: true },
         { to: '/audit', label: 'Audit log', show: true },
+        { to: '/security', label: 'Security', show: true, section: 'System' },
+        { to: '/system', label: 'System status', show: true },
       ]
     : [
         { to: '/enter', label: 'Enter card', show: true },
@@ -56,11 +62,11 @@ export default function Layout() {
 
   const exit = () => {
     exitGroup()
-    nav('/groups')
+    nav('/overview')
   }
 
   return (
-    <div className={`app ${viewingAs ? 'viewing-as' : ''}`}>
+    <div className={`app ${viewingAs ? 'viewing-as' : ''} ${overseeing ? 'system' : ''}`}>
       {viewingAs && (
         <div className="viewing-bar" role="status" ref={bar}>
           <span>
@@ -76,7 +82,7 @@ export default function Layout() {
         <button type="button" className="btn-icon nav-toggle" aria-label="Menu" onClick={() => setOpen((o) => !o)}>
           ☰
         </button>
-        <div className="brand" onClick={() => nav(overseeing ? '/groups' : '/enter')}>
+        <div className="brand" onClick={() => nav(overseeing ? '/overview' : '/enter')}>
           <span className="brand-mark" />
           <div>
             <div className="brand-title">Guest Feedback</div>
@@ -106,9 +112,12 @@ export default function Layout() {
         {links
           .filter((l) => l.show)
           .map((l) => (
-            <NavLink key={l.to} to={l.to} className={({ isActive }) => (isActive ? 'active' : '')}>
-              {l.label}
-            </NavLink>
+            <Fragment key={l.to}>
+              {l.section && <div className="nav-section">{l.section}</div>}
+              <NavLink to={l.to} className={({ isActive }) => (isActive ? 'active' : '')}>
+                {l.label}
+              </NavLink>
+            </Fragment>
           ))}
       </nav>
       <main className="content">

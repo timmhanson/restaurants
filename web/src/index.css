@@ -54,6 +54,28 @@ pre { background: #f0f2f5; padding: 0.6rem; border-radius: 6px; overflow: auto; 
 .sidenav { background: var(--surface); border-right: 1px solid var(--line); padding: 0.75rem 0; display: flex; flex-direction: column; }
 .app > .sidenav { position: sticky; top: 60px; align-self: start; height: calc(100vh - 60px); overflow-y: auto; }
 .app.viewing-as > .sidenav { top: calc(60px + var(--viewing-bar-h, 41px)); height: calc(100vh - 60px - var(--viewing-bar-h, 41px)); }
+.kv dd { min-width: 0; overflow-wrap: anywhere; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+table.compact { width: 100%; border-collapse: collapse; }
+table.compact td { padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
+table.compact tr:last-child td { border-bottom: none; }
+.attention { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.attention li { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-radius: 8px; border-left-width: 4px; }
+.attention-text { flex: 1; min-width: 0; }
+.attention-mark { width: 0.7rem; height: 0.7rem; border-radius: 50%; flex: none; background: var(--muted); }
+.attention-high { border-left-color: var(--danger); background: var(--danger-bg); }
+.attention-high .attention-mark { background: var(--danger); }
+.attention-medium { border-left-color: #d98e00; background: var(--warn-bg); }
+.attention-medium .attention-mark { background: #d98e00; border-radius: 2px; }
+.attention-info { border-left-color: var(--accent); }
+.attention-info .attention-mark { background: var(--accent); border-radius: 0; transform: rotate(45deg); }
+.nav-section { padding: 0.9rem 1.25rem 0.3rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+/* System administration has its own look so it is never mistaken for a restaurant's screens. */
+.app.system > .sidenav { background: #162033; border-right-color: #162033; }
+.app.system .sidenav a { color: #d7deea; }
+.app.system .sidenav a:hover { background: rgba(255, 255, 255, 0.07); }
+.app.system .sidenav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; border-left-color: #ffd23f; }
+.app.system .nav-section { color: #8fa0bb; }
 .sidenav a { padding: 0.6rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; }
 .sidenav a:hover { background: var(--bg); }
 .sidenav a.active { border-left-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--info-bg); }
@@ -145,6 +167,9 @@ td.num, th.num { text-align: right; }
 .modal-body { padding: 1.25rem; }
 
 /* ---- postcard entry form ---- */
+.role-choice { border: none; padding: 0; margin: 0; min-width: 0; }
+.role-choice legend { font-weight: 600; padding: 0; margin-bottom: 0.4rem; }
+.role-choice .source-choice { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .source-panel { border: 1px solid var(--line); margin: 0 0 1rem; }
 .source-panel legend { font-weight: 600; font-size: 1.05rem; padding: 0 0.35rem; }
 .source-choice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 0.25rem; }
@@ -212,7 +237,7 @@ details.audit-details summary { cursor: pointer; color: var(--accent); font-size
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
-  .source-choice { grid-template-columns: 1fr; }
+  .source-choice, .role-choice .source-choice { grid-template-columns: 1fr; }
   .sidenav { display: none; position: fixed; top: 60px; left: 0; right: 0; z-index: 30; border-bottom: 1px solid var(--line); box-shadow: var(--shadow); }
   .sidenav.open { display: flex; }
   .app > .sidenav, .app.viewing-as > .sidenav { position: fixed; top: 60px; height: auto; }

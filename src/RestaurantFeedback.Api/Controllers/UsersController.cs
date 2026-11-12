@@ -34,7 +34,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (me.IsTeamMember) return Forbid();
         var q = db.Users.Include(u => u.UserRestaurants).Include(u => u.Group).AsQueryable();
         if (me.IsSuperAdmin)
-            q = me.GroupId is null ? q : q.Where(u => u.GroupId == me.GroupId || u.Role == UserRole.SuperAdmin);
+            q = me.GroupId is null ? q : q.Where(u => u.GroupId == me.GroupId);
         else if (me.IsGroupAdmin)
             q = q.Where(u => u.GroupId == me.GroupId);
         else if (me.IsOwner)
@@ -81,7 +81,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
             Role = role,
             Permissions = role == UserRole.Manager ? ParsePermissions(req.Permissions) : ManagerPermission.None,
             IsActive = req.IsActive,
-            MustChangePassword = MustChange(me, role, targetId: 0, req.RequirePasswordChange),
+            MustChangePassword = MustChange(me, role, targetId: 0, req.RequirePasswordChange, req.Email),
             UserRestaurants = rids.Select(r => new UserRestaurant { RestaurantId = r }).ToList()
         };
         user.PasswordHash = hasher.HashPassword(user, req.Password);
@@ -146,11 +146,12 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         user.IsActive = req.IsActive;
         user.UserRestaurants.Clear();
         foreach (var r in rids) user.UserRestaurants.Add(new UserRestaurant { UserId = user.Id, RestaurantId = r });
+        if (string.IsNullOrWhiteSpace(user.Email)) user.MustChangePassword = false; // no address to send the code to
         var passwordChanged = !string.IsNullOrWhiteSpace(req.Password);
         if (passwordChanged)
         {
             user.PasswordHash = hasher.HashPassword(user, req.Password!);
-            user.MustChangePassword = MustChange(me, role, user.Id, req.RequirePasswordChange);
+            user.MustChangePassword = MustChange(me, role, user.Id, req.RequirePasswordChange, user.Email);
         }
         await db.SaveChangesAsync();
         await audit.LogAsync(me, "UserUpdated", "User", user.Id, new { before, after = Snapshot(user), passwordChanged, MustChangePassword = passwordChanged ? user.MustChangePassword : (bool?)null }, groupId: user.GroupId);
@@ -160,9 +161,11 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
     /// <summary>
     /// Whether someone whose password was just set by <paramref name="me"/> must pick a new one at next sign-in.
     /// Never for team logins or your own account; otherwise yes unless an administrator chose not to require it.
+    /// Never for an account with no email either: the change needs an emailed code, so it could not be completed
+    /// and the person would be locked out.
     /// </summary>
-    private static bool MustChange(CurrentUser me, UserRole role, int targetId, bool requested) =>
-        role != UserRole.TeamMember && targetId != me.Id && (requested || !me.IsGroupWide);
+    private static bool MustChange(CurrentUser me, UserRole role, int targetId, bool requested, string? email) =>
+        role != UserRole.TeamMember && targetId != me.Id && !string.IsNullOrWhiteSpace(email) && (requested || !me.IsGroupWide);
 
     /// <summary>Reset another user's password. Everyone except team logins must then change it at next login, unless an administrator waives it.</summary>
     [HttpPut("{id:int}/password")]
@@ -173,7 +176,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (user is null) return NotFound();
         if (await CanActOn(me, user) is { } denied) return denied;
         user.PasswordHash = hasher.HashPassword(user, req.Password);
-        user.MustChangePassword = MustChange(me, user.Role, user.Id, req.RequirePasswordChange);
+        user.MustChangePassword = MustChange(me, user.Role, user.Id, req.RequirePasswordChange, user.Email);
         await db.SaveChangesAsync();
         await audit.LogAsync(me, "UserPasswordReset", "User", user.Id,
             new { user.Username, user.MustChangePassword, Restaurants = await RestaurantNames(user.UserRestaurants.Select(ur => ur.RestaurantId)) }, groupId: user.GroupId);

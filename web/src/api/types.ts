@@ -371,3 +371,39 @@ export interface SystemReport {
   failedSignIns: number; interactions: number; byGroup: GroupReportRow[]; byRestaurant: RestaurantReportRow[]; topUsers: UserReportRow[]
   daily: DailyReportRow[]; byKind: CountItem[]
 }
+
+// ---- System administration: overview, security, status, directories ----
+export interface AttentionItem { severity: 'high' | 'medium' | 'info'; title: string; detail: string; link?: string | null }
+export interface GroupSnapshot {
+  id: number; name: string; isActive: boolean; restaurants: number; people: number; admins: number; activePeople7d: number; cards7d: number
+  waiting: number; waitingOverAWeek: number; lastActivity?: string | null
+}
+export interface SignInRow {
+  at: string; userName?: string | null; displayName?: string | null; roleTitle?: string | null; groupName?: string | null; succeeded: boolean
+  ipAddress?: string | null; userAgent?: string | null
+}
+export interface SystemOverview {
+  generatedAt: string; groups: number; activeGroups: number; restaurants: number; people: number; systemAdmins: number; activeToday: number
+  active7d: number; signInsToday: number; failedSignIns24h: number; cardsToday: number; cards7d: number; waiting: number; waitingOverAWeek: number
+  errors24h: number; attention: AttentionItem[]; groupSnapshots: GroupSnapshot[]; recentSignIns: SignInRow[]
+}
+export interface FailedSignInRow { userName: string; knownAccount: boolean; attempts: number; last: string; ipAddresses: string[] }
+export interface RefusedRow { userName?: string | null; displayName?: string | null; roleTitle?: string | null; groupName?: string | null; count: number; last: string; paths: string[] }
+export interface AccountFlag { id: number; displayName: string; username: string; roleTitle: string; groupId?: number | null; groupName?: string | null; issue: string; since?: string | null }
+export interface SystemSecurity {
+  days: number; signIns: number; failedSignIns: number; refused: number; staleCopies: number; failed: FailedSignInRow[]; refusedBy: RefusedRow[]
+  accounts: AccountFlag[]; systemAdministrators: UserDto[]; recentSignIns: SignInRow[]
+}
+export interface EndpointStat { endpoint: string; calls: number; avgMs: number; maxMs: number; errors: number }
+export interface ErrorRow { at: string; userName?: string | null; groupName?: string | null; method: string; path: string; status: number; detail?: string | null }
+export interface SystemStatus {
+  version: string; environment: string; startedAt: string; serverTime: string; database: string; databaseBytes: number; latestMigration?: string | null
+  tables: { name: string; rows: number }[]; settingsStore: string; email: string; emailConfigured: boolean; testEmailTo?: string | null
+  logRetentionDays: number; oldestLogEntry?: string | null; requests24h: number; errors24h: number; refused24h: number; avgMs24h: number
+  p95Ms24h: number; slowest: EndpointStat[]; recentErrors: ErrorRow[]
+}
+export interface DirectoryRestaurant {
+  id: number; name: string; city?: string | null; state?: string | null; isActive: boolean; groupId: number; groupName: string; groupIsActive: boolean
+  owners: string[]; managers: number; teamLogins: number; cards: number; waiting: number; waitingOverAWeek: number; lastVisit?: string | null; createdAt: string
+}
+export interface SystemPerson { user: UserDto; restaurants: string[]; lastSeen?: string | null; interactions30d: number }

@@ -63,6 +63,12 @@ Administrators can reset anyone's password in their scope, and owners can reset 
 logins at their restaurants (managers with `ManageTeamLogin` can reset the team login). A reset by someone else forces a new password at the next login, except for team logins, which
 usually have no email and are managed by the owner/manager. System and Investment Group Administrators can untick
 **Require a new password at next sign-in** (`requirePasswordChange: false`) to set a password the person keeps.
+An account with no email is never forced to change its password, because the change needs an emailed code and
+could not be completed; an account already in that state is released at its next sign-in. The forced
+"Choose a new password" page has **Sign out** at the top.
+
+Adding a user starts with "What kind of login is this?" (nothing preselected), so a shared **Team Member**
+login is not created as a manager by accident.
 
 ## The card
 
@@ -87,6 +93,25 @@ A guest with two or more cards on file anywhere in the group is flagged as a **r
 analytics and filterable in the comments view.
 
 Every login, card, edit, response, export, user, restaurant and settings change is written to the audit log.
+
+## System administration
+
+A System Administrator oversees the whole site, not restaurants, and has a menu of their own (dark sidebar):
+
+| Page | What it is for |
+| --- | --- |
+| **Overview** (home) | "Needs your attention" (server errors, bursts of failed sign-ins, groups with no administrator or restaurants, cards waiting over a week, people who never signed in, email not set up), headline numbers for the whole site, every investment group at a glance and the latest sign-ins |
+| **Investment groups** | create and rename groups; **View as admin** |
+| **Restaurants** | directory of every restaurant in every group: owners, staff counts, cards, waiting; **Open in group** |
+| **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
+| **Reports**, **Activity log**, **Audit log** | see below |
+| **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
+| **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
+
+Restaurant-level screens (Enter card, Comments, Analytics, Users, Restaurants & staff, Settings) never appear
+for a System Administrator unless they choose **View as admin** / **Open in group**, which shows one group as
+its Investment Group Administrator sees it under a yellow bar. That choice lasts for the browser tab only.
+All of `/api/system/*` is `SuperAdmin` only.
 
 ## Interaction log and System Administrator reports
 
