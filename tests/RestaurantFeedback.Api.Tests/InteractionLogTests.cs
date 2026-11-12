@@ -120,6 +120,10 @@ public class InteractionLogTests(ApiFactory factory)
         var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
         Assert.False((await owner.GetAsync("/api/auth/me")).Headers.Contains("Clear-Site-Data"));
 
+        // An unknown API address answers "not found" rather than serving the web page.
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/no-such-thing")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/system/no-such-thing")).StatusCode);
+
         var page = await client.GetAsync("/comments");
         if (page.StatusCode == HttpStatusCode.OK) // only when the front end has been built into wwwroot
             Assert.Contains("no-store", page.Headers.CacheControl!.ToString());

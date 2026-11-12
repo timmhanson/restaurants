@@ -112,6 +112,8 @@ app.MapGet("/api/info", (IGroupSettingsStore store, IEmailSender mail, IWebHostE
     version = appVersion,
     utc = DateTime.UtcNow
 });
+// An unknown API address is "not found", never the web page (which would look like a successful answer).
+app.MapFallback("/api/{**path}", () => Results.NotFound(new { message = "Not found." }));
 // Serve the React app for any non-API route (client-side routing).
 app.MapFallbackToFile("index.html", CachePolicy.StaticFiles());
 
