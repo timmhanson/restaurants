@@ -57,9 +57,14 @@ export default function PrintCenterPage() {
       .finally(() => setLoading(false))
   }, [which, dateKind, day, from, to, restaurantId, notSentOnly])
 
+  // Printed and sent are different things: a card can have been printed without being marked as sent (the
+  // "mark as sent" box was unticked, or a sent card was reopened, e.g. it came back undeliverable). Under
+  // "Not sent yet" the option to leave those out is only offered when there are some.
+  const printedBefore = (data?.items ?? []).filter((c) => c.printCount > 0 && (!mailableOnly || hasMailingAddress(c))).length
+  const offerSkipPrinted = which !== 'not-sent' || printedBefore > 0
   const shown = useMemo(
-    () => (data?.items ?? []).filter((c) => (!mailableOnly || hasMailingAddress(c)) && (!skipPrinted || c.printCount === 0)),
-    [data, mailableOnly, skipPrinted],
+    () => (data?.items ?? []).filter((c) => (!mailableOnly || hasMailingAddress(c)) && (!(skipPrinted && offerSkipPrinted) || c.printCount === 0)),
+    [data, mailableOnly, skipPrinted, offerSkipPrinted],
   )
   const chosen = shown.filter((c) => !left.includes(c.id))
   const hiddenNoAddress = (data?.items ?? []).filter((c) => !hasMailingAddress(c)).length
@@ -135,9 +140,17 @@ export default function PrintCenterPage() {
           <label className="check">
             <input type="checkbox" checked={mailableOnly} onChange={(e) => setMailableOnly(e.target.checked)} /> Only cards with a full mailing address (street, city, state and zip)
           </label>
-          <label className="check">
-            <input type="checkbox" checked={skipPrinted} onChange={(e) => setSkipPrinted(e.target.checked)} /> Leave out cards that have been printed before
-          </label>
+          {offerSkipPrinted && (
+            <label className="check">
+              <input type="checkbox" checked={skipPrinted} onChange={(e) => setSkipPrinted(e.target.checked)} />
+              <span>
+                {which === 'not-sent'
+                  ? `Leave out the ${printedBefore} card${printedBefore === 1 ? '' : 's'} already printed but not marked as sent`
+                  : 'Leave out cards that have been printed before'}{' '}
+                {which === 'not-sent' && <span className="muted">(printed without marking as sent, or reopened after sending)</span>}
+              </span>
+            </label>
+          )}
         </div>
       </div>
 
