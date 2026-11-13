@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.Configuration.Json;
@@ -84,12 +85,19 @@ else
 // ---- Postage for printed coupon cards (optional; stamps by hand always work) ----
 var postage = config.GetSection("Postage").Get<PostageOptions>() ?? new PostageOptions();
 builder.Services.AddSingleton(postage);
-if (!string.IsNullOrWhiteSpace(postage.EasyPostApiKey))
-    builder.Services.AddHttpClient<IPostageProvider, EasyPostProvider>();
-else if (postage.Sample && builder.Environment.IsDevelopment())
+// Each investment group brings its own EasyPost account key (Settings); Postage__EasyPostApiKey is an optional
+// site-wide fallback for groups without one.
+if (postage.Sample && builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IPostageProvider, SamplePostageProvider>();
 else
-    builder.Services.AddSingleton<IPostageProvider, NoPostageProvider>();
+    builder.Services.AddHttpClient<IPostageProvider, EasyPostProvider>();
+builder.Services.AddScoped<GroupPostageAccounts>();
+// Encryption keys for the stored account keys live beside the database, on the app's private persistent storage,
+// so they survive restarts and deploys.
+var keyRing = config["DataProtection:KeysPath"] ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(
+    connection.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase) ? connection["Data Source=".Length..].Split(';')[0] : "App_Data/x")) ?? "App_Data", "keys");
+Directory.CreateDirectory(keyRing);
+builder.Services.AddDataProtection().SetApplicationName("RestaurantFeedback").PersistKeysToFileSystem(new DirectoryInfo(keyRing));
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<CardFollowUps>();

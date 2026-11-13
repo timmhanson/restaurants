@@ -98,8 +98,8 @@ export default function PostcardSettingsEditor({ settings, onChange, dirty }: { 
       <label className="check">
         <input type="checkbox" checked={p.allowBoughtPostage} onChange={(e) => set('allowBoughtPostage', e.target.checked)} />
         <span>
-          Allow postage to be bought when printing <span className="muted">(only people given the "buy postage" permission can, and only once the System Administrator has set up the
-          postage service). Stamps by hand always work.</span>
+          Allow postage to be bought when printing <span className="muted">(only people given the "buy postage" permission can, and only once this group's EasyPost account is added
+          under Postage account below). Stamps by hand always work.</span>
         </span>
       </label>
     </div>

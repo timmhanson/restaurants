@@ -120,11 +120,15 @@ public class ApiCollection : ICollectionFixture<ApiFactory>
 public class FakePostageProvider : IPostageProvider
 {
     public List<(PostageAddress From, PostageAddress To)> Bought { get; } = [];
+    /// <summary>The account key each purchase was made with (null = the site's own account).</summary>
+    public List<string?> AccountKeys { get; } = [];
     public bool Configured => true;
+    public bool AcceptsAccountKeys => true;
     public string Description => "Fake postage (tests)";
 
-    public Task<PostageResult> BuyPostcardAsync(PostageAddress from, PostageAddress to, double widthIn, double heightIn, CancellationToken ct = default)
+    public Task<PostageResult> BuyPostcardAsync(PostageAddress from, PostageAddress to, double widthIn, double heightIn, string? accountKey = null, CancellationToken ct = default)
     {
+        lock (AccountKeys) AccountKeys.Add(accountKey);
         if (to.Name.Contains("Undeliverable")) throw new PostageException("EasyPost: Address not found (street1: House number is missing)");
         lock (Bought) Bought.Add((from, to));
         var n = Bought.Count;

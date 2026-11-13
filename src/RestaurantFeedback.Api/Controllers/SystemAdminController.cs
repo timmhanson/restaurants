@@ -199,6 +199,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             AddressesNotFound = await db.Comments.CountAsync(c => c.AddressStatus == AddressStatuses.NotFound),
             Postage = postage.Description,
             PostageConfigured = postage.Configured,
+            PostageGroupAccounts = await db.Groups.CountAsync(g => g.PostageKeyEncrypted != null),
             PostageCardsBought = await db.Comments.CountAsync(c => c.PostageId != null && !c.PostageTest),
             PostageCentsSpent = await db.Comments.Where(c => c.PostageId != null && !c.PostageTest).SumAsync(c => c.PostageCents ?? 0),
             PostageTestLabels = await db.Comments.CountAsync(c => c.PostageId != null && c.PostageTest)

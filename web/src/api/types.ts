@@ -449,6 +449,7 @@ export interface SystemStatus {
   logRetentionDays: number; oldestLogEntry?: string | null; requests24h: number; errors24h: number; refused24h: number; avgMs24h: number
   p95Ms24h: number; slowest: EndpointStat[]; recentErrors: ErrorRow[]
   addressChecking: string; addressCheckingConfigured: boolean; addressesConfirmed: number; addressesNotFound: number
+  postageGroupAccounts: number
   postage: string; postageConfigured: boolean; postageCardsBought: number; postageCentsSpent: number; postageTestLabels: number
 }
 export interface DirectoryRestaurant {
@@ -461,3 +462,15 @@ export interface SystemPerson { user: UserDto; restaurants: string[]; lastSeen?:
 export type AddressStatus = 'Verified' | 'Corrected' | 'NeedsUnit' | 'UnitNotConfirmed' | 'NotFound'
 export interface AddressSuggestion { streetAddress: string; city: string; state: string; zip: string }
 export interface AddressCheckResponse { available: boolean; status: AddressStatus | 'Incomplete' | 'Unavailable'; message: string; suggested?: AddressSuggestion | null }
+
+/** An investment group's own postage account. The key itself never reaches the browser. */
+export interface PostageAccount {
+  hasOwnAccount: boolean
+  keyEnding?: string | null
+  looksLikeTestKey: boolean
+  addedAt?: string | null
+  addedBy?: string | null
+  canAddAccount: boolean
+  siteAccountAvailable: boolean
+  provider: string
+}

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using RestaurantFeedback.Api.Dtos;
+using Microsoft.Extensions.DependencyInjection;
 using RestaurantFeedback.Api.Models;
 
 namespace RestaurantFeedback.Api.Tests;
@@ -196,5 +197,49 @@ public class CardMailingTests(ApiFactory factory)
         // Back to the group's default (5) so other tests see the usual timing.
         Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync($"/api/follow-ups/restaurants/{rid}", new FollowUpDaysRequest(null))).StatusCode);
         Assert.Contains((await owner.GetFromJsonAsync<PagedResult<CommentSummary>>("/api/comments?status=follow-up-due&pageSize=200"))!.Items, c => c.Id == second.Id);
+    }
+
+    [Fact]
+    public async Task Each_investment_group_pays_for_postage_from_its_own_account()
+    {
+        const string key = "EZTK0123456789abcdefTESTKEYwxyz";
+        var (owner, rid) = await OwnerAsync();
+        var groupId = (await owner.GetFromJsonAsync<UserDto>("/api/auth/me"))!.GroupId!.Value;
+        // Only the group's administrators (or the System Administrator viewing the group) manage the account.
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync("/api/settings/postage-account", new PostageAccountRequest(key))).StatusCode);
+        var admin = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword, groupId);
+        Assert.False((await admin.GetFromJsonAsync<PostageAccountDto>("/api/settings/postage-account"))!.HasOwnAccount);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync("/api/settings/postage-account", new PostageAccountRequest("too short"))).StatusCode);
+
+        var saved = await admin.PutAsJsonAsync("/api/settings/postage-account", new PostageAccountRequest(key));
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var body = await saved.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(key, body); // the key is never sent back
+        var account = (await admin.GetFromJsonAsync<PostageAccountDto>("/api/settings/postage-account"))!;
+        Assert.True(account.HasOwnAccount && account.LooksLikeTestKey);
+        Assert.Equal("wxyz", account.KeyEnding);
+
+        // Stored encrypted, and kept out of the audit log.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Data.AppDbContext>();
+            var stored = db.Groups.Single(g => g.Id == groupId).PostageKeyEncrypted;
+            Assert.False(string.IsNullOrEmpty(stored));
+            Assert.DoesNotContain(key, stored);
+            Assert.DoesNotContain(db.AuditLogs.ToList(), a => (a.Details ?? "").Contains(key));
+        }
+        Assert.Contains("investment group's account", (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!.PostageProvider);
+
+        // Postage for this group's cards is bought with the group's key.
+        var card = await Create(owner, Card(rid, "Ownaccount"));
+        var outcome = (await (await owner.PostAsJsonAsync("/api/comments/postage", new CardIdsRequest([card.Id]))).Content.ReadFromJsonAsync<List<PostageOutcome>>())!.Single();
+        Assert.True(outcome.Ok);
+        Assert.Equal(key, factory.Postage.AccountKeys.Last());
+
+        // Removing it goes back to the site's account (when the site has one).
+        Assert.Equal(HttpStatusCode.OK, (await admin.DeleteAsync("/api/settings/postage-account")).StatusCode);
+        var second = await Create(owner, Card(rid, "Siteaccount"));
+        Assert.True((await (await owner.PostAsJsonAsync("/api/comments/postage", new CardIdsRequest([second.Id]))).Content.ReadFromJsonAsync<List<PostageOutcome>>())!.Single().Ok);
+        Assert.Null(factory.Postage.AccountKeys.Last());
     }
 }

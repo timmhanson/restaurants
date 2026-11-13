@@ -85,11 +85,16 @@ export default function SystemStatusPage() {
                 </dd>
                 <dt>Postage</dt>
                 <dd>
-                  {data.postageConfigured ? <Badge kind="ok">set up</Badge> : <Badge kind="neutral">not set up</Badge>} {data.postage}
+                  {data.postageGroupAccounts > 0 ? <Badge kind="ok">{data.postageGroupAccounts} group account(s)</Badge> : <Badge kind="neutral">no group accounts yet</Badge>}{' '}
+                  {data.postage}
                   <div className="muted small">
+                    Each investment group adds its own EasyPost account in its Settings and pays for its own postage.{' '}
                     {data.postageConfigured
-                      ? data.postageCardsBought + ' card(s) of postage bought, $' + (data.postageCentsSpent / 100).toFixed(2) + ' in all' + (data.postageTestLabels ? '; ' + data.postageTestLabels + ' test label(s)' : '') + '.'
-                      : 'Coupon cards print for a stamp by hand. To buy postage when printing, add an EasyPost key as the Postage__EasyPostApiKey setting on the web app.'}
+                      ? 'The site also has a shared account, used for groups without their own.'
+                      : 'There is no shared site account, so groups without one print for a stamp by hand.'}
+                  </div>
+                  <div className="muted small">
+                    {data.postageCardsBought + ' card(s) of postage bought, $' + (data.postageCentsSpent / 100).toFixed(2) + ' in all' + (data.postageTestLabels ? '; ' + data.postageTestLabels + ' test label(s)' : '') + '.'}
                   </div>
                 </dd>
                 <dt>Email</dt>

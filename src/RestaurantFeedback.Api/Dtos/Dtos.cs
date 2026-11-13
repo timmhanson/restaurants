@@ -332,6 +332,8 @@ public record SystemStatus(string Version, string Environment, DateTime StartedA
     public int AddressesNotFound { get; init; }
     public string Postage { get; init; } = "";
     public bool PostageConfigured { get; init; }
+    /// <summary>Investment groups that have added their own postage account (each pays for its own postage).</summary>
+    public int PostageGroupAccounts { get; init; }
     public int PostageCardsBought { get; init; }
     public int PostageCentsSpent { get; init; }
     public int PostageTestLabels { get; init; }
@@ -364,3 +366,11 @@ public record FollowUpDaysRequest(int? Days);
 public record AddressCheckRequest(string? StreetAddress, string? City, string? State, string? Zip);
 /// <param name="Available">False when address checking is not set up on this site (the form then shows nothing).</param>
 public record AddressCheckResponse(bool Available, string Status, string Message, AddressSuggestion? Suggested);
+
+// ---- An investment group's own postage (EasyPost) account ---------------------------------------------------
+
+public record PostageAccountRequest(string? ApiKey);
+/// <param name="KeyEnding">The last four characters of the saved key; the key itself is never returned.</param>
+/// <param name="SiteAccountAvailable">The site has its own account, used for groups that have not added one.</param>
+public record PostageAccountDto(bool HasOwnAccount, string? KeyEnding, bool LooksLikeTestKey, DateTime? AddedAt, string? AddedBy,
+    bool CanAddAccount, bool SiteAccountAvailable, string Provider);

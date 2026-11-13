@@ -124,9 +124,13 @@ USPS's request allowance. USPS allows this only to help send mail, which is what
 
 - **Stamps by hand:** nothing is charged; the card prints with the guest's address and a stamp box.
 - **Buy and print postage:** USPS First-Class postage is bought per card through EasyPost
-  (`EasyPostProvider`) and its mailing label prints as the card's address side. It needs the
-  `Postage__EasyPostApiKey` app setting, the group's "allow postage" setting and the `BuyPostage`
-  permission. A card is never charged twice, nothing is bought above `Postage__MaxCentsPerCard` (150), and
+  (`EasyPostProvider`) and its mailing label prints as the card's address side. Each investment group
+  pays from **its own EasyPost account**: a group administrator pastes the group's API key under
+  **Settings, Postage account**. The key is encrypted with ASP.NET Core Data Protection before it is
+  stored (`GroupPostageAccounts`; the encryption keys live beside the database in `keys/`), is never sent
+  back to a browser or written to any log, and is shown only by its last four characters. The optional
+  `Postage__EasyPostApiKey` app setting is a shared site account used only for groups without their own.
+  Buying also needs the group's "allow postage" setting and the `BuyPostage` permission. A card is never charged twice, nothing is bought above `Postage__MaxCentsPerCard` (150), and
   each purchase is audited. An EasyPost *test* key buys sample labels at no cost. USPS itself has no
   service for printing postage on postcards; its label service is for packages.
 

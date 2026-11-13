@@ -18,7 +18,8 @@ namespace RestaurantFeedback.Api.Controllers;
 [Route("api")]
 [Authorize]
 public class CardMailingController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
-    CommentSummaryBuilder summaries, CardFollowUps followUps, IPostageProvider postage, PostageOptions postageOptions) : ControllerBase
+    CommentSummaryBuilder summaries, CardFollowUps followUps, IPostageProvider postage, PostageOptions postageOptions,
+    GroupPostageAccounts postageAccounts) : ControllerBase
 {
     // ---- Printing and postage -------------------------------------------------------------------------------
 
@@ -28,8 +29,10 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var me = await users.GetAsync();
         if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
         var settings = await settingsStore.GetAsync(me.GroupId ?? 0, ct);
-        var available = postage.Configured && (settings.Postcard?.AllowBoughtPostage ?? true);
-        return new PrintConfig(available, postage.Description, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings));
+        var own = me.GroupId is int gid && postage.AcceptsAccountKeys && (await postageAccounts.DescribeAsync(gid, ct)).HasOwnAccount;
+        var available = (own || postage.Configured) && (settings.Postcard?.AllowBoughtPostage ?? true);
+        var paidBy = own ? $"{postage.Description}, your investment group's account" : postage.Description;
+        return new PrintConfig(available, paidBy, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings));
     }
 
     /// <summary>
@@ -42,7 +45,10 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var me = await users.GetAsync();
         if (!me.Has(ManagerPermission.BuyPostage) || !me.Has(ManagerPermission.MarkResponded)) return Forbid();
         var settings = await settingsStore.GetAsync(me.GroupId ?? 0, ct);
-        if (!postage.Configured) return BadRequest(new { message = "Buying postage is not set up on this site. Print the cards and add stamps by hand." });
+        // The group's own account pays. Without one, the site-wide account is used if the site has one.
+        var accountKey = me.GroupId is int gid && postage.AcceptsAccountKeys ? await postageAccounts.KeyAsync(gid, ct) : null;
+        if (accountKey is null && !postage.Configured)
+            return BadRequest(new { message = "No postage account is set up for this investment group. An administrator can add the group's EasyPost account in Settings. Until then, print the cards and add stamps by hand." });
         if (!(settings.Postcard?.AllowBoughtPostage ?? true)) return BadRequest(new { message = "Buying postage is turned off for this investment group. Print the cards and add stamps by hand." });
         var cards = await Cards(me, req.CommentIds, ct);
         if (cards.Count == 0) return NotFound();
@@ -68,7 +74,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 var bought = await postage.BuyPostcardAsync(
                     new PostageAddress(r.Name, r.StreetAddress!, r.City!, r.State!, r.Zip!, r.Phone),
                     new PostageAddress($"{c.GuestFirstName} {c.GuestLastName}".Trim(), c.StreetAddress!, c.City!, c.State!, c.Zip!),
-                    card.WidthIn, card.HeightIn, ct);
+                    card.WidthIn, card.HeightIn, accountKey, ct);
                 c.PostageProvider = bought.Provider;
                 c.PostageId = bought.Id;
                 c.PostageCents = bought.Cents;
@@ -81,7 +87,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 c.LastActivityAt = entry.CreatedAt;
                 // Saved card by card: once money is spent the record must exist even if a later card fails.
                 await db.SaveChangesAsync(ct);
-                await audit.LogAsync(me, "PostagePurchased", "Comment", c.Id, new { bought.Provider, bought.Id, bought.Cents, bought.Test, bought.TrackingCode }, c.RestaurantId);
+                await audit.LogAsync(me, "PostagePurchased", "Comment", c.Id,
+                    new { bought.Provider, bought.Id, bought.Cents, bought.Test, bought.TrackingCode, PaidBy = accountKey is null ? "the site's account" : "the investment group's account" }, c.RestaurantId);
                 results.Add(new(c.Id, true, bought.Cents, bought.LabelUrl, bought.Test, false, null));
             }
             catch (PostageException ex)

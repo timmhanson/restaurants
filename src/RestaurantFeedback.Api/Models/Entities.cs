@@ -64,6 +64,15 @@ public class OwnerGroup
     public string Name { get; set; } = "";
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // The group's own EasyPost account, so it pays for its own postage. The key is stored encrypted
+    // (see GroupPostageAccounts) and never leaves the server; only its last four characters are shown.
+    public string? PostageKeyEncrypted { get; set; }
+    public string? PostageKeyEnding { get; set; }
+    public bool PostageKeyIsTest { get; set; }
+    public DateTime? PostageKeySetAt { get; set; }
+    public string? PostageKeySetBy { get; set; }
+
     public List<Restaurant> Restaurants { get; set; } = [];
     public List<AppUser> Users { get; set; } = [];
 }

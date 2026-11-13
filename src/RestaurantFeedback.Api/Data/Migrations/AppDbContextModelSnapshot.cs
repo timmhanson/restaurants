@@ -456,6 +456,21 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PostageKeyEncrypted")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostageKeyEnding")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PostageKeyIsTest")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("PostageKeySetAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostageKeySetBy")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.ToTable("Groups");
