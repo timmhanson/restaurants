@@ -2,7 +2,7 @@ export type Role = 'SuperAdmin' | 'GroupAdmin' | 'Owner' | 'Manager' | 'TeamMemb
 
 export type Permission =
   | 'ViewComments' | 'EditComments' | 'DeleteComments' | 'MarkResponded'
-  | 'ViewAnalytics' | 'ExportComments' | 'ViewAudit' | 'ManageTeamLogin'
+  | 'ViewAnalytics' | 'ExportComments' | 'ViewAudit' | 'ManageTeamLogin' | 'BuyPostage' | 'SetFollowUpDays'
 
 export interface UserDto {
   id: number
@@ -123,8 +123,28 @@ export interface GroupRequest {
   restaurants?: RestaurantRequest[]
 }
 
+export type PostcardFieldKey = 'offer' | 'dateIssued' | 'goodUntil' | 'authorizedBy' | 'guestName' | 'street' | 'cityStateZip'
+export interface PostcardField { x: number; y: number; show: boolean }
+/** How coupon cards print. Positions are inches from the card's top-left corner. */
+export interface PostcardSettings {
+  stock: 'Preprinted' | 'Blank'
+  widthIn: number
+  heightIn: number
+  nudgeXIn: number
+  nudgeYIn: number
+  fontPt: number
+  allowBoughtPostage: boolean
+  fields: Record<PostcardFieldKey, PostcardField>
+}
+export interface PrintConfig { postageAvailable: boolean; postageProvider: string; canBuyPostage: boolean; maxCentsPerCard: number; mailedMethod: string }
+export interface PostageOutcome { commentId: number; ok: boolean; cents?: number | null; labelUrl?: string | null; test: boolean; alreadyBought: boolean; error?: string | null }
+export interface FollowUpRestaurant { id: number; name: string; days?: number | null; effectiveDays: number; canSet: boolean }
+export interface FollowUpSummary { due: number; oldestDueOn?: string | null; defaultDays: number; restaurants: FollowUpRestaurant[] }
+
 export interface GroupSettings {
   schemaVersion: number
+  followUpDays: number
+  postcard: PostcardSettings
   groupDisplayName: string
   accentColor: string
   couponOffers: string[]
@@ -199,11 +219,25 @@ export interface CommentSummary {
   repliedOn?: string | null
   lastActivityAt?: string | null
   noteCount: number
+  printedAt?: string | null
+  printedByName?: string | null
+  printCount: number
+  postageCents?: number | null
+  postageLabelUrl?: string | null
+  postageTrackingCode?: string | null
+  postageTest: boolean
+  redeemedOn?: string | null
+  redeemedByName?: string | null
+  followedUpOn?: string | null
+  followedUpByName?: string | null
+  /** The day the guest should be followed up with; absent when none is needed. */
+  followUpDueOn?: string | null
   attemptCount: number
   latestNote?: ActivityDto | null
 }
 
-export type ActivityKind = 'Note' | 'Attempt' | 'Replied' | 'Reopened'
+export type ActivityKind =
+  | 'Note' | 'Attempt' | 'Replied' | 'Reopened' | 'Printed' | 'PostageBought' | 'Redeemed' | 'RedemptionUndone' | 'FollowedUp' | 'FollowUpAttempt'
 
 export interface ActivityDto {
   id: number
@@ -275,6 +309,10 @@ export interface AnalyticsDto {
   waitingOverAWeek: number
   byReplyMethod: CountItem[]
   bySource: CountItem[]
+  printed: number
+  redeemed: number
+  followedUp: number
+  postageCents: number
 }
 
 export interface RestaurantRollup {
@@ -344,6 +382,10 @@ export interface SystemCatalog {
 }
 export interface CardStats {
   cards: number
+  printed: number
+  redeemed: number
+  followedUp: number
+  postageCents: number
   replied: number
   waiting: number
   waitingOverAWeek: number
@@ -401,6 +443,7 @@ export interface SystemStatus {
   tables: { name: string; rows: number }[]; settingsStore: string; email: string; emailConfigured: boolean; testEmailTo?: string | null
   logRetentionDays: number; oldestLogEntry?: string | null; requests24h: number; errors24h: number; refused24h: number; avgMs24h: number
   p95Ms24h: number; slowest: EndpointStat[]; recentErrors: ErrorRow[]
+  postage: string; postageConfigured: boolean; postageCardsBought: number; postageCentsSpent: number; postageTestLabels: number
 }
 export interface DirectoryRestaurant {
   id: number; name: string; city?: string | null; state?: string | null; isActive: boolean; groupId: number; groupName: string; groupIsActive: boolean

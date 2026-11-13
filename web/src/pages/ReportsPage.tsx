@@ -13,6 +13,7 @@ const METRICS: { key: Metric; label: string }[] = [
   { key: 'interactions', label: 'Interactions' },
   { key: 'cards', label: 'Cards entered' },
 ]
+const dollars = (cents: number) => '$' + (cents / 100).toFixed(2)
 const pct = (s: CardStats) => (s.cards ? Math.round((100 * s.replied) / s.cards) : null)
 
 /** Card figures shared by the group and restaurant tables. */
@@ -32,6 +33,10 @@ function cardColumns<T extends { stats: CardStats }>(): Column<T>[] {
     { key: 'smg', label: 'SMG', num: true, value: (r) => r.stats.smg },
     { key: 'web', label: 'Culvers.com', num: true, value: (r) => r.stats.website },
     { key: 'phone', label: 'Phone', num: true, value: (r) => r.stats.phone },
+    { key: 'printed', label: 'Printed', num: true, value: (r) => r.stats.printed },
+    { key: 'followedUp', label: 'Followed up', num: true, value: (r) => r.stats.followedUp },
+    { key: 'redeemed', label: 'Redeemed', num: true, value: (r) => r.stats.redeemed },
+    { key: 'postage', label: 'Postage', num: true, value: (r) => r.stats.postageCents / 100, render: (r) => (r.stats.postageCents ? dollars(r.stats.postageCents) : '—') },
   ]
 }
 

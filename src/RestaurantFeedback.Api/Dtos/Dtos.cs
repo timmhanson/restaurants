@@ -143,6 +143,20 @@ public record CommentSummary(
     string GuestKey, int GuestCommentCount)
 {
     public string? Source { get; init; }
+    // Printing, postage, redemption and the after-sending follow-up
+    public DateTime? PrintedAt { get; init; }
+    public string? PrintedByName { get; init; }
+    public int PrintCount { get; init; }
+    public int? PostageCents { get; init; }
+    public string? PostageLabelUrl { get; init; }
+    public string? PostageTrackingCode { get; init; }
+    public bool PostageTest { get; init; }
+    public DateOnly? RedeemedOn { get; init; }
+    public string? RedeemedByName { get; init; }
+    public DateOnly? FollowedUpOn { get; init; }
+    public string? FollowedUpByName { get; init; }
+    /// <summary>The day the guest should be followed up with; null when none is needed (not sent by mail, already done, redeemed, or turned off).</summary>
+    public DateOnly? FollowUpDueOn { get; init; }
     public string? ReplyMethod { get; init; }
     public DateOnly? RepliedOn { get; init; }
     public DateTime? LastActivityAt { get; init; }
@@ -158,7 +172,10 @@ public record CommentSummary(
         c.Responded, c.RespondedAt, c.RespondedByName, c.CreatedAt, c.CreatedByName, c.UpdatedAt,
         c.GuestKey, guestCommentCount)
     {
-        Source = c.Source, ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
+        Source = c.Source, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
+        PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest, RedeemedOn = c.RedeemedOn,
+        RedeemedByName = c.RedeemedByName, FollowedUpOn = c.FollowedUpOn, FollowedUpByName = c.FollowedUpByName,
+        ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
     };
 }
 
@@ -218,6 +235,11 @@ public record AnalyticsDto(
     public List<CountItem> ByReplyMethod { get; init; } = [];
     /// <summary>How the comments came in (SMG survey, Culvers.com, phone), with how many were replied to.</summary>
     public List<CountItem> BySource { get; init; } = [];
+    /// <summary>Coupon cards printed here, coupons the guests came back and used, and postage bought (cents).</summary>
+    public int Printed { get; init; }
+    public int Redeemed { get; init; }
+    public int PostageCents { get; init; }
+    public int FollowedUp { get; init; }
 }
 
 public record RestaurantRollup(
@@ -247,7 +269,14 @@ public record CatalogUser(int Id, string Username, string DisplayName, string Ro
 public record SystemCatalog(List<CatalogGroup> Groups, List<CatalogRestaurant> Restaurants, List<CatalogUser> Users);
 
 /// <summary>Card and reply figures shared by the group and restaurant rows.</summary>
-public record CardStats(int Cards, int Replied, int Waiting, int WaitingOverAWeek, double? AvgDaysToReply, int Smg, int Website, int Phone, int SourceNotRecorded);
+public record CardStats(int Cards, int Replied, int Waiting, int WaitingOverAWeek, double? AvgDaysToReply, int Smg, int Website, int Phone, int SourceNotRecorded)
+{
+    /// <summary>Coupon cards printed, coupons redeemed, guests followed up with after sending, and postage bought (cents).</summary>
+    public int Printed { get; init; }
+    public int Redeemed { get; init; }
+    public int FollowedUp { get; init; }
+    public int PostageCents { get; init; }
+}
 
 public record GroupReportRow(int Id, string Name, bool IsActive, int Restaurants, int Users, int ActiveUsers, int SignIns, int Interactions,
     DateTime? LastActivity, CardStats Stats);
@@ -283,8 +312,34 @@ public record EndpointStat(string Endpoint, int Calls, int AvgMs, int MaxMs, int
 public record ErrorRow(DateTime At, string? UserName, string? GroupName, string Method, string Path, int Status, string? Detail);
 public record SystemStatus(string Version, string Environment, DateTime StartedAt, DateTime ServerTime, string Database, long DatabaseBytes,
     string? LatestMigration, List<TableCount> Tables, string SettingsStore, string Email, bool EmailConfigured, string? TestEmailTo, int LogRetentionDays,
-    DateTime? OldestLogEntry, int Requests24h, int Errors24h, int Refused24h, int AvgMs24h, int P95Ms24h, List<EndpointStat> Slowest, List<ErrorRow> RecentErrors);
+    DateTime? OldestLogEntry, int Requests24h, int Errors24h, int Refused24h, int AvgMs24h, int P95Ms24h, List<EndpointStat> Slowest, List<ErrorRow> RecentErrors)
+{
+    /// <summary>The postage service for printed coupon cards, and what has been bought through it.</summary>
+    public string Postage { get; init; } = "";
+    public bool PostageConfigured { get; init; }
+    public int PostageCardsBought { get; init; }
+    public int PostageCentsSpent { get; init; }
+    public int PostageTestLabels { get; init; }
+}
 
 public record DirectoryRestaurant(int Id, string Name, string? City, string? State, bool IsActive, int GroupId, string GroupName, bool GroupIsActive,
     string[] Owners, int Managers, int TeamLogins, int Cards, int Waiting, int WaitingOverAWeek, DateOnly? LastVisit, DateTime CreatedAt);
 public record SystemPerson(UserDto User, string[] Restaurants, DateTime? LastSeen, int Interactions30d);
+
+// ---- Printing coupon cards, postage, redemption and following up after sending -------------------------
+
+public record PrintConfig(bool PostageAvailable, string PostageProvider, bool CanBuyPostage, int MaxCentsPerCard, string MailedMethod);
+public record CardIdsRequest(int[] CommentIds);
+public record PostageOutcome(int CommentId, bool Ok, int? Cents, string? LabelUrl, bool Test, bool AlreadyBought, string? Error);
+/// <param name="Postage">"bought" (postage printed on the card) or "stamp" (a stamp goes on by hand).</param>
+public record PrintedRequest(int[] CommentIds, bool MarkSent = true, string Postage = "stamp");
+public record RedeemRequest(DateOnly? RedeemedOn, string? Note);
+public record UndoRequest(string? Reason);
+/// <summary>
+/// The call (or other contact) some days after a card was sent, to check it arrived. Reached = false records an
+/// attempt and leaves the follow-up due. Notes hold what was said.
+/// </summary>
+public record FollowedUpRequest(bool Reached, string? Method, DateOnly? ContactedOn, string? Notes);
+public record FollowUpRestaurant(int Id, string Name, int? Days, int EffectiveDays, bool CanSet);
+public record FollowUpSummary(int Due, DateOnly? OldestDueOn, int DefaultDays, List<FollowUpRestaurant> Restaurants);
+public record FollowUpDaysRequest(int? Days);

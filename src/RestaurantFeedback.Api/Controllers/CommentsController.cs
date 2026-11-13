@@ -14,21 +14,31 @@ namespace RestaurantFeedback.Api.Controllers;
 [ApiController]
 [Route("api/comments")]
 [Authorize]
-public class CommentsController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users) : ControllerBase
+public class CommentsController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
+    CommentSummaryBuilder summaries, CardFollowUps followUps) : ControllerBase
 {
     /// <summary>Comments for one restaurant, or every restaurant the user can see when restaurantId is omitted.</summary>
     [HttpGet]
     public async Task<ActionResult<PagedResult<CommentSummary>>> List(
         [FromQuery] int? restaurantId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] bool? responded,
         [FromQuery] string? reason, [FromQuery] string? search, [FromQuery] bool repeatOnly = false, [FromQuery] string? status = null,
+        [FromQuery] string? ids = null,
         [FromQuery] string sort = "visitDate", [FromQuery] string dir = "desc", [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var me = await users.GetAsync();
         if (!me.Has(ManagerPermission.ViewComments)) return Forbid();
-        var ids = ScopedRestaurantIds(me, restaurantId);
-        if (ids is null) return Forbid();
+        var scope = ScopedRestaurantIds(me, restaurantId);
+        if (scope is null) return Forbid();
 
-        var q = db.Comments.Include(c => c.Restaurant).Where(c => ids.Contains(c.RestaurantId));
+        var q = db.Comments.Include(c => c.Restaurant).Where(c => scope.Contains(c.RestaurantId));
+        // A chosen set of cards (e.g. the ones being printed).
+        if (!string.IsNullOrWhiteSpace(ids))
+        {
+            var wanted = ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => int.TryParse(x, out var n) ? n : 0).Where(n => n > 0).Take(200).ToList();
+            q = q.Where(c => wanted.Contains(c.Id));
+        }
+        // Cards whose "did it arrive?" follow-up day has come.
+        List<int> dueIds = status == "follow-up-due" ? (await followUps.DueAsync(me.GroupId, scope)).Select(d => d.Id).ToList() : [];
         if (from is not null) q = q.Where(c => c.VisitDate >= from);
         if (to is not null) q = q.Where(c => c.VisitDate <= to);
         if (responded is not null) q = q.Where(c => c.Responded == responded);
@@ -40,6 +50,10 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
             "attempted" => q.Where(c => !c.Responded && attempted.Contains(c.Id)),
             "waiting" => q.Where(c => !c.Responded),
             "replied" => q.Where(c => c.Responded),
+            "to-print" => q.Where(c => !c.Responded && c.PrintedAt == null),
+            "follow-up-due" => q.Where(c => dueIds.Contains(c.Id)),
+            "sent-not-redeemed" => q.Where(c => c.Responded && c.RedeemedOn == null),
+            "redeemed" => q.Where(c => c.RedeemedOn != null),
             _ => q
         };
         if (!string.IsNullOrWhiteSpace(reason)) q = q.Where(c => c.Reason == reason);
@@ -308,7 +322,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 $"{a.CreatedAt:yyyy-MM-dd} {a.CreatedByName}: {a.Kind}{(a.Method is null ? "" : $" ({a.Method})")}{(a.Text is null ? "" : $" - {a.Text}")}")));
 
         var sb = new StringBuilder();
-        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
+        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Printed At,Postage,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
         foreach (var c in rows)
         {
             sb.AppendLine(string.Join(',', new[]
@@ -317,7 +331,9 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 Csv(c.GuestFirstName), Csv(c.GuestLastName), Csv(c.Phone), Csv(c.StreetAddress), Csv(c.City), Csv(c.State), Csv(c.Zip),
                 Csv(c.Reason), Csv(c.ReasonDetails), Csv(c.CouponOffer), c.DateIssued.ToString("yyyy-MM-dd"), c.ExpiresOn.ToString("yyyy-MM-dd"),
                 Csv(c.AuthorizedBy), c.Responded ? "Yes" : "No", Csv(c.ReplyMethod), c.RepliedOn?.ToString("yyyy-MM-dd") ?? "",
-                c.RespondedAt?.ToString("u") ?? "", Csv(c.RespondedByName), Csv(c.Notes), Csv(history.GetValueOrDefault(c.Id)),
+                c.RespondedAt?.ToString("u") ?? "", Csv(c.RespondedByName), c.PrintedAt?.ToString("u") ?? "",
+                c.PostageCents is int cents ? $"{(c.PostageTest ? "test " : "")}{cents / 100m:0.00}" : "", c.FollowedUpOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.FollowedUpByName),
+                c.RedeemedOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.RedeemedByName), Csv(c.Notes), Csv(history.GetValueOrDefault(c.Id)),
                 counts.GetValueOrDefault(c.GuestKey, 1).ToString(), Csv(c.CreatedByName), c.CreatedAt.ToString("u")
             }));
         }
@@ -333,24 +349,8 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         .Select(ActivityDto.From).ToList();
 
     /// <summary>Summaries with follow-up counts and each comment's latest note.</summary>
-    private async Task<List<CommentSummary>> Summaries(List<GuestComment> items, Func<GuestComment, int> guestCount)
-    {
-        var ids = items.Select(c => c.Id).ToList();
-        var activity = await db.CommentActivities.Where(a => ids.Contains(a.CommentId) && (a.Kind == ActivityKind.Note || a.Kind == ActivityKind.Attempt))
-            .ToListAsync();
-        var byComment = activity.GroupBy(a => a.CommentId).ToDictionary(g => g.Key, g => g.ToList());
-        return items.Select(c =>
-        {
-            var mine = byComment.GetValueOrDefault(c.Id) ?? [];
-            var latest = mine.Where(a => a.Kind == ActivityKind.Note).MaxBy(a => a.CreatedAt);
-            return CommentSummary.From(c, guestCount(c)) with
-            {
-                NoteCount = mine.Count(a => a.Kind == ActivityKind.Note),
-                AttemptCount = mine.Count(a => a.Kind == ActivityKind.Attempt),
-                LatestNote = latest is null ? null : ActivityDto.From(latest)
-            };
-        }).ToList();
-    }
+    private async Task<List<CommentSummary>> Summaries(List<GuestComment> items, Func<GuestComment, int> guestCount) =>
+        await summaries.BuildAsync((await users.GetAsync()).GroupId, items, guestCount);
 
     private static string Csv(string? s)
     {

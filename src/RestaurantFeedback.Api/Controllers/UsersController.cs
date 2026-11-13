@@ -347,6 +347,8 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         ManagerPermission.ExportComments => "Download comments as CSV",
         ManagerPermission.ViewAudit => "View the audit log for their restaurants",
         ManagerPermission.ManageTeamLogin => "Create and reset the shared team login",
+        ManagerPermission.BuyPostage => "Buy USPS postage when printing coupon cards (spends money)",
+        ManagerPermission.SetFollowUpDays => "Set how many days after a card is sent the guest is followed up with",
         _ => p.ToString()
     };
 

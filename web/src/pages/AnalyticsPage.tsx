@@ -101,6 +101,18 @@ export default function AnalyticsPage() {
               <div className="stat-value">{data.repeatGuests}<small className="muted"> / {data.distinctGuests}</small></div>
               <div className="stat-label">Repeat guests / distinct guests{data.crossRestaurantGuests > 0 && ` · ${data.crossRestaurantGuests} at more than one restaurant`}</div>
             </div>
+            <div className="stat">
+              <div className="stat-value">{data.printed}</div>
+              <div className="stat-label">Coupon cards printed here{data.postageCents > 0 && <> · {'$' + (data.postageCents / 100).toFixed(2)} postage bought</>}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">{data.followedUp}</div>
+              <div className="stat-label">Guests followed up with after sending</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">{data.redeemed}<small className="muted"> / {data.totalComments - data.unresponded}</small></div>
+              <div className="stat-label">Coupons redeemed / cards sent</div>
+            </div>
           </div>
 
           {multi && <Comparison rows={data.restaurants} from={from} to={to} />}

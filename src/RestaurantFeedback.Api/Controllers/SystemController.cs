@@ -130,7 +130,11 @@ public class SystemController(AppDbContext db, AuditService audit, CurrentUserPr
         // Cards with a visit in range.
         var cards = await db.Comments.AsNoTracking()
             .Where(c => c.VisitDate >= start && c.VisitDate <= end && restaurantIdSet.Contains(c.RestaurantId))
-            .Select(c => new CardRow(c.RestaurantId, c.Restaurant.GroupId, c.VisitDate, c.Responded, c.RepliedOn, c.Source)).ToListAsync();
+            .Select(c => new CardRow(c.RestaurantId, c.Restaurant.GroupId, c.VisitDate, c.Responded, c.RepliedOn, c.Source)
+            {
+                Printed = c.PrintedAt != null, Redeemed = c.RedeemedOn != null, FollowedUp = c.FollowedUpOn != null,
+                PostageCents = c.PostageTest ? 0 : (c.PostageCents ?? 0)
+            }).ToListAsync();
         // Cards entered in range, by who entered them and on which day.
         var entered = await db.Comments.AsNoTracking()
             .Where(c => c.CreatedAt >= startAt && c.CreatedAt < endAt && restaurantIdSet.Contains(c.RestaurantId))
@@ -197,7 +201,13 @@ public class SystemController(AppDbContext db, AuditService audit, CurrentUserPr
             scoped.GroupBy(a => a.Kind).Select(g => new CountItem(g.Key, g.Sum(a => a.Count))).OrderByDescending(c => c.Count).ToList());
     }
 
-    private record CardRow(int RestaurantId, int GroupId, DateOnly VisitDate, bool Responded, DateOnly? RepliedOn, string? Source);
+    private record CardRow(int RestaurantId, int GroupId, DateOnly VisitDate, bool Responded, DateOnly? RepliedOn, string? Source)
+    {
+        public bool Printed { get; init; }
+        public bool Redeemed { get; init; }
+        public bool FollowedUp { get; init; }
+        public int PostageCents { get; init; }
+    }
 
     private static CardStats Stats(IEnumerable<CardRow> rows, DateOnly today)
     {
@@ -207,7 +217,11 @@ public class SystemController(AppDbContext db, AuditService audit, CurrentUserPr
             list.Count(c => !c.Responded && today.DayNumber - c.VisitDate.DayNumber > 7),
             replyDays.Count == 0 ? null : Math.Round(replyDays.Average(), 1),
             list.Count(c => c.Source == CommentSources.Smg), list.Count(c => c.Source == CommentSources.Website),
-            list.Count(c => c.Source == CommentSources.Phone), list.Count(c => c.Source is null));
+            list.Count(c => c.Source == CommentSources.Phone), list.Count(c => c.Source is null))
+        {
+            Printed = list.Count(c => c.Printed), Redeemed = list.Count(c => c.Redeemed), FollowedUp = list.Count(c => c.FollowedUp),
+            PostageCents = list.Sum(c => c.PostageCents)
+        };
     }
 
     private static HashSet<int> Ids(string? csv) =>

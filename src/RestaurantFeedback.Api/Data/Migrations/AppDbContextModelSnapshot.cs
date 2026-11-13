@@ -207,6 +207,15 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<DateOnly>("ExpiresOn")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("FollowedUpAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FollowedUpByName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("FollowedUpOn")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("GuestFirstName")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -238,11 +247,53 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<string>("PhoneNormalized")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PostageByName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PostageCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PostageId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostageLabelUrl")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostageProvider")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PostagePurchasedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PostageTest")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PostageTrackingCode")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PrintCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("PrintedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrintedByName")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ReasonDetails")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RedeemedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RedeemedByName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("RedeemedOn")
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly?>("RepliedOn")
@@ -415,6 +466,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("FollowUpDays")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("GroupId")
                         .HasColumnType("INTEGER");

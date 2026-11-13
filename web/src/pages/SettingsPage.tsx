@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import type { GroupSettings } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import PostcardSettingsEditor from '../components/PostcardSettingsEditor'
 import { Alert, Field, Spinner, fmtDateTime } from '../components/ui'
 
 function ListEditor({ label, items, onChange, placeholder, hint }: { label: string; items: string[]; onChange: (v: string[]) => void; placeholder: string; hint?: string }) {
@@ -38,6 +39,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
     setS(null)
@@ -54,6 +56,7 @@ export default function SettingsPage() {
     try {
       setS(await api.put<GroupSettings>('/settings', s))
       setSaved(true)
+      setDirty(false)
       await refreshContext()
     } catch (err) {
       setError((err as Error).message)
@@ -81,6 +84,10 @@ export default function SettingsPage() {
             <div className="panel">
               <h2>The card</h2>
               <ListEditor label="Coupon offers" items={s.couponOffers} onChange={(v) => setS({ ...s, couponOffers: v })} placeholder="Free Value Basket" hint='Choices for the "Please enjoy ___" line.' />
+              <br />
+              <Field label="Follow up with the guest after (days)" hint="Days after a coupon card is sent before managers and owners are reminded to check it arrived. Each restaurant's owners can choose their own; 0 turns reminders off.">
+                <input type="number" min={0} max={90} value={s.followUpDays} onChange={(e) => setS({ ...s, followUpDays: Number(e.target.value) })} />
+              </Field>
               <br />
               <Field label="Coupon good for (months)" hint="Printed on the card as “good for 3 months from date of issue”.">
                 <input type="number" min={1} max={24} value={s.couponValidityMonths} onChange={(e) => setS({ ...s, couponValidityMonths: Number(e.target.value) })} />
@@ -120,6 +127,14 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+          <PostcardSettingsEditor
+            settings={s}
+            dirty={dirty}
+            onChange={(postcard) => {
+              setS({ ...s, postcard })
+              setDirty(true)
+            }}
+          />
           <div className="panel">
             <div className="muted" style={{ fontSize: '0.85rem' }}>
               Stored in: <strong>{store || 'unknown'}</strong> — one settings document per investment group.

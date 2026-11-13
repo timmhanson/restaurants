@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { roleTitle } from '../auth/roles'
 import { track } from '../api/tracker'
+import FollowUpNotice from './FollowUpNotice'
 
 export default function Layout() {
   const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup } = useAuth()
@@ -121,6 +122,7 @@ export default function Layout() {
           ))}
       </nav>
       <main className="content">
+        <FollowUpNotice />
         <Outlet />
       </main>
     </div>

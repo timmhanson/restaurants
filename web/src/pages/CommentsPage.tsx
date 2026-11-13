@@ -1,21 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, downloadBlob, qs } from '../api/client'
 import type { CommentSummary, PagedResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import CardForm, { cardFromSummary } from '../components/CardForm'
 import CommentDrawer from '../components/CommentDrawer'
-import { FollowUpBadge } from '../components/FollowUp'
+import { AfterSendBadges, FollowUpBadge } from '../components/FollowUp'
+import { FollowUpTimingButton } from '../components/FollowUpNotice'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, daysAgo, fmtDate } from '../components/ui'
 
 type Sort = 'visitDate' | 'createdAt' | 'guest' | 'reason' | 'lastActivity'
-type Status = '' | 'waiting' | 'needs-reply' | 'attempted' | 'replied'
+type Status = '' | 'waiting' | 'needs-reply' | 'attempted' | 'replied' | 'to-print' | 'follow-up-due' | 'sent-not-redeemed' | 'redeemed'
+const STATUSES: Status[] = ['', 'waiting', 'needs-reply', 'attempted', 'replied', 'to-print', 'follow-up-due', 'sent-not-redeemed', 'redeemed']
+/** Statuses that only make sense for cards already sent (used for the CSV's replied filter). */
+const SENT: Status[] = ['replied', 'follow-up-due', 'sent-not-redeemed', 'redeemed']
 
 export default function CommentsPage() {
   const { restaurants, settings, has } = useAuth()
+  const nav = useNavigate()
+  const [params] = useSearchParams()
+  // The follow-up notice links here with ?status=follow-up-due.
+  const wanted = params.get('status') as Status | null
+  const startStatus: Status = wanted && STATUSES.includes(wanted) ? wanted : ''
   const [restaurantId, setRestaurantId] = useState<number | ''>('')
-  const [from, setFrom] = useState(daysAgo(90))
+  const [from, setFrom] = useState(startStatus ? '' : daysAgo(90))
   const [to, setTo] = useState('')
-  const [status, setStatus] = useState<Status>('')
+  const [status, setStatus] = useState<Status>(startStatus)
+  const [picked, setPicked] = useState<number[]>([])
+  useEffect(() => {
+    if (wanted && STATUSES.includes(wanted)) {
+      setStatus(wanted)
+      setFrom('')
+      setPage(1)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted])
   const [reason, setReason] = useState('')
   const [search, setSearch] = useState('')
   const [repeatOnly, setRepeatOnly] = useState(false)
@@ -97,7 +116,7 @@ export default function CommentsPage() {
 
   const exportCsv = async () => {
     try {
-      const responded = status === 'replied' ? 'true' : status ? 'false' : ''
+      const responded = SENT.includes(status) ? 'true' : status ? 'false' : ''
       const blob = await api.blob(`/comments/export${qs({ restaurantId, from, to, responded })}`)
       downloadBlob(blob, `guest-comments-${new Date().toISOString().slice(0, 10)}.csv`)
     } catch (e) {
@@ -113,9 +132,15 @@ export default function CommentsPage() {
       <div className="page-head">
         <h1>Guest comments</h1>
         <span className="grow" />
+        {has('MarkResponded') && picked.length > 0 && (
+          <button type="button" className="btn btn-primary" onClick={() => nav(`/print-cards?ids=${picked.join(',')}`)}>
+            🖨 Print {picked.length} card{picked.length === 1 ? '' : 's'}
+          </button>
+        )}
         {has('MarkResponded') && (
           <button type="button" className="btn" onClick={showQueue}>Reply queue</button>
         )}
+        <FollowUpTimingButton />
         {has('ExportComments') && (
           <button type="button" className="btn" onClick={exportCsv}>
             ⬇ Download CSV
@@ -145,6 +170,10 @@ export default function CommentsPage() {
             <option value="needs-reply">Not tried yet</option>
             <option value="attempted">Tried, not reached</option>
             <option value="replied">Replied</option>
+            <option value="to-print">Not printed or sent yet</option>
+            <option value="follow-up-due">Follow-up due (did the card arrive?)</option>
+            <option value="sent-not-redeemed">Sent, coupon not redeemed</option>
+            <option value="redeemed">Coupon redeemed</option>
           </select>
         </Field>
         <Field label="Reason">
@@ -172,6 +201,16 @@ export default function CommentsPage() {
           <table>
             <thead>
               <tr>
+                {has('MarkResponded') && (
+                  <th>
+                    <input
+                      type="checkbox"
+                      aria-label="Choose every card on this page for printing"
+                      checked={data.items.length > 0 && data.items.every((c) => picked.includes(c.id))}
+                      onChange={(e) => setPicked((p) => (e.target.checked ? [...new Set([...p, ...data.items.map((c) => c.id)])] : p.filter((id) => !data.items.some((c) => c.id === id))))}
+                    />
+                  </th>
+                )}
                 <th className="sortable" onClick={() => toggleSort('visitDate')}>Visit{arrow('visitDate')}</th>
                 <th>Day</th>
                 {!restaurantId && restaurants.length > 1 && <th>Restaurant</th>}
@@ -186,6 +225,16 @@ export default function CommentsPage() {
             <tbody>
               {data.items.map((c) => (
                 <tr key={c.id} className="clickable" onClick={() => openComment(c)}>
+                  {has('MarkResponded') && (
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Choose ${c.guestFirstName} ${c.guestLastName}'s card for printing`}
+                        checked={picked.includes(c.id)}
+                        onChange={(e) => setPicked((p) => (e.target.checked ? [...p, c.id] : p.filter((id) => id !== c.id)))}
+                      />
+                    </td>
+                  )}
                   <td>{fmtDate(c.visitDate)}</td>
                   <td>{c.dayOfWeek.slice(0, 3)}</td>
                   {!restaurantId && restaurants.length > 1 && <td>{c.restaurantName}</td>}
@@ -206,6 +255,7 @@ export default function CommentsPage() {
                   <td>{c.couponOffer || <span className="muted">—</span>}</td>
                   <td>
                     <FollowUpBadge c={c} />
+                    <div><AfterSendBadges c={c} /></div>
                     {c.noteCount > 0 && (
                       <div className="small muted" title={c.latestNote ? `${c.latestNote.createdByName}: ${c.latestNote.text}` : undefined}>
                         💬 {c.noteCount} note{c.noteCount === 1 ? '' : 's'}

@@ -43,11 +43,16 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     }
 
     public CapturingEmailSender Emails { get; } = new();
+    public FakePostageProvider Postage { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
-        builder.ConfigureServices(services => services.AddSingleton<IEmailSender>(Emails));
+        builder.ConfigureServices(services =>
+        {
+            services.AddSingleton<IEmailSender>(Emails);
+            services.AddSingleton<IPostageProvider>(Postage);
+        });
     }
 
     /// <summary>Every client behaves like the current site, which always sends its session id.</summary>
@@ -107,4 +112,20 @@ public class CapturingEmailSender : IEmailSender
 public class ApiCollection : ICollectionFixture<ApiFactory>
 {
     public const string Name = "api";
+}
+
+/// <summary>Stands in for EasyPost: "buys" a 65-cent test label and remembers what it was asked for.</summary>
+public class FakePostageProvider : IPostageProvider
+{
+    public List<(PostageAddress From, PostageAddress To)> Bought { get; } = [];
+    public bool Configured => true;
+    public string Description => "Fake postage (tests)";
+
+    public Task<PostageResult> BuyPostcardAsync(PostageAddress from, PostageAddress to, double widthIn, double heightIn, CancellationToken ct = default)
+    {
+        if (to.Name.Contains("Undeliverable")) throw new PostageException("EasyPost: Address not found (street1: House number is missing)");
+        lock (Bought) Bought.Add((from, to));
+        var n = Bought.Count;
+        return Task.FromResult(new PostageResult("Fake", $"shp_test{n}", 65, $"https://labels.test/{n}.png", $"94001{n:000000}", true));
+    }
 }

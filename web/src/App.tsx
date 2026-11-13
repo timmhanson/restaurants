@@ -16,6 +16,8 @@ import GroupsPage from './pages/GroupsPage'
 import LoginPage from './pages/LoginPage'
 import OverviewPage from './pages/OverviewPage'
 import PeoplePage from './pages/PeoplePage'
+import PrintCardsPage from './pages/PrintCardsPage'
+import PrintTestPage from './pages/PrintTestPage'
 import ReportsPage from './pages/ReportsPage'
 import RestaurantsPage from './pages/RestaurantsPage'
 import SecurityPage from './pages/SecurityPage'
@@ -79,6 +81,9 @@ export default function App() {
     <>
     <Tracking signedIn />
     <Routes>
+      {/* Outside the usual frame so that only the cards themselves reach the printer. */}
+      <Route path="/print-cards" element={<Guard home={home} allow={inGroup && perm('MarkResponded')}><PrintCardsPage /></Guard>} />
+      <Route path="/print-test" element={<Guard home={home} allow={inGroup && isGroupWide}><PrintTestPage /></Guard>} />
       <Route element={<Layout />}>
         <Route index element={<Navigate to={home} replace />} />
         <Route path="/login" element={<Navigate to={home} replace />} />

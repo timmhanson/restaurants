@@ -50,7 +50,11 @@ public enum ManagerPermission
     ExportComments = 32,
     ViewAudit = 64,
     ManageTeamLogin = 128,
-    All = ViewComments | EditComments | DeleteComments | MarkResponded | ViewAnalytics | ExportComments | ViewAudit | ManageTeamLogin
+    /// <summary>Spend money: buy USPS postage when printing a guest's coupon card.</summary>
+    BuyPostage = 256,
+    /// <summary>Change how many days after a card is sent the guest should be followed up with, at the manager's restaurants.</summary>
+    SetFollowUpDays = 512,
+    All = ViewComments | EditComments | DeleteComments | MarkResponded | ViewAnalytics | ExportComments | ViewAudit | ManageTeamLogin | BuyPostage | SetFollowUpDays
 }
 
 /// <summary>An investment / ownership group. The tenant boundary for users and restaurants.</summary>
@@ -76,6 +80,11 @@ public class Restaurant
     public string? Zip { get; set; }
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>
+    /// Days after a coupon card is sent before the guest should be called to check it arrived.
+    /// Null uses the investment group's default (5); 0 turns the reminders off for this restaurant.
+    /// </summary>
+    public int? FollowUpDays { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public List<UserRestaurant> UserRestaurants { get; set; } = [];
     public List<GuestComment> Comments { get; set; } = [];
@@ -165,6 +174,32 @@ public class GuestComment
     /// <summary>Last note, attempt or reply, so lists can show what is new.</summary>
     public DateTime? LastActivityAt { get; set; }
 
+    // Printing the coupon card onto a postcard
+    public DateTime? PrintedAt { get; set; }
+    public string? PrintedByName { get; set; }
+    public int PrintCount { get; set; }
+
+    // Postage bought for the card (null when a stamp goes on by hand). Money is kept in cents.
+    public string? PostageProvider { get; set; }
+    public string? PostageId { get; set; }
+    public int? PostageCents { get; set; }
+    public string? PostageLabelUrl { get; set; }
+    public string? PostageTrackingCode { get; set; }
+    public DateTime? PostagePurchasedAt { get; set; }
+    public string? PostageByName { get; set; }
+    /// <summary>Bought with the provider's test key: a sample label that is not valid postage.</summary>
+    public bool PostageTest { get; set; }
+
+    // The guest came back and used the coupon
+    public DateOnly? RedeemedOn { get; set; }
+    public DateTime? RedeemedAt { get; set; }
+    public string? RedeemedByName { get; set; }
+
+    // Checking with the guest, some days after the card was sent, that it arrived
+    public DateOnly? FollowedUpOn { get; set; }
+    public DateTime? FollowedUpAt { get; set; }
+    public string? FollowedUpByName { get; set; }
+
     // Duplicate detection keys (derived, see GuestMatcher)
     public string GuestKey { get; set; } = "";
     public string? PhoneNormalized { get; set; }
@@ -189,6 +224,19 @@ public enum ActivityKind
     Replied = 2,
     /// <summary>The reply was undone and the comment needs a reply again.</summary>
     Reopened = 3
+    ,
+    /// <summary>The coupon card was printed onto a postcard.</summary>
+    Printed = 4,
+    /// <summary>USPS postage was bought for the card.</summary>
+    PostageBought = 5,
+    /// <summary>The guest used the coupon.</summary>
+    Redeemed = 6,
+    /// <summary>A redemption recorded by mistake was taken back.</summary>
+    RedemptionUndone = 7,
+    /// <summary>Spoke with the guest after the card was sent (did it arrive?). Notes hold the conversation.</summary>
+    FollowedUp = 8,
+    /// <summary>Tried to follow up but did not reach the guest; the follow-up stays due.</summary>
+    FollowUpAttempt = 9
 }
 
 /// <summary>One entry in a comment's follow-up history, shared by every manager who can see the comment.</summary>

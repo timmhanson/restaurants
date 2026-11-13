@@ -23,6 +23,9 @@ See README.md for the architecture, roles and deployment.
   Overview's "Needs your attention" list.
 - **Never create a dead end.** Every forced or modal screen needs a visible way out (Sign out / Cancel), and
   nothing may require a step the person cannot complete (e.g. an emailed code with no email on file).
+- **Money needs its own permission and a cap.** Anything that spends money (postage today) requires a specific
+  permission, a confirmation naming what will be charged, protection against charging twice, and an audit row.
+  Third-party keys live only in App Service settings.
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use

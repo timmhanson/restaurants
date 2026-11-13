@@ -45,6 +45,15 @@ const defaultSettings: GroupSettings = {
   duplicateWindowDays: 7,
   repeatGuestAlertThreshold: 2,
   requirePhoneOrAddress: true, replyMethods: [],
+  followUpDays: 5,
+  postcard: {
+    stock: 'Blank', widthIn: 6, heightIn: 4, nudgeXIn: 0, nudgeYIn: 0, fontPt: 11, allowBoughtPostage: true,
+    fields: {
+      offer: { x: 0.95, y: 1.2, show: true }, dateIssued: { x: 1.15, y: 1.95, show: true }, goodUntil: { x: 1.15, y: 2.3, show: false },
+      authorizedBy: { x: 1.6, y: 2.75, show: true }, guestName: { x: 3.45, y: 1.7, show: true }, street: { x: 3.45, y: 2.1, show: true },
+      cityStateZip: { x: 3.45, y: 2.5, show: true },
+    },
+  },
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

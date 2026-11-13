@@ -20,6 +20,8 @@ public class SettingsController(IGroupSettingsStore store, AuditService audit, C
         var me = await users.GetAsync();
         if (me.GroupId is null) return new GroupSettings();
         var settings = await store.GetAsync(me.GroupId.Value, ct);
+        settings.Postcard ??= new PostcardSettings();
+        settings.Postcard.Normalize();
         settings.GroupDisplayName = await GroupName(me.GroupId.Value, ct) ?? settings.GroupDisplayName;
         return settings;
     }
@@ -37,6 +39,9 @@ public class SettingsController(IGroupSettingsStore store, AuditService audit, C
         if (settings.ReplyMethods.Count == 0) settings.ReplyMethods = new GroupSettings().ReplyMethods;
         if (settings.ReasonCategories.Count == 0) return BadRequest(new { message = "At least one reason category is required." });
         settings.CouponValidityMonths = Math.Clamp(settings.CouponValidityMonths, 1, 24);
+        settings.Postcard ??= new PostcardSettings();
+        settings.Postcard.Normalize();
+        settings.FollowUpDays = Math.Clamp(settings.FollowUpDays, 0, 90);
         settings.DuplicateWindowDays = Math.Clamp(settings.DuplicateWindowDays, 0, 365);
         settings.RepeatGuestAlertThreshold = Math.Clamp(settings.RepeatGuestAlertThreshold, 2, 100);
         settings.GroupDisplayName = await GroupName(me.GroupId.Value, ct) ?? settings.GroupDisplayName;

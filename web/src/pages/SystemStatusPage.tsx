@@ -74,6 +74,15 @@ export default function SystemStatusPage() {
                 <dd>{data.database}, {size(data.databaseBytes)}<div className="muted small">Structure version: {data.latestMigration ?? 'unknown'}</div></dd>
                 <dt>Group settings</dt>
                 <dd>{data.settingsStore}</dd>
+                <dt>Postage</dt>
+                <dd>
+                  {data.postageConfigured ? <Badge kind="ok">set up</Badge> : <Badge kind="neutral">not set up</Badge>} {data.postage}
+                  <div className="muted small">
+                    {data.postageConfigured
+                      ? data.postageCardsBought + ' card(s) of postage bought, $' + (data.postageCentsSpent / 100).toFixed(2) + ' in all' + (data.postageTestLabels ? '; ' + data.postageTestLabels + ' test label(s)' : '') + '.'
+                      : 'Coupon cards print for a stamp by hand. To buy postage when printing, add an EasyPost key as the Postage__EasyPostApiKey setting on the web app.'}
+                  </div>
+                </dd>
                 <dt>Email</dt>
                 <dd>
                   {data.emailConfigured ? <Badge kind="ok">working service</Badge> : <Badge kind="danger">not set up</Badge>} {data.email}

@@ -105,7 +105,11 @@ public class AnalyticsController(AppDbContext db, CurrentUserProvider users) : C
             AvgDaysToReply = AvgReplyDays(rows),
             WaitingOverAWeek = rows.Count(c => !c.Responded && WaitingDays(c) > 7),
             ByReplyMethod = Counts(rows.Where(c => c.Responded), c => c.ReplyMethod ?? "Not recorded"),
-            BySource = Counts(rows, c => c.Source ?? "Not recorded")
+            BySource = Counts(rows, c => c.Source ?? "Not recorded"),
+            Printed = rows.Count(c => c.PrintedAt != null),
+            Redeemed = rows.Count(c => c.RedeemedOn != null),
+            FollowedUp = rows.Count(c => c.FollowedUpOn != null),
+            PostageCents = rows.Where(c => !c.PostageTest).Sum(c => c.PostageCents ?? 0)
         };
     }
 

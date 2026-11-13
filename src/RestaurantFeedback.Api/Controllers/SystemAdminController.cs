@@ -18,7 +18,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Route("api/system")]
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
-    InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users) : ControllerBase
+    InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -71,6 +71,9 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             var waiting = cards.Count(c => c.GroupId == g.Id && !c.Responded && OverAWeek(c.VisitDate));
             if (waiting > 0)
                 attention.Add(new("medium", $"{waiting} card{(waiting == 1 ? " has" : "s have")} waited over a week at {g.Name}", "Guests who have not had a reply yet.", $"/reports?groupIds={g.Id}"));
+            var dueFollowUps = (await followUps.DueAsync(g.Id, restaurants.Where(r => r.GroupId == g.Id).Select(r => r.Id))).Count;
+            if (dueFollowUps > 0)
+                attention.Add(new("info", $"{dueFollowUps} guest{(dueFollowUps == 1 ? " is" : "s are")} due a follow-up at {g.Name}", "Their coupon cards were sent and nobody has checked they arrived. The group's managers and owners see a reminder.", $"/reports?groupIds={g.Id}"));
         }
         var never = people.Count(u => u.IsActive && u.LastLoginAt == null && u.CreatedAt < now.AddDays(-2));
         if (never > 0)
@@ -187,7 +190,14 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             settingsStore.Description, mail.Description, mail is not LoggingEmailSender, myEmail, logOptions.RetentionDays, oldest is null ? null : Utc(oldest.Value),
             calls.Count, calls.Count(c => c.Status >= 500), calls.Count(c => c.Status is 401 or 403),
             times.Count == 0 ? 0 : (int)times.Average(), times.Count == 0 ? 0 : times[Math.Min(times.Count - 1, (int)(times.Count * 0.95))],
-            slowest, recentErrors);
+            slowest, recentErrors)
+        {
+            Postage = postage.Description,
+            PostageConfigured = postage.Configured,
+            PostageCardsBought = await db.Comments.CountAsync(c => c.PostageId != null && !c.PostageTest),
+            PostageCentsSpent = await db.Comments.Where(c => c.PostageId != null && !c.PostageTest).SumAsync(c => c.PostageCents ?? 0),
+            PostageTestLabels = await db.Comments.CountAsync(c => c.PostageId != null && c.PostageTest)
+        };
     }
 
     /// <summary>Sends a test message to the System Administrator's own address to prove the email service works.</summary>

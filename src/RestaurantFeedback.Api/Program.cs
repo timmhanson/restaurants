@@ -69,8 +69,20 @@ if (!string.IsNullOrWhiteSpace(email.ConnectionString) || !string.IsNullOrWhiteS
 else
     builder.Services.AddSingleton<IEmailSender, LoggingEmailSender>();
 builder.Services.AddScoped<PasswordCodeService>();
+
+// ---- Postage for printed coupon cards (optional; stamps by hand always work) ----
+var postage = config.GetSection("Postage").Get<PostageOptions>() ?? new PostageOptions();
+builder.Services.AddSingleton(postage);
+if (!string.IsNullOrWhiteSpace(postage.EasyPostApiKey))
+    builder.Services.AddHttpClient<IPostageProvider, EasyPostProvider>();
+else if (postage.Sample && builder.Environment.IsDevelopment())
+    builder.Services.AddSingleton<IPostageProvider, SamplePostageProvider>();
+else
+    builder.Services.AddSingleton<IPostageProvider, NoPostageProvider>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AuditService>();
+builder.Services.AddScoped<CardFollowUps>();
+builder.Services.AddScoped<CommentSummaryBuilder>();
 // Every user interaction (API calls here, page views and clicks from the browser) for the System Administrator.
 builder.Services.AddSingleton(config.GetSection("InteractionLog").Get<InteractionLogOptions>() ?? new InteractionLogOptions());
 builder.Services.AddSingleton<InteractionLogQueue>();

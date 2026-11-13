@@ -94,6 +94,39 @@ analytics and filterable in the comments view.
 
 Every login, card, edit, response, export, user, restaurant and settings change is written to the audit log.
 
+## Printing, postage, follow-up and redemption
+
+**Printing.** On Comments, tick cards and choose **Print cards** (or **Print card** on one card). Each card
+prints on its own page at the card's real size. Investment group settings choose the stock:
+
+- **Pre-printed cards:** only the blanks are printed (offer, dates, authorized by, guest name and address),
+  each at a position measured in inches from the card's top-left corner, with a nudge for the printer.
+- **Blank postcards:** the whole card is printed, with the return address and a box for the stamp.
+
+Settings shows a real-size preview and prints a test card. After the print dialog closes, one confirmation
+marks every card as sent (reply method "Mailed coupon card") and records the print in the card's history.
+
+**Postage.** The print screen offers two choices every time:
+
+- **Stamps by hand:** nothing is charged; the card prints with the guest's address and a stamp box.
+- **Buy and print postage:** USPS First-Class postage is bought per card through EasyPost
+  (`EasyPostProvider`) and its mailing label prints as the card's address side. It needs the
+  `Postage__EasyPostApiKey` app setting, the group's "allow postage" setting and the `BuyPostage`
+  permission. A card is never charged twice, nothing is bought above `Postage__MaxCentsPerCard` (150), and
+  each purchase is audited. An EasyPost *test* key buys sample labels at no cost. USPS itself has no
+  service for printing postage on postcards; its label service is for packages.
+
+**Following up.** Once a card has gone out by mail, the guest is due a follow-up to check it arrived:
+5 days later by default (`FollowUpDays` in group settings), or the number its restaurant chooses. Owners set
+their restaurants' days; managers can only with the `SetFollowUpDays` permission; 0 turns it off. Managers
+and owners see a notice at the top of every page while anyone is due, with **Review and call**. Recording
+the follow-up keeps notes about the conversation in the card's history; "no answer" is kept as an attempt
+and leaves it due. No follow-up is asked for once the coupon is redeemed.
+
+**Redeeming.** **Coupon redeemed** records the day the guest used the coupon (and can be undone with a
+reason). Analytics, the export and the System Administrator's reports show cards printed, guests followed
+up with, coupons redeemed and postage bought.
+
 ## System administration
 
 A System Administrator oversees the whole site, not restaurants, and has a menu of their own (dark sidebar):
