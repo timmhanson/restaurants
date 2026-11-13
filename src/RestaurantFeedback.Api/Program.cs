@@ -75,12 +75,13 @@ builder.Services.AddScoped<PasswordCodeService>();
 var usps = config.GetSection("Usps").Get<UspsOptions>() ?? new UspsOptions();
 builder.Services.AddSingleton(usps);
 builder.Services.AddMemoryCache();
-if (!string.IsNullOrWhiteSpace(usps.ClientId) && !string.IsNullOrWhiteSpace(usps.ClientSecret))
-    builder.Services.AddHttpClient<IAddressVerifier, UspsAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
-else if (usps.Sample && builder.Environment.IsDevelopment())
+// The System Administrator enters the USPS account on System status (stored encrypted); the Usps__* app settings
+// are a fallback. Until one exists, address checking simply stays off.
+builder.Services.AddSingleton<UspsAccountStore>();
+if (usps.Sample && builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IAddressVerifier, SampleAddressVerifier>();
 else
-    builder.Services.AddSingleton<IAddressVerifier, NoAddressVerifier>();
+    builder.Services.AddHttpClient<IAddressVerifier, UspsAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
 
 // ---- Postage for printed coupon cards (optional; stamps by hand always work) ----
 var postage = config.GetSection("Postage").Get<PostageOptions>() ?? new PostageOptions();
@@ -149,6 +150,7 @@ app.MapFallback("/api/{**path}", () => Results.NotFound(new { message = "Not fou
 app.MapFallbackToFile("index.html", CachePolicy.StaticFiles());
 
 await DbSeeder.SeedAsync(app.Services);
+await app.Services.GetRequiredService<UspsAccountStore>().LoadAsync();
 app.Run();
 
 public partial class Program;

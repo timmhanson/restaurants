@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using RestaurantFeedback.Api.Dtos;
 
 namespace RestaurantFeedback.Api.Tests;
@@ -61,5 +62,47 @@ public class SystemAdminTests(ApiFactory factory)
         var people = (await admin.GetFromJsonAsync<List<SystemPerson>>("/api/system/people"))!;
         Assert.Contains(people, p => p.User.Id == me.Id && p.Restaurants.Length >= 1 && p.LastSeen != null);
         Assert.Contains(people, p => p.User.Role == "SuperAdmin" && p.User.GroupId == null);
+    }
+
+    [Fact]
+    public async Task The_system_administrator_enters_the_usps_account_and_it_is_kept_encrypted()
+    {
+        const string key = "uspsConsumerKEY1234abcd", secret = "uspsConsumerSECRET5678wxyz";
+        var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync("/api/system/usps-account")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync("/api/system/usps-account", new UspsAccountRequest(key, secret, false))).StatusCode);
+
+        var admin = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
+        Assert.False((await admin.GetFromJsonAsync<UspsAccountDto>("/api/system/usps-account"))!.Configured);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync("/api/system/usps-account", new UspsAccountRequest(key, "", false))).StatusCode);
+
+        var saved = await admin.PutAsJsonAsync("/api/system/usps-account", new UspsAccountRequest(key, secret, true));
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var body = await saved.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(key, body);
+        Assert.DoesNotContain(secret, body);
+        var account = (await admin.GetFromJsonAsync<UspsAccountDto>("/api/system/usps-account"))!;
+        Assert.True(account.Configured && account.TestEnvironment);
+        Assert.Equal("Saved in the site", account.Source);
+        Assert.Equal("abcd", account.KeyEnding);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Stored encrypted, kept out of the audit log, and picked up straight away by the address service.
+            var db = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Data.AppDbContext>();
+            var stored = db.SiteSettings.Single(x => x.Key == "usps.account").Value;
+            Assert.DoesNotContain(key, stored);
+            Assert.DoesNotContain(secret, stored);
+            Assert.DoesNotContain(db.AuditLogs.ToList(), a => (a.Details ?? "").Contains(secret) || (a.Details ?? "").Contains(key));
+            var live = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Services.UspsAccountStore>().Current!;
+            Assert.Equal(secret, live.ClientSecret);
+            Assert.Equal("https://apis-tem.usps.com", live.BaseUrl);
+        }
+
+        var test = (await (await admin.PostAsync("/api/system/usps-account/test", null)).Content.ReadFromJsonAsync<ServiceTestResult>())!;
+        Assert.True(test.Ok);
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.DeleteAsync("/api/system/usps-account")).StatusCode);
+        Assert.False((await admin.GetFromJsonAsync<UspsAccountDto>("/api/system/usps-account"))!.Configured);
     }
 }

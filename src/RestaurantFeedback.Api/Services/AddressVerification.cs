@@ -52,6 +52,13 @@ public interface IAddressVerifier
     bool Configured { get; }
     string Description { get; }
     Task<AddressCheck> CheckAsync(AddressInput input, CancellationToken ct = default);
+
+    /// <summary>Proves the service works by checking a known address (USPS headquarters).</summary>
+    async Task<(bool Ok, string Message)> TestAsync(CancellationToken ct = default)
+    {
+        var r = await CheckAsync(new AddressInput("475 L'Enfant Plaza SW", "Washington", "DC", "20260"), ct);
+        return AddressStatuses.IsResult(r.Status) ? (true, "The address service answered. Address checking is working.") : (false, r.Message);
+    }
 }
 
 public class NoAddressVerifier : IAddressVerifier
@@ -67,18 +74,59 @@ public class NoAddressVerifier : IAddressVerifier
 /// for a day so retyping or saving a card does not use up USPS's request allowance, and after USPS says it is
 /// busy (429/503) the service is left alone for a while.
 /// </summary>
-public class UspsAddressVerifier(HttpClient http, UspsOptions options, IMemoryCache cache, ILogger<UspsAddressVerifier> log) : IAddressVerifier
+public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMemoryCache cache, ILogger<UspsAddressVerifier> log) : IAddressVerifier
 {
     private static readonly SemaphoreSlim TokenLock = new(1, 1);
     private static string? _token;
     private static DateTime _tokenExpires = DateTime.MinValue;
     private static DateTime _pausedUntil = DateTime.MinValue;
+    private static int _accountVersion = -1;
+    private static string? _signInProblem;
 
-    public bool Configured => true;
-    public string Description => options.BaseUrl.Contains("-tem.") ? "USPS Addresses (testing environment)" : "USPS Addresses";
+    /// <summary>The account in use right now: the one the System Administrator saved in the site, else the app settings.</summary>
+    private UspsCredentials? Account
+    {
+        get
+        {
+            // New account details: forget the old sign-in and any pause it caused.
+            if (account.Version != _accountVersion)
+            {
+                _accountVersion = account.Version;
+                _token = null;
+                _pausedUntil = DateTime.MinValue;
+                _signInProblem = null;
+            }
+            return account.Current;
+        }
+    }
+    private string BaseUrl => (Account?.BaseUrl ?? "https://apis.usps.com").TrimEnd('/');
+
+    public bool Configured => Account is not null;
+    public string Description => Account is not { } a ? "Not set up" : a.BaseUrl.Contains("-tem.") ? "USPS Addresses (testing environment)" : "USPS Addresses";
+
+    /// <summary>Signs in afresh and looks up USPS's own headquarters, skipping anything remembered, to prove the account works.</summary>
+    public async Task<(bool Ok, string Message)> TestAsync(CancellationToken ct = default)
+    {
+        if (Account is null) return (false, "No USPS account details have been entered.");
+        _token = null;
+        _pausedUntil = DateTime.MinValue;
+        _signInProblem = null;
+        try
+        {
+            var typed = new AddressInput("475 L'Enfant Plaza SW", "Washington", "DC", "20260");
+            var r = await AskAsync(typed.Street!, typed.City!, "DC", "20260", typed, ct);
+            if (AddressStatuses.IsResult(r.Status)) return (true, "USPS accepted the account and answered an address check. Address checking is working.");
+            return (false, _signInProblem ?? r.Message);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return (false, "USPS could not be reached. Check whether the testing environment box matches the account, then try again.");
+        }
+    }
 
     public async Task<AddressCheck> CheckAsync(AddressInput input, CancellationToken ct = default)
     {
+        if (Account is null) return new(AddressStatuses.Unavailable, "Address checking is not set up.");
         var street = Clean(input.Street);
         var city = Clean(input.City);
         var zip5 = Zip5(input.Zip);
@@ -115,7 +163,7 @@ public class UspsAddressVerifier(HttpClient http, UspsOptions options, IMemoryCa
         {
             var token = await TokenAsync(ct);
             if (token is null) return new(AddressStatuses.Unavailable, "Address checking could not sign in to USPS. You can still save the card.");
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"{options.BaseUrl.TrimEnd('/')}/addresses/v3/address?{string.Join('&', query)}");
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/addresses/v3/address?{string.Join('&', query)}");
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var res = await http.SendAsync(req, ct);
@@ -192,13 +240,16 @@ public class UspsAddressVerifier(HttpClient http, UspsOptions options, IMemoryCa
         try
         {
             if (_token is not null && DateTime.UtcNow < _tokenExpires) return _token;
-            using var res = await http.PostAsJsonAsync($"{options.BaseUrl.TrimEnd('/')}/oauth2/v3/token",
-                new { client_id = options.ClientId, client_secret = options.ClientSecret, grant_type = "client_credentials" }, ct);
+            var creds = Account;
+            if (creds is null) return null;
+            using var res = await http.PostAsJsonAsync($"{BaseUrl}/oauth2/v3/token",
+                new { client_id = creds.ClientId, client_secret = creds.ClientSecret, grant_type = "client_credentials" }, ct);
             if (!res.IsSuccessStatusCode)
             {
                 // Wrong key or secret: stop asking for a while instead of failing on every card.
                 _pausedUntil = DateTime.UtcNow.AddMinutes(10);
-                log.LogError("USPS refused the sign-in for address checking ({Status}). Check Usps__ClientId and Usps__ClientSecret.", (int)res.StatusCode);
+                _signInProblem = $"USPS refused the sign-in ({(int)res.StatusCode}). Check the Consumer Key and Consumer Secret, and that the USPS app is allowed to use the Addresses API.";
+                log.LogError("USPS refused the sign-in for address checking ({Status}). Check the USPS account details on System status.", (int)res.StatusCode);
                 return null;
             }
             var root = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct)).RootElement;
@@ -275,5 +326,88 @@ public class SampleAddressVerifier : IAddressVerifier
         return Task.FromResult(tidy == street.ToUpperInvariant()
             ? new AddressCheck(AddressStatuses.Verified, "USPS delivers to this address.", suggestion)
             : new AddressCheck(AddressStatuses.Corrected, $"USPS writes this address as {shown}.", suggestion));
+    }
+}
+
+/// <param name="Source">"Saved in the site" (by the System Administrator) or "App settings".</param>
+public record UspsCredentials(string ClientId, string ClientSecret, string BaseUrl, string Source, DateTime? SavedAt, string? SavedBy);
+
+/// <summary>
+/// The site's USPS developer account (Consumer Key and Secret) for address checking. The System Administrator
+/// enters it on System status; it is encrypted with Data Protection before it is stored and never sent back to a
+/// browser or logged. When nothing is saved there, the Usps__ClientId / Usps__ClientSecret app settings are used.
+/// </summary>
+public class UspsAccountStore(IServiceScopeFactory scopes, Microsoft.AspNetCore.DataProtection.IDataProtectionProvider protection, UspsOptions options, ILogger<UspsAccountStore> log)
+{
+    private const string SettingKey = "usps.account";
+    public const string Production = "https://apis.usps.com";
+    public const string Testing = "https://apis-tem.usps.com";
+    private readonly Microsoft.AspNetCore.DataProtection.IDataProtector _protector = protection.CreateProtector("RestaurantFeedback.SiteSecret.Usps.v1");
+    private volatile UspsCredentials? _current;
+    private int _version;
+
+    private record Saved(string ClientId, string ClientSecret, bool TestEnvironment);
+
+    public UspsCredentials? Current => _current;
+    /// <summary>Goes up every time the account changes, so a cached sign-in is not reused with new details.</summary>
+    public int Version => _version;
+
+    /// <summary>Reads the saved account (called at start-up and after every change).</summary>
+    public async Task LoadAsync(CancellationToken ct = default)
+    {
+        UspsCredentials? found = null;
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Data.AppDbContext>();
+            var row = await db.SiteSettings.FindAsync([SettingKey], ct);
+            if (row is not null)
+            {
+                var json = Microsoft.AspNetCore.DataProtection.DataProtectionCommonExtensions.Unprotect(_protector, row.Value);
+                var saved = System.Text.Json.JsonSerializer.Deserialize<Saved>(json)!;
+                found = new UspsCredentials(saved.ClientId, saved.ClientSecret, saved.TestEnvironment ? Testing : Production, "Saved in the site",
+                    DateTime.SpecifyKind(row.UpdatedAt, DateTimeKind.Utc), row.UpdatedBy);
+            }
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or System.Text.Json.JsonException)
+        {
+            log.LogError(ex, "The saved USPS account can no longer be read and must be entered again");
+        }
+        if (found is null && !string.IsNullOrWhiteSpace(options.ClientId) && !string.IsNullOrWhiteSpace(options.ClientSecret))
+            found = new UspsCredentials(options.ClientId, options.ClientSecret, options.BaseUrl, "App settings", null, null);
+        _current = found;
+        Interlocked.Increment(ref _version);
+    }
+
+    public async Task SaveAsync(string clientId, string clientSecret, bool testEnvironment, string by, CancellationToken ct = default)
+    {
+        using (var scope = scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Data.AppDbContext>();
+            var value = Microsoft.AspNetCore.DataProtection.DataProtectionCommonExtensions.Protect(_protector,
+                System.Text.Json.JsonSerializer.Serialize(new Saved(clientId.Trim(), clientSecret.Trim(), testEnvironment)));
+            var row = await db.SiteSettings.FindAsync([SettingKey], ct);
+            if (row is null) db.SiteSettings.Add(row = new RestaurantFeedback.Api.Models.SiteSetting { Key = SettingKey });
+            row.Value = value;
+            row.UpdatedAt = DateTime.UtcNow;
+            row.UpdatedBy = by;
+            await db.SaveChangesAsync(ct);
+        }
+        await LoadAsync(ct);
+    }
+
+    public async Task RemoveAsync(CancellationToken ct = default)
+    {
+        using (var scope = scopes.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Data.AppDbContext>();
+            var row = await db.SiteSettings.FindAsync([SettingKey], ct);
+            if (row is not null)
+            {
+                db.SiteSettings.Remove(row);
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        await LoadAsync(ct);
     }
 }

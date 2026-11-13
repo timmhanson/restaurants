@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<CommentActivity> CommentActivities => Set<CommentActivity>();
     public DbSet<InteractionLog> InteractionLogs => Set<InteractionLog>();
+    public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -36,6 +37,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         b.Entity<AuditLog>().HasIndex(a => a.Timestamp);
         b.Entity<AuditLog>().HasIndex(a => new { a.GroupId, a.RestaurantId });
+
+        b.Entity<SiteSetting>().HasKey(s => s.Key);
+        b.Entity<SiteSetting>().Property(s => s.Key).HasMaxLength(100);
 
         var log = b.Entity<InteractionLog>();
         log.HasIndex(l => l.At);

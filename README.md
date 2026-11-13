@@ -113,9 +113,11 @@ marks every card as sent (reply method "Mailed coupon card") and records the pri
 **Checking addresses.** As a card is entered, the guest's address is checked with USPS (`UspsAddressVerifier`,
 USPS Addresses 3.0). The form shows a confirmation, the address as USPS writes it with **Use this address**, or
 a warning (not recognised, apartment or unit needed). It only advises: a card always saves, and the verdict is
-kept on the card and shown on the print screen. It needs the `Usps__ClientId` and `Usps__ClientSecret` app
-settings (a free USPS developer app; `Usps__BaseUrl=https://apis-tem.usps.com` uses USPS's testing
-environment). The audit log records, per card, whether the person used USPS's version of the address
+kept on the card and shown on the print screen. It needs a free USPS developer app. The System Administrator
+enters its Consumer Key and Secret under **System status, USPS account for address checking**
+(`UspsAccountStore`): they are encrypted before they are stored, never shown again, and **Save and test**
+signs in to USPS and checks a known address. The `Usps__ClientId` / `Usps__ClientSecret` app settings still
+work as a fallback when nothing is entered in the site. The audit log records, per card, whether the person used USPS's version of the address
 (`AddressUspsVersionUsed`, with what was first typed) or kept their own (`AddressKeptAsTyped`, with the USPS
 version passed over), including when a card is saved without choosing. Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
 USPS's request allowance. USPS allows this only to help send mail, which is what it is used for.

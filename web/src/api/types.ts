@@ -474,3 +474,15 @@ export interface PostageAccount {
   siteAccountAvailable: boolean
   provider: string
 }
+
+/** The site's USPS account for address checking. Neither the key nor the secret ever reaches the browser. */
+export interface UspsAccount {
+  configured: boolean
+  source: 'Saved in the site' | 'App settings' | 'None'
+  keyEnding?: string | null
+  testEnvironment: boolean
+  savedAt?: string | null
+  savedBy?: string | null
+  canEnter: boolean
+}
+export interface ServiceTestResult { ok: boolean; message: string }

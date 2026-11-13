@@ -19,7 +19,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
-    IAddressVerifier addressVerifier) : ControllerBase
+    IAddressVerifier addressVerifier, UspsAccountStore uspsAccount) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -80,7 +80,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         if (never > 0)
             attention.Add(new("medium", $"{never} {(never == 1 ? "person has" : "people have")} never signed in", "Their accounts were created more than two days ago.", "/people?status=never"));
         if (!addressVerifier.Configured)
-            attention.Add(new("info", "Guest addresses are not being checked with USPS", "Add the site's USPS account details to switch address checking on. System status says how.", "/system"));
+            attention.Add(new("info", "Guest addresses are not being checked with USPS", "Enter the site's USPS account details on System status to switch address checking on.", "/system"));
         if (mail is LoggingEmailSender)
             attention.Add(new("medium", "Email is not set up", "Password codes cannot be emailed, so nobody can change their own password.", "/system"));
         foreach (var r in restaurants.Where(r => r.IsActive && !assigned.Contains(r.Id) && groups.Any(g => g.Id == r.GroupId && g.IsActive)))
@@ -227,6 +227,58 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         }
         await audit.LogAsync(me, "TestEmailSent", details: new { to = AcsEmailSender.Mask(to) });
         return Ok(new { message = $"Test email sent to {AcsEmailSender.Mask(to)}." });
+    }
+
+    // ---- The site's USPS account for address checking ----------------------------------------------------------
+
+    [HttpGet("usps-account")]
+    public UspsAccountDto UspsAccount() => UspsDto();
+
+    /// <summary>
+    /// Saves the USPS developer app's Consumer Key and Secret. They are encrypted before they are stored and are
+    /// never shown again or written to any log; changing them means typing both again.
+    /// </summary>
+    [HttpPut("usps-account")]
+    public async Task<ActionResult<UspsAccountDto>> SetUspsAccount(UspsAccountRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var key = (req.ConsumerKey ?? "").Trim();
+        var secret = (req.ConsumerSecret ?? "").Trim();
+        if (key.Length is < 8 or > 200 || secret.Length is < 8 or > 200 || key.Any(char.IsWhiteSpace) || secret.Any(char.IsWhiteSpace))
+            return BadRequest(new { message = "Enter both the Consumer Key and the Consumer Secret exactly as USPS shows them for your app, with no spaces." });
+        await uspsAccount.SaveAsync(key, secret, req.TestEnvironment, me.DisplayName, ct);
+        await audit.LogAsync(me, "UspsAccountSet", details: new { KeyEnding = key[^4..], req.TestEnvironment });
+        return UspsDto();
+    }
+
+    [HttpDelete("usps-account")]
+    public async Task<ActionResult<UspsAccountDto>> RemoveUspsAccount(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var before = uspsAccount.Current;
+        await uspsAccount.RemoveAsync(ct);
+        if (before?.Source == "Saved in the site") await audit.LogAsync(me, "UspsAccountRemoved", details: new { KeyEnding = before.ClientId[^4..] });
+        return UspsDto();
+    }
+
+    /// <summary>Signs in to USPS with the saved details and checks one known address, to prove it works.</summary>
+    [HttpPost("usps-account/test")]
+    public async Task<ServiceTestResult> TestUspsAccount(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var (ok, message) = await addressVerifier.TestAsync(ct);
+        await audit.LogAsync(me, ok ? "UspsAccountTestPassed" : "UspsAccountTestFailed", details: new { message });
+        return new ServiceTestResult(ok, message);
+    }
+
+    private UspsAccountDto UspsDto()
+    {
+        var a = uspsAccount.Current;
+        // CanEnter is false only when the address service is a stand-in (local development) that takes no account.
+        var real = addressVerifier is UspsAddressVerifier;
+        return a is null
+            ? new UspsAccountDto(false, "None", null, false, null, null, real)
+            : new UspsAccountDto(true, a.Source, a.ClientId.Length >= 4 ? a.ClientId[^4..] : null, a.BaseUrl.Contains("-tem."), a.SavedAt, a.SavedBy, real);
     }
 
     // ---- Directories across every investment group ----------------------------------------------------------

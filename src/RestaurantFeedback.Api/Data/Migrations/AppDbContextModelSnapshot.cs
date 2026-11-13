@@ -520,6 +520,27 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("Restaurants");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.SiteSetting", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("SiteSettings");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.UserRestaurant", b =>
                 {
                     b.Property<int>("UserId")

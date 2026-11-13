@@ -374,3 +374,11 @@ public record PostageAccountRequest(string? ApiKey);
 /// <param name="SiteAccountAvailable">The site has its own account, used for groups that have not added one.</param>
 public record PostageAccountDto(bool HasOwnAccount, string? KeyEnding, bool LooksLikeTestKey, DateTime? AddedAt, string? AddedBy,
     bool CanAddAccount, bool SiteAccountAvailable, string Provider);
+
+// ---- The site's USPS account for address checking (System Administrator only) ---------------------------------
+
+public record UspsAccountRequest(string? ConsumerKey, string? ConsumerSecret, bool TestEnvironment);
+/// <param name="Source">"Saved in the site", "App settings" or "None".</param>
+/// <param name="KeyEnding">The last four characters of the Consumer Key; neither the key nor the secret is ever returned.</param>
+public record UspsAccountDto(bool Configured, string Source, string? KeyEnding, bool TestEnvironment, DateTime? SavedAt, string? SavedBy, bool CanEnter);
+public record ServiceTestResult(bool Ok, string Message);

@@ -341,3 +341,15 @@ public static class InteractionKinds
     public static readonly string[] FromBrowser = [Page, Click, Choice, SignOut];
     public static readonly string[] All = [Api, Page, Click, Choice, SignOut];
 }
+
+/// <summary>
+/// A site-wide setting the System Administrator enters in the site itself (for example the USPS account).
+/// Secret values are stored encrypted; see the service that owns each key.
+/// </summary>
+public class SiteSetting
+{
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public string? UpdatedBy { get; set; }
+}
