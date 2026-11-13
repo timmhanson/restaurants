@@ -182,6 +182,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("AddressCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AddressStatus")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AuthorizedBy")
                         .HasColumnType("TEXT");
 

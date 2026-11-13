@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using RestaurantFeedback.Api.Models;
+using RestaurantFeedback.Api.Services;
 
 namespace RestaurantFeedback.Api.Dtos;
 
@@ -143,6 +144,8 @@ public record CommentSummary(
     string GuestKey, int GuestCommentCount)
 {
     public string? Source { get; init; }
+    /// <summary>USPS's verdict on the mailing address when the card was saved: Verified, Corrected, NeedsUnit, UnitNotConfirmed or NotFound.</summary>
+    public string? AddressStatus { get; init; }
     // Printing, postage, redemption and the after-sending follow-up
     public DateTime? PrintedAt { get; init; }
     public string? PrintedByName { get; init; }
@@ -172,7 +175,7 @@ public record CommentSummary(
         c.Responded, c.RespondedAt, c.RespondedByName, c.CreatedAt, c.CreatedByName, c.UpdatedAt,
         c.GuestKey, guestCommentCount)
     {
-        Source = c.Source, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
+        Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
         PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest, RedeemedOn = c.RedeemedOn,
         RedeemedByName = c.RedeemedByName, FollowedUpOn = c.FollowedUpOn, FollowedUpByName = c.FollowedUpByName,
         ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
@@ -315,6 +318,11 @@ public record SystemStatus(string Version, string Environment, DateTime StartedA
     DateTime? OldestLogEntry, int Requests24h, int Errors24h, int Refused24h, int AvgMs24h, int P95Ms24h, List<EndpointStat> Slowest, List<ErrorRow> RecentErrors)
 {
     /// <summary>The postage service for printed coupon cards, and what has been bought through it.</summary>
+    /// <summary>The service that checks guests' mailing addresses, and what it has found on the cards on file.</summary>
+    public string AddressChecking { get; init; } = "";
+    public bool AddressCheckingConfigured { get; init; }
+    public int AddressesConfirmed { get; init; }
+    public int AddressesNotFound { get; init; }
     public string Postage { get; init; } = "";
     public bool PostageConfigured { get; init; }
     public int PostageCardsBought { get; init; }
@@ -343,3 +351,9 @@ public record FollowedUpRequest(bool Reached, string? Method, DateOnly? Contacte
 public record FollowUpRestaurant(int Id, string Name, int? Days, int EffectiveDays, bool CanSet);
 public record FollowUpSummary(int Due, DateOnly? OldestDueOn, int DefaultDays, List<FollowUpRestaurant> Restaurants);
 public record FollowUpDaysRequest(int? Days);
+
+// ---- Checking a mailing address with USPS ------------------------------------------------------------------
+
+public record AddressCheckRequest(string? StreetAddress, string? City, string? State, string? Zip);
+/// <param name="Available">False when address checking is not set up on this site (the form then shows nothing).</param>
+public record AddressCheckResponse(bool Available, string Status, string Message, AddressSuggestion? Suggested);

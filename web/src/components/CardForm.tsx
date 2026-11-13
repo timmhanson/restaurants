@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { api, ApiError } from '../api/client'
 import { COMMENT_SOURCES, PHONE_SOURCE, type CommentRequest, type CommentSummary, type DuplicateCheckResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import AddressCheckNote from './AddressCheckNote'
 import { Alert, Field, addMonths, fmtDate, today } from './ui'
 
 export type CardFormValues = Omit<CommentRequest, 'force'>
@@ -271,6 +272,13 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
               <input value={v.zip ?? ''} onChange={(e) => set('zip', e.target.value)} inputMode="numeric" autoComplete="off" />
             </Field>
           </div>
+          <AddressCheckNote
+            street={v.streetAddress ?? ''}
+            city={v.city ?? ''}
+            state={v.state ?? ''}
+            zip={v.zip ?? ''}
+            onUse={(a) => setV((s) => ({ ...s, streetAddress: a.streetAddress, city: a.city, state: a.state, zip: a.zip }))}
+          />
           {!byPhone && (
             <Field label="Guest's phone number" hint={settings?.requirePhoneOrAddress ? 'Phone or street address is required to spot repeat guests.' : undefined}>
               {phoneInput(false)}

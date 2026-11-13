@@ -15,7 +15,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Route("api/comments")]
 [Authorize]
 public class CommentsController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
-    CommentSummaryBuilder summaries, CardFollowUps followUps) : ControllerBase
+    CommentSummaryBuilder summaries, CardFollowUps followUps, IAddressVerifier addresses) : ControllerBase
 {
     /// <summary>Comments for one restaurant, or every restaurant the user can see when restaurantId is omitted.</summary>
     [HttpGet]
@@ -228,6 +228,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
 
         var c = new GuestComment { RestaurantId = req.RestaurantId, CreatedByUserId = me.Id, CreatedByName = me.DisplayName };
         Apply(c, req, settings);
+        await CheckAddress(c, null, ct);
         db.Comments.Add(c);
         await db.SaveChangesAsync();
         await audit.LogAsync(me, "CommentCreated", "Comment", c.Id,
@@ -251,7 +252,9 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         if (check.ExactDuplicate && !req.Force) return Conflict(check);
 
         var before = CommentSummary.From(c, 0);
+        var addressBefore = AddressOf(c);
         Apply(c, req, settings);
+        await CheckAddress(c, addressBefore, ct);
         c.UpdatedAt = DateTime.UtcNow; c.UpdatedByUserId = me.Id;
         await db.SaveChangesAsync(ct);
         await audit.LogAsync(me, "CommentUpdated", "Comment", c.Id, new { before = Trim(before), after = Trim(CommentSummary.From(c, 0)) }, c.RestaurantId);
@@ -351,6 +354,25 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
     /// <summary>Summaries with follow-up counts and each comment's latest note.</summary>
     private async Task<List<CommentSummary>> Summaries(List<GuestComment> items, Func<GuestComment, int> guestCount) =>
         await summaries.BuildAsync((await users.GetAsync()).GroupId, items, guestCount);
+
+    private static string AddressOf(GuestComment c) => $"{c.StreetAddress}|{c.City}|{c.State}|{c.Zip}";
+
+    /// <summary>
+    /// Remembers what USPS says about the guest's address (the form has usually just asked, so this is answered
+    /// from memory). It never stops a card being saved: with no answer the card simply carries no verdict.
+    /// </summary>
+    private async Task CheckAddress(GuestComment c, string? addressBefore, CancellationToken ct)
+    {
+        if (!addresses.Configured) return;
+        if (addressBefore == AddressOf(c) && c.AddressStatus is not null) return;
+        c.AddressStatus = null;
+        c.AddressCheckedAt = null;
+        if (string.IsNullOrWhiteSpace(c.StreetAddress)) return;
+        var verdict = await addresses.CheckAsync(new AddressInput(c.StreetAddress, c.City, c.State, c.Zip), ct);
+        if (!AddressStatuses.IsResult(verdict.Status)) return;
+        c.AddressStatus = verdict.Status;
+        c.AddressCheckedAt = DateTime.UtcNow;
+    }
 
     private static string Csv(string? s)
     {

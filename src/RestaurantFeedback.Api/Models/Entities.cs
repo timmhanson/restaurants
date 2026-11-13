@@ -174,6 +174,10 @@ public class GuestComment
     /// <summary>Last note, attempt or reply, so lists can show what is new.</summary>
     public DateTime? LastActivityAt { get; set; }
 
+    /// <summary>What USPS said about the guest's mailing address when the card was saved (see AddressStatuses); null when not checked.</summary>
+    public string? AddressStatus { get; set; }
+    public DateTime? AddressCheckedAt { get; set; }
+
     // Printing the coupon card onto a postcard
     public DateTime? PrintedAt { get; set; }
     public string? PrintedByName { get; set; }

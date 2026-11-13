@@ -74,6 +74,15 @@ export default function SystemStatusPage() {
                 <dd>{data.database}, {size(data.databaseBytes)}<div className="muted small">Structure version: {data.latestMigration ?? 'unknown'}</div></dd>
                 <dt>Group settings</dt>
                 <dd>{data.settingsStore}</dd>
+                <dt>Address checking</dt>
+                <dd>
+                  {data.addressCheckingConfigured ? <Badge kind="ok">set up</Badge> : <Badge kind="neutral">not set up</Badge>} {data.addressChecking}
+                  <div className="muted small">
+                    {data.addressCheckingConfigured
+                      ? data.addressesConfirmed + ' card address(es) confirmed by USPS, ' + data.addressesNotFound + ' not recognised.'
+                      : 'Guest addresses are saved as typed. To check them with USPS, add the Usps__ClientId and Usps__ClientSecret settings on the web app.'}
+                  </div>
+                </dd>
                 <dt>Postage</dt>
                 <dd>
                   {data.postageConfigured ? <Badge kind="ok">set up</Badge> : <Badge kind="neutral">not set up</Badge>} {data.postage}

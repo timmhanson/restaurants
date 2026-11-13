@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { CommentSummary, PagedResult, PostageOutcome, PrintConfig } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { AddressBadge } from '../components/AddressCheckNote'
 import PostcardFace, { PostageLabel, hasMailingAddress } from '../components/PostcardFace'
 import { Alert, Badge, Confirm, Spinner } from '../components/ui'
 
@@ -195,6 +196,7 @@ export default function PrintCardsPage() {
                 {c.responded && <Badge kind="ok">already marked sent</Badge>}
                 {c.printCount > 0 && <Badge kind="neutral">printed {c.printCount}× before</Badge>}
                 {!hasMailingAddress(c) && <Badge kind="warn">no mailing address</Badge>}
+                {c.addressStatus && c.addressStatus !== 'Verified' && c.addressStatus !== 'Corrected' && <AddressBadge status={c.addressStatus} />}
                 {label && <Badge kind={c.postageTest || outcomes[c.id]?.test ? 'warn' : 'accent'}>{c.postageTest || outcomes[c.id]?.test ? 'test postage' : 'postage bought'}</Badge>}
               </div>
               <div className="print-scroll">

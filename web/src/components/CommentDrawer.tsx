@@ -1,3 +1,4 @@
+import { AddressBadge } from './AddressCheckNote'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { CommentSummary } from '../api/types'
@@ -80,7 +81,9 @@ export default function CommentDrawer({ comment, onClose, onEdit, onChanged, onD
           <dt>Phone</dt>
           <dd>{comment.phone || <span className="muted">—</span>}</dd>
           <dt>Address</dt>
-          <dd>{address || <span className="muted">—</span>}</dd>
+          <dd>
+            {address || <span className="muted">—</span>} <AddressBadge status={comment.addressStatus} />
+          </dd>
           <dt>Card notes</dt>
           <dd>{comment.notes || <span className="muted">—</span>}</dd>
           <dt>Entered</dt>

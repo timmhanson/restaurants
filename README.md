@@ -106,6 +106,14 @@ prints on its own page at the card's real size. Investment group settings choose
 Settings shows a real-size preview and prints a test card. After the print dialog closes, one confirmation
 marks every card as sent (reply method "Mailed coupon card") and records the print in the card's history.
 
+**Checking addresses.** As a card is entered, the guest's address is checked with USPS (`UspsAddressVerifier`,
+USPS Addresses 3.0). The form shows a confirmation, the address as USPS writes it with **Use this address**, or
+a warning (not recognised, apartment or unit needed). It only advises: a card always saves, and the verdict is
+kept on the card and shown on the print screen. It needs the `Usps__ClientId` and `Usps__ClientSecret` app
+settings (a free USPS developer app; `Usps__BaseUrl=https://apis-tem.usps.com` uses USPS's testing
+environment). Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
+USPS's request allowance. USPS allows this only to help send mail, which is what it is used for.
+
 **Postage.** The print screen offers two choices every time:
 
 - **Stamps by hand:** nothing is charged; the card prints with the guest's address and a stamp box.

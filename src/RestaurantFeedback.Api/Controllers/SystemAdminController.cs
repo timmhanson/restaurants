@@ -18,7 +18,8 @@ namespace RestaurantFeedback.Api.Controllers;
 [Route("api/system")]
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
-    InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps) : ControllerBase
+    InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
+    IAddressVerifier addressVerifier) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -192,6 +193,10 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             times.Count == 0 ? 0 : (int)times.Average(), times.Count == 0 ? 0 : times[Math.Min(times.Count - 1, (int)(times.Count * 0.95))],
             slowest, recentErrors)
         {
+            AddressChecking = addressVerifier.Description,
+            AddressCheckingConfigured = addressVerifier.Configured,
+            AddressesConfirmed = await db.Comments.CountAsync(c => c.AddressStatus == AddressStatuses.Verified || c.AddressStatus == AddressStatuses.Corrected),
+            AddressesNotFound = await db.Comments.CountAsync(c => c.AddressStatus == AddressStatuses.NotFound),
             Postage = postage.Description,
             PostageConfigured = postage.Configured,
             PostageCardsBought = await db.Comments.CountAsync(c => c.PostageId != null && !c.PostageTest),

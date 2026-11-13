@@ -70,6 +70,17 @@ else
     builder.Services.AddSingleton<IEmailSender, LoggingEmailSender>();
 builder.Services.AddScoped<PasswordCodeService>();
 
+// ---- Checking guest addresses with USPS (optional; cards always save without it) ----
+var usps = config.GetSection("Usps").Get<UspsOptions>() ?? new UspsOptions();
+builder.Services.AddSingleton(usps);
+builder.Services.AddMemoryCache();
+if (!string.IsNullOrWhiteSpace(usps.ClientId) && !string.IsNullOrWhiteSpace(usps.ClientSecret))
+    builder.Services.AddHttpClient<IAddressVerifier, UspsAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
+else if (usps.Sample && builder.Environment.IsDevelopment())
+    builder.Services.AddSingleton<IAddressVerifier, SampleAddressVerifier>();
+else
+    builder.Services.AddSingleton<IAddressVerifier, NoAddressVerifier>();
+
 // ---- Postage for printed coupon cards (optional; stamps by hand always work) ----
 var postage = config.GetSection("Postage").Get<PostageOptions>() ?? new PostageOptions();
 builder.Services.AddSingleton(postage);

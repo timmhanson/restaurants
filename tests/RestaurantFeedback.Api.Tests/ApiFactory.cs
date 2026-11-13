@@ -44,6 +44,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public CapturingEmailSender Emails { get; } = new();
     public FakePostageProvider Postage { get; } = new();
+    public FakeAddressVerifier Addresses { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -52,6 +53,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         {
             services.AddSingleton<IEmailSender>(Emails);
             services.AddSingleton<IPostageProvider>(Postage);
+            services.AddSingleton<IAddressVerifier>(Addresses);
         });
     }
 
@@ -127,5 +129,30 @@ public class FakePostageProvider : IPostageProvider
         lock (Bought) Bought.Add((from, to));
         var n = Bought.Count;
         return Task.FromResult(new PostageResult("Fake", $"shp_test{n}", 65, $"https://labels.test/{n}.png", $"94001{n:000000}", true));
+    }
+}
+
+/// <summary>
+/// Stands in for USPS: "Nowhere" streets do not exist, "Tower" buildings need a unit, "Avenue" is corrected to
+/// "AVE" with a ZIP+4, a street containing "Outage" means USPS is down, and anything else is confirmed as typed.
+/// </summary>
+public class FakeAddressVerifier : IAddressVerifier
+{
+    public int Calls { get; private set; }
+    public bool Configured => true;
+    public string Description => "Fake USPS (tests)";
+
+    public Task<AddressCheck> CheckAsync(AddressInput input, CancellationToken ct = default)
+    {
+        Calls++;
+        var street = input.Street ?? "";
+        if (string.IsNullOrWhiteSpace(street)) return Task.FromResult(new AddressCheck(AddressStatuses.Incomplete, "Enter the street address to check it."));
+        if (street.Contains("Outage")) return Task.FromResult(new AddressCheck(AddressStatuses.Unavailable, "USPS could not be reached."));
+        if (street.Contains("Nowhere")) return Task.FromResult(new AddressCheck(AddressStatuses.NotFound, "USPS does not recognise this address."));
+        var suggestion = new AddressSuggestion(street.ToUpperInvariant().Replace("AVENUE", "AVE"), (input.City ?? "Joliet").ToUpperInvariant(), "IL", "60431-1234");
+        if (street.Contains("Tower")) return Task.FromResult(new AddressCheck(AddressStatuses.NeedsUnit, "USPS needs an apartment, suite or unit number.", suggestion));
+        return Task.FromResult(street.Contains("Avenue")
+            ? new AddressCheck(AddressStatuses.Corrected, $"USPS writes this address as {suggestion.StreetAddress}.", suggestion)
+            : new AddressCheck(AddressStatuses.Verified, "USPS delivers to this address.", suggestion));
     }
 }

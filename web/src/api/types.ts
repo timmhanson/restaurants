@@ -219,6 +219,8 @@ export interface CommentSummary {
   repliedOn?: string | null
   lastActivityAt?: string | null
   noteCount: number
+  /** What USPS said about the mailing address when the card was saved; absent when it was not checked. */
+  addressStatus?: AddressStatus | null
   printedAt?: string | null
   printedByName?: string | null
   printCount: number
@@ -443,6 +445,7 @@ export interface SystemStatus {
   tables: { name: string; rows: number }[]; settingsStore: string; email: string; emailConfigured: boolean; testEmailTo?: string | null
   logRetentionDays: number; oldestLogEntry?: string | null; requests24h: number; errors24h: number; refused24h: number; avgMs24h: number
   p95Ms24h: number; slowest: EndpointStat[]; recentErrors: ErrorRow[]
+  addressChecking: string; addressCheckingConfigured: boolean; addressesConfirmed: number; addressesNotFound: number
   postage: string; postageConfigured: boolean; postageCardsBought: number; postageCentsSpent: number; postageTestLabels: number
 }
 export interface DirectoryRestaurant {
@@ -450,3 +453,8 @@ export interface DirectoryRestaurant {
   owners: string[]; managers: number; teamLogins: number; cards: number; waiting: number; waitingOverAWeek: number; lastVisit?: string | null; createdAt: string
 }
 export interface SystemPerson { user: UserDto; restaurants: string[]; lastSeen?: string | null; interactions30d: number }
+
+// ---- Checking a mailing address with USPS ----
+export type AddressStatus = 'Verified' | 'Corrected' | 'NeedsUnit' | 'UnitNotConfirmed' | 'NotFound'
+export interface AddressSuggestion { streetAddress: string; city: string; state: string; zip: string }
+export interface AddressCheckResponse { available: boolean; status: AddressStatus | 'Incomplete' | 'Unavailable'; message: string; suggested?: AddressSuggestion | null }
