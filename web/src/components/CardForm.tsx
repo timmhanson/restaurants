@@ -108,6 +108,7 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   const [addressChoice, setAddressChoice] = useState<{ choice: 'UsedUsps' | 'KeptOwn'; address: string; typed?: string } | null>(null)
   const addressLine = (x: Pick<CardFormValues, 'streetAddress' | 'city' | 'state' | 'zip'>) => [x.streetAddress, x.city, x.state, x.zip].map((p) => (p ?? '').trim()).join(', ')
   const timer = useRef<number | null>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const canSeeDetails = has('ViewComments')
 
   useEffect(() => setV(initial), [initial])
@@ -156,15 +157,28 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [v.guestFirstName, v.guestLastName, v.phone, v.streetAddress, v.zip, v.visitDate, v.reason, v.restaurantId, canCheck])
 
+  // When a card cannot be saved, the reason is shown at the top of the form, so bring the top into view:
+  // the top of the page on Enter card, or the top of the form when it is open in a dialog.
+  const toTop = () =>
+    window.requestAnimationFrame(() => {
+      const form = formRef.current
+      if (form?.closest('.modal')) form.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      else window.scrollTo({ top: 0, behavior: 'smooth' })
+    })
+  const fail = (message: string) => {
+    setError(message)
+    toTop()
+  }
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (!v.restaurantId) return setError('Pick a restaurant.')
-    if (!v.source && (!editingId || hadSource)) return setError('Choose how the comment came in: SMG survey, Culvers.com or a phone call.')
-    if (byPhone && !v.phone?.trim()) return setError("The guest called, so enter their phone number.")
-    if (!v.reason) return setError('Pick a reason.')
+    if (!v.restaurantId) return fail('Pick a restaurant.')
+    if (!v.source && (!editingId || hadSource)) return fail('Choose how the comment came in: SMG survey, Culvers.com or a phone call.')
+    if (byPhone && !v.phone?.trim()) return fail("The guest called, so enter their phone number.")
+    if (!v.reason) return fail('Pick a reason.')
     if (settings?.requirePhoneOrAddress && !v.phone?.trim() && !v.streetAddress?.trim())
-      return setError("Enter the guest's phone number or street address so repeat guests can be recognised.")
+      return fail("Enter the guest's phone number or street address so repeat guests can be recognised.")
     setBusy(true)
     try {
       const chose = addressChoice && addressChoice.address === addressLine(v) ? addressChoice : null
@@ -177,8 +191,9 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
         setCheck(dup)
         setNeedsForce(true)
         setError(null)
+        toTop() // the duplicate warning is at the top too
       } else {
-        setError((err as Error).message)
+        fail((err as Error).message)
       }
     } finally {
       setBusy(false)
@@ -199,7 +214,7 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   )
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={submit} ref={formRef}>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {check && <DuplicateAlert check={check} showDetails={canSeeDetails} />}
 
