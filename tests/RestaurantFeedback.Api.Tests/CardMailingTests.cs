@@ -64,6 +64,27 @@ public class CardMailingTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Cards_to_print_can_be_chosen_by_not_sent_or_by_the_day_they_were_entered()
+    {
+        var (owner, rid) = await OwnerAsync();
+        var fresh = await Create(owner, Card(rid, "Entered"));
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        async Task<List<int>> Ids(string query) =>
+            (await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?pageSize=500&{query}"))!.Items.Select(c => c.Id).ToList();
+
+        Assert.Contains(fresh.Id, await Ids("status=waiting"));
+        Assert.Contains(fresh.Id, await Ids($"enteredFrom={today:yyyy-MM-dd}&enteredTo={today:yyyy-MM-dd}"));
+        Assert.Contains(fresh.Id, await Ids($"enteredFrom={today.AddDays(-3):yyyy-MM-dd}&enteredTo={today:yyyy-MM-dd}&restaurantId={rid}"));
+        Assert.DoesNotContain(fresh.Id, await Ids($"enteredTo={today.AddDays(-1):yyyy-MM-dd}"));
+        Assert.DoesNotContain(fresh.Id, await Ids($"enteredFrom={today.AddDays(1):yyyy-MM-dd}"));
+
+        // Once printed and sent it leaves the "not sent" list but is still found by its date.
+        await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([fresh.Id]));
+        Assert.DoesNotContain(fresh.Id, await Ids("status=waiting"));
+        Assert.Contains(fresh.Id, await Ids($"enteredFrom={today:yyyy-MM-dd}&enteredTo={today:yyyy-MM-dd}"));
+    }
+
+    [Fact]
     public async Task Postage_is_bought_once_per_card_only_by_people_allowed_to_spend()
     {
         var (owner, rid) = await OwnerAsync();

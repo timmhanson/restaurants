@@ -134,6 +134,13 @@ public class CommentRequest
     [MaxLength(2000)] public string? Notes { get; set; }
     /// <summary>Set true to save even though a duplicate / repeat guest was detected.</summary>
     public bool Force { get; set; }
+    /// <summary>
+    /// What the person did when USPS offered its version of the address: "UsedUsps" (took it) or "KeptOwn" (kept
+    /// what they typed). Recorded in the audit log; it does not change what is saved.
+    /// </summary>
+    [MaxLength(20)] public string? AddressChoice { get; set; }
+    /// <summary>The address as first typed, when the USPS version replaced it. For the audit log only.</summary>
+    [MaxLength(400)] public string? AddressAsTyped { get; set; }
 }
 
 public record CommentSummary(

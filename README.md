@@ -96,8 +96,12 @@ Every login, card, edit, response, export, user, restaurant and settings change 
 
 ## Printing, postage, follow-up and redemption
 
-**Printing.** On Comments, tick cards and choose **Print cards** (or **Print card** on one card). Each card
-prints on its own page at the card's real size. Investment group settings choose the stock:
+**Printing.** The **Print cards** tab chooses what to print: everything **not sent yet** (the default), the
+cards for **a specific date**, or **a date range** (by the date entered or the visit date). It covers every
+restaurant the person works at unless one is picked, can leave out cards with no full mailing address or
+already printed, and sets the postage choice and whether printing marks the cards as sent. Cards can also be
+ticked on Comments, or printed singly with **Print card**. Each card prints on its own page at the card's
+real size. Investment group settings choose the stock:
 
 - **Pre-printed cards:** only the blanks are printed (offer, dates, authorized by, guest name and address),
   each at a position measured in inches from the card's top-left corner, with a nudge for the printer.
@@ -111,7 +115,9 @@ USPS Addresses 3.0). The form shows a confirmation, the address as USPS writes i
 a warning (not recognised, apartment or unit needed). It only advises: a card always saves, and the verdict is
 kept on the card and shown on the print screen. It needs the `Usps__ClientId` and `Usps__ClientSecret` app
 settings (a free USPS developer app; `Usps__BaseUrl=https://apis-tem.usps.com` uses USPS's testing
-environment). Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
+environment). The audit log records, per card, whether the person used USPS's version of the address
+(`AddressUspsVersionUsed`, with what was first typed) or kept their own (`AddressKeptAsTyped`, with the USPS
+version passed over), including when a card is saved without choosing. Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
 USPS's request allowance. USPS allows this only to help send mail, which is what it is used for.
 
 **Postage.** The print screen offers two choices every time:

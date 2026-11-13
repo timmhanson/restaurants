@@ -168,6 +168,9 @@ export const PHONE_SOURCE = 'Phone call'
 
 export interface CommentRequest {
   source?: string | null
+  /** What was done with USPS's version of the address, for the audit log: took it, or kept what was typed. */
+  addressChoice?: 'UsedUsps' | 'KeptOwn' | null
+  addressAsTyped?: string | null
   restaurantId: number
   guestFirstName: string
   guestLastName: string

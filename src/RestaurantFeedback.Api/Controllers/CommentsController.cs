@@ -22,7 +22,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
     public async Task<ActionResult<PagedResult<CommentSummary>>> List(
         [FromQuery] int? restaurantId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] bool? responded,
         [FromQuery] string? reason, [FromQuery] string? search, [FromQuery] bool repeatOnly = false, [FromQuery] string? status = null,
-        [FromQuery] string? ids = null,
+        [FromQuery] string? ids = null, [FromQuery] DateOnly? enteredFrom = null, [FromQuery] DateOnly? enteredTo = null,
         [FromQuery] string sort = "visitDate", [FromQuery] string dir = "desc", [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var me = await users.GetAsync();
@@ -41,6 +41,9 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         List<int> dueIds = status == "follow-up-due" ? (await followUps.DueAsync(me.GroupId, scope)).Select(d => d.Id).ToList() : [];
         if (from is not null) q = q.Where(c => c.VisitDate >= from);
         if (to is not null) q = q.Where(c => c.VisitDate <= to);
+        // When the card was entered here (as opposed to the day of the visit), e.g. "everything keyed in today".
+        if (enteredFrom is { } ef) q = q.Where(c => c.CreatedAt >= ef.ToDateTime(TimeOnly.MinValue));
+        if (enteredTo is { } et) q = q.Where(c => c.CreatedAt < et.AddDays(1).ToDateTime(TimeOnly.MinValue));
         if (responded is not null) q = q.Where(c => c.Responded == responded);
         // Follow-up queue: needs-reply = nobody has tried yet, attempted = tried but not replied, replied = done.
         var attempted = db.CommentActivities.Where(a => a.Kind == ActivityKind.Attempt).Select(a => a.CommentId);
@@ -228,11 +231,12 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
 
         var c = new GuestComment { RestaurantId = req.RestaurantId, CreatedByUserId = me.Id, CreatedByName = me.DisplayName };
         Apply(c, req, settings);
-        await CheckAddress(c, null, ct);
+        var verdict = await CheckAddress(c, null, ct);
         db.Comments.Add(c);
         await db.SaveChangesAsync();
         await audit.LogAsync(me, "CommentCreated", "Comment", c.Id,
             new { Guest = $"{c.GuestFirstName} {c.GuestLastName}", c.Source, c.VisitDate, c.Reason, c.CouponOffer, Forced = req.Force, check.PriorCount }, c.RestaurantId);
+        await AuditAddressChoice(me, c, req, verdict);
         c.Restaurant = await db.Restaurants.FindAsync([c.RestaurantId], ct) ?? new Restaurant();
         return CreatedAtAction(nameof(Get), new { id = c.Id }, CommentSummary.From(c, check.PriorCount + 1));
     }
@@ -254,10 +258,11 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         var before = CommentSummary.From(c, 0);
         var addressBefore = AddressOf(c);
         Apply(c, req, settings);
-        await CheckAddress(c, addressBefore, ct);
+        var verdict = await CheckAddress(c, addressBefore, ct);
         c.UpdatedAt = DateTime.UtcNow; c.UpdatedByUserId = me.Id;
         await db.SaveChangesAsync(ct);
         await audit.LogAsync(me, "CommentUpdated", "Comment", c.Id, new { before = Trim(before), after = Trim(CommentSummary.From(c, 0)) }, c.RestaurantId);
+        await AuditAddressChoice(me, c, req, verdict);
         return CommentSummary.From(c, check.PriorCount + 1);
     }
 
@@ -361,17 +366,48 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
     /// Remembers what USPS says about the guest's address (the form has usually just asked, so this is answered
     /// from memory). It never stops a card being saved: with no answer the card simply carries no verdict.
     /// </summary>
-    private async Task CheckAddress(GuestComment c, string? addressBefore, CancellationToken ct)
+    private async Task<AddressCheck?> CheckAddress(GuestComment c, string? addressBefore, CancellationToken ct)
     {
-        if (!addresses.Configured) return;
-        if (addressBefore == AddressOf(c) && c.AddressStatus is not null) return;
+        if (!addresses.Configured) return null;
+        if (addressBefore == AddressOf(c) && c.AddressStatus is not null) return null;
         c.AddressStatus = null;
         c.AddressCheckedAt = null;
-        if (string.IsNullOrWhiteSpace(c.StreetAddress)) return;
+        if (string.IsNullOrWhiteSpace(c.StreetAddress)) return null;
         var verdict = await addresses.CheckAsync(new AddressInput(c.StreetAddress, c.City, c.State, c.Zip), ct);
-        if (!AddressStatuses.IsResult(verdict.Status)) return;
+        if (!AddressStatuses.IsResult(verdict.Status)) return null;
         c.AddressStatus = verdict.Status;
         c.AddressCheckedAt = DateTime.UtcNow;
+        return verdict;
+    }
+
+    /// <summary>
+    /// Records whether the person took USPS's version of the guest's address or kept their own. Written when they
+    /// chose in the form, and also when a card is saved with an address USPS writes differently and no choice was
+    /// made, so the log shows every time USPS's version was not used.
+    /// </summary>
+    private async Task AuditAddressChoice(CurrentUser me, GuestComment c, CommentRequest req, AddressCheck? verdict)
+    {
+        var saved = string.Join(", ", new[] { c.StreetAddress, c.City, string.Join(' ', new[] { c.State, c.Zip }.Where(x => !string.IsNullOrWhiteSpace(x))) }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        var usps = verdict?.Suggested is { } s ? $"{s.StreetAddress}, {s.City}, {s.State} {s.Zip}" : null;
+        var offeredDifferent = verdict?.Status == AddressStatuses.Corrected;
+        // "Used USPS" only counts if what was saved really is the USPS version (they may have edited it afterwards).
+        var declared = req.AddressChoice == "UsedUsps" && offeredDifferent ? null : req.AddressChoice;
+        string? choice = declared switch
+        {
+            "UsedUsps" => "Used the USPS address",
+            "KeptOwn" => "Kept the address as typed",
+            _ => offeredDifferent ? "Saved the address as typed without choosing" : null
+        };
+        if (choice is null) return;
+        await audit.LogAsync(me, declared == "UsedUsps" ? "AddressUspsVersionUsed" : "AddressKeptAsTyped", "Comment", c.Id, new
+        {
+            Choice = choice,
+            Guest = $"{c.GuestFirstName} {c.GuestLastName}",
+            AddressSaved = saved,
+            AddressAsTyped = declared == "UsedUsps" ? req.AddressAsTyped?.Trim() : null,
+            UspsVersion = declared == "UsedUsps" ? null : usps,
+            UspsVerdict = verdict?.Status ?? c.AddressStatus
+        }, c.RestaurantId);
     }
 
     private static string Csv(string? s)

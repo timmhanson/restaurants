@@ -21,9 +21,10 @@ export default function PrintCardsPage() {
   const ids = useMemo(() => (params.get('ids') ?? '').split(',').map(Number).filter((n) => n > 0), [params])
   const [cards, setCards] = useState<CommentSummary[] | null>(null)
   const [config, setConfig] = useState<PrintConfig | null>(null)
-  const [postage, setPostage] = useState<'stamp' | 'bought'>('stamp')
+  // The Print cards tab passes the choices made there; both can still be changed here.
+  const [postage, setPostage] = useState<'stamp' | 'bought'>(params.get('postage') === 'bought' ? 'bought' : 'stamp')
   const [outcomes, setOutcomes] = useState<Record<number, PostageOutcome>>({})
-  const [markSent, setMarkSent] = useState(true)
+  const [markSent, setMarkSent] = useState(params.get('markSent') !== '0')
   const [confirmBuy, setConfirmBuy] = useState(false)
   const [askPrinted, setAskPrinted] = useState(false)
   const [done, setDone] = useState<string | null>(null)
@@ -38,6 +39,7 @@ export default function PrintCardsPage() {
         // Keep the order the cards were picked in.
         setCards([...list.items].sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)))
         setConfig(cfg)
+        if (!cfg.canBuyPostage) setPostage('stamp')
       })
       .catch((e) => {
         setError((e as Error).message)
@@ -113,13 +115,13 @@ export default function PrintCardsPage() {
           <div className="page-head" style={{ marginBottom: 0 }}>
             <h1 style={{ margin: 0 }}>Print coupon cards</h1>
             <span className="grow" />
-            <button type="button" className="btn" onClick={() => nav('/comments')}>{done ? 'Back to comments' : 'Cancel'}</button>
+            <button type="button" className="btn" onClick={() => (done ? nav('/print') : nav(-1))}>{done ? 'Back to Print cards' : 'Cancel'}</button>
           </div>
           {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
           {done ? (
             <Alert kind="success">{done}</Alert>
           ) : cards.length === 0 ? (
-            <Alert kind="warn">No cards were chosen. Go back to Comments, tick the cards to print and choose Print cards.</Alert>
+            <Alert kind="warn">No cards were chosen. Go to <Link to="/print">Print cards</Link> and choose which to print.</Alert>
           ) : (
             <>
               <div className="muted">

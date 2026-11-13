@@ -103,6 +103,10 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [needsForce, setNeedsForce] = useState(false)
+  // Whether the person took USPS's version of the address or kept their own, for the audit log. It only counts
+  // while the address is still the one they chose about.
+  const [addressChoice, setAddressChoice] = useState<{ choice: 'UsedUsps' | 'KeptOwn'; address: string; typed?: string } | null>(null)
+  const addressLine = (x: Pick<CardFormValues, 'streetAddress' | 'city' | 'state' | 'zip'>) => [x.streetAddress, x.city, x.state, x.zip].map((p) => (p ?? '').trim()).join(', ')
   const timer = useRef<number | null>(null)
   const canSeeDetails = has('ViewComments')
 
@@ -163,7 +167,8 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
       return setError("Enter the guest's phone number or street address so repeat guests can be recognised.")
     setBusy(true)
     try {
-      const body: CommentRequest = { ...v, source: v.source || null, force: needsForce }
+      const chose = addressChoice && addressChoice.address === addressLine(v) ? addressChoice : null
+      const body: CommentRequest = { ...v, source: v.source || null, force: needsForce, addressChoice: chose?.choice ?? null, addressAsTyped: chose?.typed ?? null }
       const saved = editingId ? await api.put<CommentSummary>(`/comments/${editingId}`, body) : await api.post<CommentSummary>('/comments', body)
       onSaved(saved)
     } catch (err) {
@@ -277,7 +282,11 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
             city={v.city ?? ''}
             state={v.state ?? ''}
             zip={v.zip ?? ''}
-            onUse={(a) => setV((s) => ({ ...s, streetAddress: a.streetAddress, city: a.city, state: a.state, zip: a.zip }))}
+            onUse={(a) => {
+              setAddressChoice({ choice: 'UsedUsps', address: addressLine(a), typed: addressLine(v) })
+              setV((s) => ({ ...s, streetAddress: a.streetAddress, city: a.city, state: a.state, zip: a.zip }))
+            }}
+            onKeep={() => setAddressChoice({ choice: 'KeptOwn', address: addressLine(v) })}
           />
           {!byPhone && (
             <Field label="Guest's phone number" hint={settings?.requirePhoneOrAddress ? 'Phone or street address is required to spot repeat guests.' : undefined}>

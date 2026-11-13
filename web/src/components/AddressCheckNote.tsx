@@ -29,12 +29,15 @@ export default function AddressCheckNote({
   state,
   zip,
   onUse,
+  onKeep,
 }: {
   street: string
   city: string
   state: string
   zip: string
   onUse: (a: AddressSuggestion) => void
+  /** The person chose to keep their own wording over USPS's. */
+  onKeep?: () => void
 }) {
   const [result, setResult] = useState<AddressCheckResponse | null>(null)
   const [checking, setChecking] = useState(false)
@@ -91,7 +94,16 @@ export default function AddressCheckNote({
         </div>
         <div className="row-actions">
           <button type="button" className="btn btn-sm btn-primary" onClick={() => onUse(s)}>Use this address</button>
-          <button type="button" className="btn btn-sm" onClick={() => setKept(key)}>Keep what I typed</button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setKept(key)
+              onKeep?.()
+            }}
+          >
+            Keep what I typed
+          </button>
         </div>
       </div>
     )

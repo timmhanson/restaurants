@@ -17,6 +17,7 @@ import LoginPage from './pages/LoginPage'
 import OverviewPage from './pages/OverviewPage'
 import PeoplePage from './pages/PeoplePage'
 import PrintCardsPage from './pages/PrintCardsPage'
+import PrintCenterPage from './pages/PrintCenterPage'
 import PrintTestPage from './pages/PrintTestPage'
 import ReportsPage from './pages/ReportsPage'
 import RestaurantsPage from './pages/RestaurantsPage'
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="/login" element={<Navigate to={home} replace />} />
         <Route path="/enter" element={<Guard home={home} allow={inGroup}><EnterCardPage /></Guard>} />
         <Route path="/password" element={<ChangePasswordPage />} />
+        <Route path="/print" element={<Guard home={home} allow={inGroup && perm('MarkResponded') && perm('ViewComments')}><PrintCenterPage /></Guard>} />
         <Route path="/comments" element={<Guard home={home} allow={inGroup && perm('ViewComments')}><CommentsPage /></Guard>} />
         <Route path="/analytics" element={<Guard home={home} allow={inGroup && perm('ViewAnalytics')}><AnalyticsPage /></Guard>} />
         <Route path="/users" element={overseeing ? <Navigate to="/people" replace /> : <Guard home={home} allow={isAdmin || perm('ManageTeamLogin')}><UsersPage /></Guard>} />

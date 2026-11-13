@@ -45,6 +45,7 @@ export default function Layout() {
     : [
         { to: '/enter', label: 'Enter card', show: true },
         { to: '/comments', label: 'Comments', show: has('ViewComments') },
+        { to: '/print', label: 'Print cards', show: has('ViewComments') && has('MarkResponded') },
         { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
         { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
         { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },

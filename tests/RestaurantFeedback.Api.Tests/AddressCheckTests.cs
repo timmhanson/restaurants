@@ -69,6 +69,40 @@ public class AddressCheckTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task The_audit_log_records_whether_the_usps_address_or_the_typed_one_was_used()
+    {
+        var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
+        var rid = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.First().Id;
+        async Task<int> Save(CommentRequest card) =>
+            (await (await owner.PostAsJsonAsync("/api/comments", card)).Content.ReadFromJsonAsync<CommentSummary>())!.Id;
+        async Task<List<AuditDto>> Log(int id) =>
+            (await owner.GetFromJsonAsync<PagedResult<AuditDto>>("/api/audit?pageSize=200"))!.Items.Where(a => a.EntityId == id.ToString() && a.Action.StartsWith("Address")).ToList();
+
+        // Took the USPS version: the card is saved with it, and the log keeps what was first typed.
+        var took = Card(rid, "Took", "44 OAK AVE");
+        took.AddressChoice = "UsedUsps";
+        took.AddressAsTyped = "44 Oak Avenue, Joliet, IL 60431";
+        var tookRow = Assert.Single(await Log(await Save(took)));
+        Assert.Equal("AddressUspsVersionUsed", tookRow.Action);
+        Assert.Contains("44 Oak Avenue", tookRow.Details);
+
+        // Kept their own wording when USPS writes it differently.
+        var kept = Card(rid, "Kept", "45 Oak Avenue");
+        kept.AddressChoice = "KeptOwn";
+        var keptRow = Assert.Single(await Log(await Save(kept)));
+        Assert.Equal("AddressKeptAsTyped", keptRow.Action);
+        Assert.Contains("Kept the address as typed", keptRow.Details);
+        Assert.Contains("45 OAK AVE", keptRow.Details); // the USPS version that was passed over
+
+        // Saved without choosing while USPS had a different version: still recorded.
+        var ignored = Assert.Single(await Log(await Save(Card(rid, "Ignored", "46 Oak Avenue"))));
+        Assert.Contains("without choosing", ignored.Details);
+
+        // Nothing to choose between when USPS agrees with what was typed.
+        Assert.Empty(await Log(await Save(Card(rid, "Agreed", "47 Oak St"))));
+    }
+
+    [Fact]
     public void Usps_answers_are_read_into_plain_verdicts()
     {
         static AddressCheck Read(string dpv, string street, string typedStreet) => UspsAddressVerifier.Read(JsonDocument.Parse($$"""
