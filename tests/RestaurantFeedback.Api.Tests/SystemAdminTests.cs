@@ -44,10 +44,17 @@ public class SystemAdminTests(ApiFactory factory)
         Assert.Contains(overview.GroupSnapshots, g => g.Id == me.GroupId && g.Restaurants >= 1);
         Assert.Contains(overview.RecentSignIns, s => !s.Succeeded && s.UserName == "sysadmin-burst");
 
-        var security = (await admin.GetFromJsonAsync<SystemSecurity>("/api/system/security?days=1"))!;
-        var burst = Assert.Single(security.Failed, f => f.UserName == "sysadmin-burst");
+        // Log rows are saved in the background, so wait for the owner's refused request to be written.
+        SystemSecurity? security = null;
+        bool Refused(SystemSecurity x) => x.RefusedBy.Any(r => r.UserName == ApiFactory.OwnerUser && r.Paths.Any(p => p.Contains("/api/system/overview")));
+        for (var i = 0; i < 40 && (security is null || !Refused(security)); i++)
+        {
+            security = await admin.GetFromJsonAsync<SystemSecurity>("/api/system/security?days=1");
+            if (!Refused(security!)) await Task.Delay(150);
+        }
+        var burst = Assert.Single(security!.Failed, f => f.UserName == "sysadmin-burst");
         Assert.True(burst.Attempts >= 5 && !burst.KnownAccount);
-        Assert.Contains(security.RefusedBy, r => r.UserName == ApiFactory.OwnerUser && r.Paths.Any(p => p.Contains("/api/system/overview")));
+        Assert.True(Refused(security));
         Assert.Contains(security.SystemAdministrators, u => u.Username == ApiFactory.SuperAdminUser);
 
         var status = (await admin.GetFromJsonAsync<SystemStatus>("/api/system/status"))!;

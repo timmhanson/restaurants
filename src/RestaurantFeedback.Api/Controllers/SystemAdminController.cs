@@ -136,7 +136,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         {
             var u = g.Key is int id ? byId.GetValueOrDefault(id) : null;
             return new RefusedRow(u?.Username ?? g.First().UserName, u?.DisplayName, u is null ? null : RoleTitles.Of(u.Role), u?.Group?.Name, g.Count(),
-                Utc(g.Max(r => r.At)), g.Select(r => $"{r.Method} {r.Path.Split('?')[0]}").Distinct().Take(5).ToArray());
+                Utc(g.Max(r => r.At)), g.OrderByDescending(r => r.At).Select(r => $"{r.Method} {r.Path.Split('?')[0]}").Distinct().Take(5).ToArray());
         }).OrderByDescending(r => r.Count).Take(50).ToList();
 
         var now = DateTime.UtcNow;
