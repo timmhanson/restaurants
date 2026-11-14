@@ -249,7 +249,7 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
                 // Wrong key or secret: stop asking for a while instead of failing on every card.
                 _pausedUntil = DateTime.UtcNow.AddMinutes(10);
                 _signInProblem = $"USPS refused the sign-in ({(int)res.StatusCode}). Check the Consumer Key and Consumer Secret, and that the USPS app is allowed to use the Addresses API.";
-                log.LogError("USPS refused the sign-in for address checking ({Status}). Check the USPS account details on System status.", (int)res.StatusCode);
+                log.LogError("USPS refused the sign-in for address checking ({Status}). Check the USPS account details on Connected Systems.", (int)res.StatusCode);
                 return null;
             }
             var root = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct)).RootElement;
@@ -334,7 +334,7 @@ public record UspsCredentials(string ClientId, string ClientSecret, string BaseU
 
 /// <summary>
 /// The site's USPS developer account (Consumer Key and Secret) for address checking. The System Administrator
-/// enters it on System status; it is encrypted with Data Protection before it is stored and never sent back to a
+/// enters it on Connected Systems; it is encrypted with Data Protection before it is stored and never sent back to a
 /// browser or logged. When nothing is saved there, the Usps__ClientId / Usps__ClientSecret app settings are used.
 /// </summary>
 public class UspsAccountStore(IServiceScopeFactory scopes, Microsoft.AspNetCore.DataProtection.IDataProtectionProvider protection, UspsOptions options, ILogger<UspsAccountStore> log)

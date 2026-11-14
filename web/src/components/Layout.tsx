@@ -40,6 +40,7 @@ export default function Layout() {
         { to: '/activity', label: 'Activity log', show: true },
         { to: '/audit', label: 'Audit log', show: true },
         { to: '/security', label: 'Security', show: true, section: 'System' },
+        { to: '/connected-systems', label: 'Connected Systems', show: true },
         { to: '/system', label: 'System status', show: true },
       ]
     : [

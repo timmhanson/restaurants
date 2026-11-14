@@ -11,6 +11,7 @@ import AllRestaurantsPage from './pages/AllRestaurantsPage'
 import AuditPage from './pages/AuditPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import CommentsPage from './pages/CommentsPage'
+import ConnectedSystemsPage from './pages/ConnectedSystemsPage'
 import EnterCardPage from './pages/EnterCardPage'
 import GroupsPage from './pages/GroupsPage'
 import LoginPage from './pages/LoginPage'
@@ -103,6 +104,7 @@ export default function App() {
         <Route path="/all-restaurants" element={<Guard home={home} allow={overseeing}><AllRestaurantsPage /></Guard>} />
         <Route path="/people" element={<Guard home={home} allow={overseeing}><PeoplePage /></Guard>} />
         <Route path="/security" element={<Guard home={home} allow={overseeing}><SecurityPage /></Guard>} />
+        <Route path="/connected-systems" element={<Guard home={home} allow={overseeing}><ConnectedSystemsPage /></Guard>} />
         <Route path="/system" element={<Guard home={home} allow={overseeing}><SystemStatusPage /></Guard>} />
         <Route path="/reports" element={<Guard home={home} allow={overseeing}><ReportsPage /></Guard>} />
         <Route path="/activity" element={<Guard home={home} allow={overseeing}><ActivityPage /></Guard>} />

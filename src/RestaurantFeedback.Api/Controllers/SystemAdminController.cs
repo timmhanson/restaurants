@@ -80,7 +80,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         if (never > 0)
             attention.Add(new("medium", $"{never} {(never == 1 ? "person has" : "people have")} never signed in", "Their accounts were created more than two days ago.", "/people?status=never"));
         if (!addressVerifier.Configured)
-            attention.Add(new("info", "Guest addresses are not being checked with USPS", "Enter the site's USPS account details on System status to switch address checking on.", "/system"));
+            attention.Add(new("info", "Guest addresses are not being checked with USPS", "Enter the site's USPS account details on Connected Systems to switch address checking on.", "/connected-systems"));
         if (mail is LoggingEmailSender)
             attention.Add(new("medium", "Email is not set up", "Password codes cannot be emailed, so nobody can change their own password.", "/system"));
         foreach (var r in restaurants.Where(r => r.IsActive && !assigned.Contains(r.Id) && groups.Any(g => g.Id == r.GroupId && g.IsActive)))

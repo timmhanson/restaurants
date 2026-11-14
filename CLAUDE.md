@@ -17,7 +17,8 @@ See README.md for the architecture, roles and deployment.
 - **Reports for System Administrators must filter by investment group and/or restaurant.** When a feature adds
   data worth reporting on, add it to `GET /api/system/reports` and the Reports page.
 - **System Administrators oversee the site, not restaurants.** Their menu (Overview, Investment groups,
-  Restaurants, People, Reports, Activity log, Audit log, Security, System status) is entirely their own. Never
+  Restaurants, People, Reports, Activity log, Audit log, Security, Connected Systems, System status) is entirely
+  their own. Accounts for outside services the whole site uses are entered on Connected Systems. Never
   show them restaurant-level screens unless they chose "View as admin". Put new site-wide features in that area
   (`SystemAdminController`, `/api/system/*`, `SuperAdmin` only) and surface anything needing action in the
   Overview's "Needs your attention" list.
@@ -25,7 +26,8 @@ See README.md for the architecture, roles and deployment.
   nothing may require a step the person cannot complete (e.g. an emailed code with no email on file).
 - **Money needs its own permission and a cap.** Anything that spends money (postage today) requires a specific
   permission, a confirmation naming what will be charged, protection against charging twice, and an audit row.
-  Third-party keys live only in App Service settings.
+  Third-party keys are entered in the site and stored encrypted with Data Protection (never returned to a
+  browser, logged or audited beyond their last four characters), or live in App Service settings.
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use

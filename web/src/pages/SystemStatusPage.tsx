@@ -4,7 +4,6 @@ import { api } from '../api/client'
 import type { EndpointStat, ErrorRow, SystemStatus } from '../api/types'
 import DataTable from '../components/DataTable'
 import Stat from '../components/Stat'
-import UspsAccountPanel from '../components/UspsAccountPanel'
 import { Alert, Badge, Spinner, fmtDateTime } from '../components/ui'
 
 const size = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`)
@@ -81,7 +80,7 @@ export default function SystemStatusPage() {
                   <div className="muted small">
                     {data.addressCheckingConfigured
                       ? data.addressesConfirmed + ' card address(es) confirmed by USPS, ' + data.addressesNotFound + ' not recognised.'
-                      : 'Guest addresses are saved as typed. Enter the USPS account below to check them.'}
+                      : 'Guest addresses are saved as typed. Enter the USPS account on Connected Systems to check them.'}
                   </div>
                 </dd>
                 <dt>Postage</dt>
@@ -129,8 +128,6 @@ export default function SystemStatusPage() {
               </table>
             </div>
           </div>
-
-          <UspsAccountPanel onChanged={load} />
 
           <DataTable<ErrorRow>
             title="Recent server errors"

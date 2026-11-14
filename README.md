@@ -114,7 +114,7 @@ marks every card as sent (reply method "Mailed coupon card") and records the pri
 USPS Addresses 3.0). The form shows a confirmation, the address as USPS writes it with **Use this address**, or
 a warning (not recognised, apartment or unit needed). It only advises: a card always saves, and the verdict is
 kept on the card and shown on the print screen. It needs a free USPS developer app. The System Administrator
-enters its Consumer Key and Secret under **System status, USPS account for address checking**
+enters its Consumer Key and Secret under **Connected Systems, USPS account for address checking**
 (`UspsAccountStore`): they are encrypted before they are stored, never shown again, and **Save and test**
 signs in to USPS and checks a known address. The `Usps__ClientId` / `Usps__ClientSecret` app settings still
 work as a fallback when nothing is entered in the site. The audit log records, per card, whether the person used USPS's version of the address
@@ -158,6 +158,7 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **Restaurants** | directory of every restaurant in every group: owners, staff counts, cards, waiting; **Open in group** |
 | **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
 | **Reports**, **Activity log**, **Audit log** | see below |
+| **Connected Systems** | the outside services the site uses: the USPS account for address checking is entered here (with Save and test); EasyPost and email are summarised with where each is managed |
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
