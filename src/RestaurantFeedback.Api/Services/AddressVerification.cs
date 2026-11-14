@@ -82,6 +82,10 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
     private static DateTime _pausedUntil = DateTime.MinValue;
     private static int _accountVersion = -1;
     private static string? _signInProblem;
+    /// <summary>Why USPS refused the last address lookup, in its own words, for the connection test.</summary>
+    private static string? _lookupProblem;
+    /// <summary>What USPS says this key may use (the token's scope and API products), for the connection test.</summary>
+    private static string? _keyAllows;
 
     /// <summary>The account in use right now: the one the System Administrator saved in the site, else the app settings.</summary>
     private UspsCredentials? Account
@@ -95,6 +99,8 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
                 _token = null;
                 _pausedUntil = DateTime.MinValue;
                 _signInProblem = null;
+                _lookupProblem = null;
+                _keyAllows = null;
             }
             return account.Current;
         }
@@ -111,12 +117,14 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
         _token = null;
         _pausedUntil = DateTime.MinValue;
         _signInProblem = null;
+        _lookupProblem = null;
         try
         {
             var typed = new AddressInput("475 L'Enfant Plaza SW", "Washington", "DC", "20260");
             var r = await AskAsync(typed.Street!, typed.City!, "DC", "20260", typed, ct);
-            if (AddressStatuses.IsResult(r.Status)) return (true, "USPS accepted the account and answered an address check. Address checking is working.");
-            return (false, _signInProblem ?? r.Message);
+            if (AddressStatuses.IsResult(r.Status))
+                return (true, $"USPS accepted the account and answered an address check. Address checking is working.{(string.IsNullOrWhiteSpace(_keyAllows) ? "" : $" This key may use: {_keyAllows}.")}");
+            return (false, _signInProblem ?? _lookupProblem ?? r.Message);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
@@ -184,7 +192,16 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
             if (res.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest) return Refused(res.StatusCode, body);
             if (!res.IsSuccessStatusCode)
             {
-                log.LogWarning("USPS address check answered {Status}", (int)res.StatusCode);
+                var said = ErrorMessage(body);
+                var status = (int)res.StatusCode;
+                _lookupProblem = res.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized
+                    ? $"USPS accepted the Consumer Key and Secret but refused the address lookup ({status}{(said is null ? "" : $": {said}")}). "
+                      + $"USPS says this key may use: {(string.IsNullOrWhiteSpace(_keyAllows) ? "nothing listed" : _keyAllows)}. "
+                      + "The app needs USPS's Addresses service: in the USPS business portal, My Apps, the app's Products list should include it. If Products is empty, ask USPS API Support to add the default product to the app."
+                    : $"USPS answered the address lookup with an error ({status}{(said is null ? "" : $": {said}")}).";
+                if (res.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+                    _pausedUntil = DateTime.UtcNow.AddMinutes(10); // not allowed: stop asking on every card for a while
+                log.LogWarning("USPS address check answered {Status}: {Said}. Key allows: {Allows}", status, said ?? "(no message)", _keyAllows ?? "(unknown)");
                 return new(AddressStatuses.Unavailable, "USPS could not check this address just now. You can still save the card.");
             }
             return Read(JsonDocument.Parse(body).RootElement, typed);
@@ -214,16 +231,27 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
         };
     }
 
-    private static AddressCheck Refused(HttpStatusCode status, string body)
+    /// <summary>USPS's own explanation from an error reply ({"error":{"message":...}} or a gateway "fault"), if it gave one.</summary>
+    public static string? ErrorMessage(string body)
     {
-        string? message = null;
         try
         {
             var root = JsonDocument.Parse(body).RootElement;
-            if (root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.Object) message = Text(e, "message");
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            // Prefer the readable sentence over a short code such as "invalid_client".
+            var text = Text(root, "error_description");
+            if (text is null && root.TryGetProperty("error", out var e))
+                text = e.ValueKind == JsonValueKind.Object ? Text(e, "message") : e.ValueKind == JsonValueKind.String ? e.GetString() : null;
+            if (text is null && root.TryGetProperty("fault", out var f) && f.ValueKind == JsonValueKind.Object) text = Text(f, "faultstring");
+            text ??= Text(root, "message");
+            return string.IsNullOrWhiteSpace(text) ? null : text.Length > 300 ? text[..300] : text;
         }
-        catch (JsonException) { /* fall through to the general wording */ }
-        message ??= "";
+        catch (JsonException) { return null; }
+    }
+
+    private static AddressCheck Refused(HttpStatusCode status, string body)
+    {
+        var message = ErrorMessage(body) ?? "";
         if (message.Contains("More than one", StringComparison.OrdinalIgnoreCase))
             return new(AddressStatuses.NotFound, "USPS found more than one address like this. Add the apartment or unit, or check the street name and direction (N, S, E, W).");
         if (message.Contains("insufficient", StringComparison.OrdinalIgnoreCase) || status == HttpStatusCode.BadRequest)
@@ -248,12 +276,16 @@ public class UspsAddressVerifier(HttpClient http, UspsAccountStore account, IMem
             {
                 // Wrong key or secret: stop asking for a while instead of failing on every card.
                 _pausedUntil = DateTime.UtcNow.AddMinutes(10);
-                _signInProblem = $"USPS refused the sign-in ({(int)res.StatusCode}). Check the Consumer Key and Consumer Secret, and that the USPS app is allowed to use the Addresses API.";
+                var why = ErrorMessage(await res.Content.ReadAsStringAsync(ct));
+                _signInProblem = $"USPS refused the sign-in ({(int)res.StatusCode}{(why is null ? "" : $": {why}")}). Check the Consumer Key and Consumer Secret, and that the USPS app and its key both show as approved.";
                 log.LogError("USPS refused the sign-in for address checking ({Status}). Check the USPS account details on Connected Systems.", (int)res.StatusCode);
                 return null;
             }
             var root = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct)).RootElement;
             _token = Text(root, "access_token");
+            // What the key is allowed to do: names of services only, nothing secret.
+            var allowed = new[] { Text(root, "scope"), Text(root, "api_products") }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim());
+            _keyAllows = string.Join("; products ", allowed) is { Length: > 0 } list ? (list.Length > 300 ? list[..300] : list) : null;
             // expires_in arrives as a number or a string of seconds; renew a minute early.
             var seconds = root.TryGetProperty("expires_in", out var exp)
                 ? exp.ValueKind == JsonValueKind.Number ? exp.GetDouble() : double.TryParse(exp.GetString(), out var d) ? d : 600

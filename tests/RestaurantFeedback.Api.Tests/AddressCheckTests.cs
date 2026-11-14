@@ -120,6 +120,13 @@ public class AddressCheckTests(ApiFactory factory)
         Assert.Equal(AddressStatuses.UnitNotConfirmed, Read("S", "500 TOWER RD", "500 Tower Rd Apt 99").Status);
         Assert.Equal(AddressStatuses.NotFound, Read("N", "9999 MAIN ST", "9999 Main St").Status);
 
+        // USPS's own reason is pulled out of whichever error shape it sends.
+        Assert.Equal("Insufficient scope", UspsAddressVerifier.ErrorMessage("""{"apiVersion":"v3","error":{"code":"403","message":"Insufficient scope","errors":[]}}"""));
+        Assert.Equal("Invalid API call as no apiproduct match found", UspsAddressVerifier.ErrorMessage("""{"fault":{"faultstring":"Invalid API call as no apiproduct match found","detail":{}}}"""));
+        Assert.Equal("The client is not approved", UspsAddressVerifier.ErrorMessage("""{"error":"invalid_client","error_description":"The client is not approved"}"""));
+        Assert.Equal("invalid_client", UspsAddressVerifier.ErrorMessage("""{"error":"invalid_client"}"""));
+        Assert.Null(UspsAddressVerifier.ErrorMessage("<html>Forbidden</html>"));
+
         Assert.Equal("IL", UsStates.Code("Illinois"));
         Assert.Equal("IL", UsStates.Code("il"));
         Assert.Equal("WI", UsStates.Code("Wisc"));
