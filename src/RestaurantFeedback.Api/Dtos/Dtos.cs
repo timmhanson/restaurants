@@ -161,6 +161,11 @@ public record CommentSummary(
     public string? PostageLabelUrl { get; init; }
     public string? PostageTrackingCode { get; init; }
     public bool PostageTest { get; init; }
+    /// <summary>Printed and mailed by PostGrid: its status (ready, printing, processed_for_delivery, completed, cancelled).</summary>
+    public string? MailProvider { get; init; }
+    public string? MailStatus { get; init; }
+    public DateTime? MailedAt { get; init; }
+    public bool MailTest { get; init; }
     public DateOnly? RedeemedOn { get; init; }
     public string? RedeemedByName { get; init; }
     public DateOnly? FollowedUpOn { get; init; }
@@ -183,7 +188,8 @@ public record CommentSummary(
         c.GuestKey, guestCommentCount)
     {
         Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
-        PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest, RedeemedOn = c.RedeemedOn,
+        PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest,
+        MailProvider = c.MailProvider, MailStatus = c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
         RedeemedByName = c.RedeemedByName, FollowedUpOn = c.FollowedUpOn, FollowedUpByName = c.FollowedUpByName,
         ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
     };
@@ -286,6 +292,9 @@ public record CardStats(int Cards, int Replied, int Waiting, int WaitingOverAWee
     public int Redeemed { get; init; }
     public int FollowedUp { get; init; }
     public int PostageCents { get; init; }
+    /// <summary>Cards printed and mailed by PostGrid (not test orders or cancelled ones), and their expected cost in cents.</summary>
+    public int MailedByPostGrid { get; init; }
+    public int MailEstimateCents { get; init; }
 }
 
 public record GroupReportRow(int Id, string Name, bool IsActive, int Restaurants, int Users, int ActiveUsers, int SignIns, int Interactions,
@@ -345,7 +354,27 @@ public record SystemPerson(UserDto User, string[] Restaurants, DateTime? LastSee
 
 // ---- Printing coupon cards, postage, redemption and following up after sending -------------------------
 
-public record PrintConfig(bool PostageAvailable, string PostageProvider, bool CanBuyPostage, int MaxCentsPerCard, string MailedMethod);
+public record PrintConfig(bool PostageAvailable, string PostageProvider, bool CanBuyPostage, int MaxCentsPerCard, string MailedMethod)
+{
+    /// <summary>The group has a PostGrid account, so cards can be printed and mailed by PostGrid.</summary>
+    public bool MailAvailable { get; init; }
+    /// <summary>MailAvailable, and this person may spend money (the BuyPostage permission).</summary>
+    public bool CanMail { get; init; }
+    /// <summary>The group's PostGrid key is a test key: nothing is printed, mailed or charged.</summary>
+    public bool MailTest { get; init; }
+    public int MailCentsPerCard { get; init; }
+    public int MailMaxCards { get; init; }
+    /// <summary>The group has uploaded a picture for the front of the card.</summary>
+    public bool HasCardArt { get; init; }
+}
+/// <param name="ConfirmCount">The number of cards the person confirmed; the request is refused if it does not match.</param>
+public record MailRequest(int[] CommentIds, int ConfirmCount);
+/// <param name="Status">PostGrid's status: ready, printing, processed_for_delivery, completed or cancelled.</param>
+public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, bool AlreadyMailed, string? Error);
+public record MailStatusDto(int CommentId, string? Status, bool Test, string? PreviewUrl, string? Error);
+public record MailPreview(string FrontHtml, string BackHtml);
+/// <param name="Url">Public address of the picture (PostGrid downloads it from here).</param>
+public record CardArtDto(bool HasArt, string? Url, int? WidthPx, int? HeightPx, long Bytes, DateTime? UploadedAt, string? UploadedBy);
 public record CardIdsRequest(int[] CommentIds);
 public record PostageOutcome(int CommentId, bool Ok, int? Cents, string? LabelUrl, bool Test, bool AlreadyBought, string? Error);
 /// <param name="Postage">"bought" (postage printed on the card) or "stamp" (a stamp goes on by hand).</param>
@@ -382,3 +411,13 @@ public record UspsAccountRequest(string? ConsumerKey, string? ConsumerSecret, bo
 /// <param name="KeyEnding">The last four characters of the Consumer Key; neither the key nor the secret is ever returned.</param>
 public record UspsAccountDto(bool Configured, string Source, string? KeyEnding, bool TestEnvironment, DateTime? SavedAt, string? SavedBy, bool CanEnter);
 public record ServiceTestResult(bool Ok, string Message);
+
+// ---- PostGrid: each group's mailing account, and the site's address verification key ---------------------------
+
+/// <param name="UseFirst">Ask PostGrid before USPS (otherwise PostGrid is the backup for when USPS cannot answer).</param>
+public record PostGridAddressRequest(string? ApiKey, bool UseFirst);
+public record PostGridAddressOrderRequest(bool UseFirst);
+/// <param name="KeyEnding">The last four characters of the key; the key is never returned.</param>
+/// <param name="GroupsWithMailAccounts">Investment groups that have added their own PostGrid mailing account.</param>
+public record PostGridAddressDto(bool Configured, string Source, string? KeyEnding, bool UseFirst, DateTime? SavedAt, string? SavedBy, bool CanEnter,
+    int GroupsWithMailAccounts, int CardsMailed, int TestCardsMailed);

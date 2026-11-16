@@ -5,6 +5,7 @@ import type { CommentSummary, PagedResult, PrintConfig } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { AddressBadge } from '../components/AddressCheckNote'
 import { hasMailingAddress } from '../components/PostcardFace'
+import { MailStatusBadge } from './MailCardsPage'
 import { Alert, Badge, Empty, Field, Spinner, daysAgo, fmtDate, today } from '../components/ui'
 
 type Which = 'not-sent' | 'date' | 'range'
@@ -27,7 +28,7 @@ export default function PrintCenterPage() {
   const [notSentOnly, setNotSentOnly] = useState(false)
   const [mailableOnly, setMailableOnly] = useState(true)
   const [skipPrinted, setSkipPrinted] = useState(false)
-  const [postage, setPostage] = useState<'stamp' | 'bought'>('stamp')
+  const [postage, setPostage] = useState<'stamp' | 'bought' | 'mail'>('stamp')
   const [markSent, setMarkSent] = useState(true)
   const [config, setConfig] = useState<PrintConfig | null>(null)
   const [data, setData] = useState<PagedResult<CommentSummary> | null>(null)
@@ -70,7 +71,10 @@ export default function PrintCenterPage() {
   const hiddenNoAddress = (data?.items ?? []).filter((c) => !hasMailingAddress(c)).length
   const card = settings?.postcard
 
-  const go = () => nav(`/print-cards${qs({ ids: chosen.map((c) => c.id).join(','), postage, markSent: markSent ? '' : '0' })}`)
+  const go = () =>
+    postage === 'mail'
+      ? nav(`/mail-cards${qs({ ids: chosen.map((c) => c.id).join(',') })}`)
+      : nav(`/print-cards${qs({ ids: chosen.map((c) => c.id).join(','), postage, markSent: markSent ? '' : '0' })}`)
 
   return (
     <>
@@ -157,8 +161,8 @@ export default function PrintCenterPage() {
       <div className="panel">
         <h2>Print options</h2>
         <fieldset className="role-choice">
-          <legend>Postage</legend>
-          <div className="source-choice two" role="radiogroup">
+          <legend>How the cards go out</legend>
+          <div className="source-choice" role="radiogroup">
             <label className={postage === 'stamp' ? 'selected' : ''}>
               <input type="radio" name="postage" checked={postage === 'stamp'} onChange={() => setPostage('stamp')} />
               <span className="source-label">Stamps by hand</span>
@@ -175,14 +179,34 @@ export default function PrintCenterPage() {
                     : 'You need the "buy postage" permission. Ask an owner or administrator.'}
               </span>
             </label>
+            <label className={postage === 'mail' ? 'selected' : ''} style={config?.canMail ? undefined : { opacity: 0.6 }}>
+              <input type="radio" name="postage" checked={postage === 'mail'} disabled={!config?.canMail} onChange={() => setPostage('mail')} />
+              <span className="source-label">Mailed for you by PostGrid</span>
+              <span className="source-hint">
+                {config?.canMail
+                  ? `PostGrid prints both sides, adds postage and mails each card${config.mailTest ? ' (test account: nothing is mailed or charged)' : `, about $${(config.mailCentsPerCard / 100).toFixed(2)} a card`}. Nothing to print here. You confirm on the next screen.`
+                  : !config?.mailAvailable
+                    ? isGroupWide
+                      ? 'Add your group’s PostGrid account in Settings to use this.'
+                      : 'Not set up for your group. Ask your Investment Group Administrator.'
+                    : 'You need the "buy postage" permission. Ask an owner or administrator.'}
+              </span>
+            </label>
           </div>
         </fieldset>
-        <div className="check-list" style={{ marginTop: '0.75rem' }}>
-          <label className="check">
-            <input type="checkbox" checked={markSent} onChange={(e) => setMarkSent(e.target.checked)} /> Mark the cards as sent once they have printed
-          </label>
-        </div>
-        {card && (
+        {postage !== 'mail' && (
+          <div className="check-list" style={{ marginTop: '0.75rem' }}>
+            <label className="check">
+              <input type="checkbox" checked={markSent} onChange={(e) => setMarkSent(e.target.checked)} /> Mark the cards as sent once they have printed
+            </label>
+          </div>
+        )}
+        {postage === 'mail' ? (
+          <p className="legend-note" style={{ marginTop: '0.75rem' }}>
+            PostGrid prints on blank 6 × 4 card stock, {config?.hasCardArt ? 'with your group’s uploaded front picture' : 'with a plain front (no front picture uploaded yet)'}. Cards are
+            marked as sent when PostGrid takes them. {isGroupWide && <Link to="/settings">PostGrid settings</Link>}
+          </p>
+        ) : card && (
           <p className="legend-note" style={{ marginTop: '0.75rem' }}>
             Printing on {card.stock === 'Preprinted' ? 'pre-printed cards (only the blanks are printed)' : 'blank postcards (the whole card is printed)'}, {card.widthIn} ×{' '}
             {card.heightIn} inches. {isGroupWide ? <Link to="/settings">Change the card stock, size or layout</Link> : 'Your investment group administrator can change the card stock, size or layout.'}
@@ -194,11 +218,11 @@ export default function PrintCenterPage() {
       <div className="panel">
         <div className="page-head">
           <h2 style={{ margin: 0 }}>
-            {loading && !data ? 'Finding cards…' : `${chosen.length} card${chosen.length === 1 ? '' : 's'} to print`}
+            {loading && !data ? 'Finding cards…' : `${chosen.length} card${chosen.length === 1 ? '' : 's'} to ${postage === 'mail' ? 'mail' : 'print'}`}
           </h2>
           <span className="grow" />
           <button type="button" className="btn btn-primary" disabled={chosen.length === 0} onClick={go}>
-            Preview and print {chosen.length > 0 ? chosen.length : ''} card{chosen.length === 1 ? '' : 's'}
+            Preview and {postage === 'mail' ? 'mail' : 'print'} {chosen.length > 0 ? chosen.length : ''} card{chosen.length === 1 ? '' : 's'}
           </button>
         </div>
         {data && data.total > LIMIT && (
@@ -266,7 +290,8 @@ export default function PrintCenterPage() {
                     </td>
                     <td>
                       {c.responded ? <Badge kind="ok">Sent</Badge> : <Badge kind="danger">Not sent</Badge>}{' '}
-                      {c.printCount > 0 && <Badge kind="neutral">printed {c.printCount}×</Badge>}
+                      {c.printCount > 0 && <Badge kind="neutral">printed {c.printCount}×</Badge>}{' '}
+                      {c.mailStatus && c.mailStatus !== 'cancelled' && <MailStatusBadge status={c.mailStatus} test={c.mailTest} />}
                     </td>
                   </tr>
                 ))}

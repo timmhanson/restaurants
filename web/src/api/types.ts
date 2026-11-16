@@ -136,7 +136,28 @@ export interface PostcardSettings {
   allowBoughtPostage: boolean
   fields: Record<PostcardFieldKey, PostcardField>
 }
-export interface PrintConfig { postageAvailable: boolean; postageProvider: string; canBuyPostage: boolean; maxCentsPerCard: number; mailedMethod: string }
+export interface PrintConfig {
+  postageAvailable: boolean
+  postageProvider: string
+  canBuyPostage: boolean
+  maxCentsPerCard: number
+  mailedMethod: string
+  /** The group has a PostGrid account, which prints and mails cards. */
+  mailAvailable: boolean
+  /** mailAvailable, and this person has the "buy postage" permission. */
+  canMail: boolean
+  /** The group's PostGrid key is a test key: nothing is printed, mailed or charged. */
+  mailTest: boolean
+  mailCentsPerCard: number
+  mailMaxCards: number
+  hasCardArt: boolean
+}
+/** PostGrid's status for a mailed card. */
+export type MailStatus = 'ready' | 'printing' | 'processed_for_delivery' | 'completed' | 'cancelled'
+export interface MailOutcome { commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null }
+export interface MailStatusInfo { commentId: number; status?: MailStatus | null; test: boolean; previewUrl?: string | null; error?: string | null }
+export interface MailPreview { frontHtml: string; backHtml: string }
+export interface CardArt { hasArt: boolean; url?: string | null; widthPx?: number | null; heightPx?: number | null; bytes: number; uploadedAt?: string | null; uploadedBy?: string | null }
 export interface PostageOutcome { commentId: number; ok: boolean; cents?: number | null; labelUrl?: string | null; test: boolean; alreadyBought: boolean; error?: string | null }
 export interface FollowUpRestaurant { id: number; name: string; days?: number | null; effectiveDays: number; canSet: boolean }
 export interface FollowUpSummary { due: number; oldestDueOn?: string | null; defaultDays: number; restaurants: FollowUpRestaurant[] }
@@ -231,6 +252,10 @@ export interface CommentSummary {
   postageLabelUrl?: string | null
   postageTrackingCode?: string | null
   postageTest: boolean
+  mailProvider?: string | null
+  mailStatus?: MailStatus | null
+  mailedAt?: string | null
+  mailTest?: boolean
   redeemedOn?: string | null
   redeemedByName?: string | null
   followedUpOn?: string | null
@@ -242,7 +267,7 @@ export interface CommentSummary {
 }
 
 export type ActivityKind =
-  | 'Note' | 'Attempt' | 'Replied' | 'Reopened' | 'Printed' | 'PostageBought' | 'Redeemed' | 'RedemptionUndone' | 'FollowedUp' | 'FollowUpAttempt'
+  | 'Note' | 'Attempt' | 'Replied' | 'Reopened' | 'Printed' | 'PostageBought' | 'Redeemed' | 'RedemptionUndone' | 'FollowedUp' | 'FollowUpAttempt' | 'Mailed' | 'MailCancelled'
 
 export interface ActivityDto {
   id: number
@@ -391,6 +416,9 @@ export interface CardStats {
   redeemed: number
   followedUp: number
   postageCents: number
+  /** Cards printed and mailed by PostGrid, and what they were expected to cost (cents). */
+  mailedByPostGrid: number
+  mailEstimateCents: number
   replied: number
   waiting: number
   waitingOverAWeek: number
@@ -486,3 +514,18 @@ export interface UspsAccount {
   canEnter: boolean
 }
 export interface ServiceTestResult { ok: boolean; message: string }
+
+/** The site's PostGrid address verification key (never sent to the browser) and how groups use PostGrid for mailing. */
+export interface PostGridSite {
+  configured: boolean
+  source: 'Saved in the site' | 'App settings' | 'None'
+  keyEnding?: string | null
+  /** PostGrid is asked before USPS; otherwise only when USPS cannot answer. */
+  useFirst: boolean
+  savedAt?: string | null
+  savedBy?: string | null
+  canEnter: boolean
+  groupsWithMailAccounts: number
+  cardsMailed: number
+  testCardsMailed: number
+}

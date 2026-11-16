@@ -73,6 +73,14 @@ public class OwnerGroup
     public DateTime? PostageKeySetAt { get; set; }
     public string? PostageKeySetBy { get; set; }
 
+    // The group's own PostGrid account, which prints and mails coupon cards and bills the group directly.
+    // Stored encrypted like the EasyPost key (see GroupPostGridAccounts); only its last four characters are shown.
+    public string? PostGridKeyEncrypted { get; set; }
+    public string? PostGridKeyEnding { get; set; }
+    public bool PostGridKeyIsTest { get; set; }
+    public DateTime? PostGridKeySetAt { get; set; }
+    public string? PostGridKeySetBy { get; set; }
+
     public List<Restaurant> Restaurants { get; set; } = [];
     public List<AppUser> Users { get; set; } = [];
 }
@@ -203,6 +211,20 @@ public class GuestComment
     /// <summary>Bought with the provider's test key: a sample label that is not valid postage.</summary>
     public bool PostageTest { get; set; }
 
+    // Printed and mailed for us by a mail house (PostGrid), instead of printed at the restaurant
+    public string? MailProvider { get; set; }
+    public string? MailId { get; set; }
+    /// <summary>The mail house's status: ready (can still be cancelled), printing, processed_for_delivery, completed or cancelled.</summary>
+    public string? MailStatus { get; set; }
+    public DateTime? MailedAt { get; set; }
+    public string? MailedByName { get; set; }
+    /// <summary>Sent with the mail house's test key: nothing is printed, mailed or charged.</summary>
+    public bool MailTest { get; set; }
+    /// <summary>What one card was expected to cost when it was sent (the mail house does not report its price per card).</summary>
+    public int? MailEstimateCents { get; set; }
+    /// <summary>Times this card has been sent to the mail house; part of the key that stops one request mailing it twice.</summary>
+    public int MailAttempts { get; set; }
+
     // The guest came back and used the coupon
     public DateOnly? RedeemedOn { get; set; }
     public DateTime? RedeemedAt { get; set; }
@@ -249,7 +271,28 @@ public enum ActivityKind
     /// <summary>Spoke with the guest after the card was sent (did it arrive?). Notes hold the conversation.</summary>
     FollowedUp = 8,
     /// <summary>Tried to follow up but did not reach the guest; the follow-up stays due.</summary>
-    FollowUpAttempt = 9
+    FollowUpAttempt = 9,
+    /// <summary>Sent to the mail house (PostGrid), which prints and mails the card.</summary>
+    Mailed = 10,
+    /// <summary>A mailing was cancelled before it printed; the card is waiting to be sent again.</summary>
+    MailCancelled = 11
+}
+
+/// <summary>
+/// The picture an investment group uses for the front of the coupon cards a mail house prints. Kept in its own
+/// table so loading a group never loads the image.
+/// </summary>
+public class CardArtwork
+{
+    public int GroupId { get; set; }
+    public string ContentType { get; set; } = "image/jpeg";
+    public byte[] Data { get; set; } = [];
+    /// <summary>Short hash of the image, part of its public address so a new upload gets a new address.</summary>
+    public string Hash { get; set; } = "";
+    public int? WidthPx { get; set; }
+    public int? HeightPx { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    public string UploadedBy { get; set; } = "";
 }
 
 /// <summary>One entry in a comment's follow-up history, shared by every manager who can see the comment.</summary>

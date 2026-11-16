@@ -19,7 +19,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
-    IAddressVerifier addressVerifier, UspsAccountStore uspsAccount) : ControllerBase
+    IAddressVerifier addressVerifier, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -80,7 +80,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         if (never > 0)
             attention.Add(new("medium", $"{never} {(never == 1 ? "person has" : "people have")} never signed in", "Their accounts were created more than two days ago.", "/people?status=never"));
         if (!addressVerifier.Configured)
-            attention.Add(new("info", "Guest addresses are not being checked with USPS", "Enter the site's USPS account details on Connected Systems to switch address checking on.", "/connected-systems"));
+            attention.Add(new("info", "Guest addresses are not being checked", "Enter the site's USPS account or a PostGrid address verification key on Connected Systems to switch address checking on.", "/connected-systems"));
         if (mail is LoggingEmailSender)
             attention.Add(new("medium", "Email is not set up", "Password codes cannot be emailed, so nobody can change their own password.", "/system"));
         foreach (var r in restaurants.Where(r => r.IsActive && !assigned.Contains(r.Id) && groups.Any(g => g.Id == r.GroupId && g.IsActive)))
@@ -266,7 +266,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
     public async Task<ServiceTestResult> TestUspsAccount(CancellationToken ct)
     {
         var me = await users.GetAsync();
-        var (ok, message) = await addressVerifier.TestAsync(ct);
+        var (ok, message) = addressVerifier is AddressCheckers both ? await both.Usps.TestAsync(ct) : await addressVerifier.TestAsync(ct);
         await audit.LogAsync(me, ok ? "UspsAccountTestPassed" : "UspsAccountTestFailed", details: new { message });
         return new ServiceTestResult(ok, message);
     }
@@ -275,10 +275,73 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
     {
         var a = uspsAccount.Current;
         // CanEnter is false only when the address service is a stand-in (local development) that takes no account.
-        var real = addressVerifier is UspsAddressVerifier;
+        var real = addressVerifier is AddressCheckers;
         return a is null
             ? new UspsAccountDto(false, "None", null, false, null, null, real)
             : new UspsAccountDto(true, a.Source, a.ClientId.Length >= 4 ? a.ClientId[^4..] : null, a.BaseUrl.Contains("-tem."), a.SavedAt, a.SavedBy, real);
+    }
+
+    // ---- PostGrid: the site's address verification key, and how groups use PostGrid for mailing -------------------
+
+    [HttpGet("postgrid")]
+    public Task<PostGridAddressDto> PostGrid(CancellationToken ct) => PostGridDto(ct);
+
+    /// <summary>Saves the PostGrid address verification key, encrypted; it is never shown again or written to any log.</summary>
+    [HttpPut("postgrid")]
+    public async Task<ActionResult<PostGridAddressDto>> SetPostGrid(PostGridAddressRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var key = (req.ApiKey ?? "").Trim();
+        if (key.Length is < 12 or > 200 || key.Any(char.IsWhiteSpace))
+            return BadRequest(new { message = "Enter the address verification API key exactly as PostGrid shows it (Address Verification, Developers), with no spaces." });
+        await postGridAccount.SaveAsync(key, req.UseFirst, me.DisplayName, ct);
+        await audit.LogAsync(me, "PostGridAddressKeySet", details: new { KeyEnding = key[^4..], req.UseFirst });
+        return await PostGridDto(ct);
+    }
+
+    /// <summary>Changes which service checks addresses first, keeping the saved key.</summary>
+    [HttpPut("postgrid/order")]
+    public async Task<ActionResult<PostGridAddressDto>> SetPostGridOrder(PostGridAddressOrderRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!await postGridAccount.SetUseFirstAsync(req.UseFirst, me.DisplayName, ct))
+            return BadRequest(new { message = "Save a PostGrid address verification key first." });
+        await audit.LogAsync(me, "AddressCheckOrderChanged", details: new { First = req.UseFirst ? "PostGrid" : "USPS" });
+        return await PostGridDto(ct);
+    }
+
+    [HttpDelete("postgrid")]
+    public async Task<ActionResult<PostGridAddressDto>> RemovePostGrid(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var before = postGridAccount.Current;
+        await postGridAccount.RemoveAsync(ct);
+        if (before?.Source == "Saved in the site") await audit.LogAsync(me, "PostGridAddressKeyRemoved", details: new { KeyEnding = before.ApiKey[^4..] });
+        return await PostGridDto(ct);
+    }
+
+    /// <summary>Checks the key with PostGrid and looks up one known address.</summary>
+    [HttpPost("postgrid/test")]
+    public async Task<ServiceTestResult> TestPostGrid(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var (ok, message) = addressVerifier is AddressCheckers both
+            ? await both.PostGrid.TestAsync(ct)
+            : (false, "PostGrid address checking cannot be tested on this copy of the site (it uses a stand-in address service).");
+        await audit.LogAsync(me, ok ? "PostGridAddressTestPassed" : "PostGridAddressTestFailed", details: new { message });
+        return new ServiceTestResult(ok, message);
+    }
+
+    private async Task<PostGridAddressDto> PostGridDto(CancellationToken ct)
+    {
+        var a = postGridAccount.Current;
+        var groups = await db.Groups.CountAsync(g => g.PostGridKeyEncrypted != null, ct);
+        var mailed = await db.Comments.CountAsync(c => c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled, ct);
+        var tests = await db.Comments.CountAsync(c => c.MailId != null && c.MailTest && c.MailStatus != MailStatuses.Cancelled, ct);
+        var real = addressVerifier is AddressCheckers;
+        return a is null
+            ? new PostGridAddressDto(false, "None", null, false, null, null, real, groups, mailed, tests)
+            : new PostGridAddressDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.UseFirst, a.SavedAt, a.SavedBy, real, groups, mailed, tests);
     }
 
     // ---- Directories across every investment group ----------------------------------------------------------

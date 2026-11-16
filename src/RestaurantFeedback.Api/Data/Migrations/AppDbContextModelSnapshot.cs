@@ -133,6 +133,43 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("AuditLogs");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardArtwork", b =>
+                {
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("HeightPx")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UploadedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("WidthPx")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("GroupId");
+
+                    b.ToTable("CardArtworks");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.CommentActivity", b =>
                 {
                     b.Property<int>("Id")
@@ -238,6 +275,30 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime?>("LastActivityAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MailAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MailEstimateCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MailId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MailProvider")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MailStatus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("MailTest")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("MailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MailedByName")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("NameNormalized")
@@ -348,6 +409,8 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.HasIndex("GuestKey");
 
+                    b.HasIndex("MailId");
+
                     b.HasIndex("PhoneNormalized");
 
                     b.HasIndex("RestaurantId", "VisitDate");
@@ -454,6 +517,21 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostGridKeyEncrypted")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostGridKeyEnding")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PostGridKeyIsTest")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("PostGridKeySetAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PostGridKeySetBy")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PostageKeyEncrypted")
@@ -563,6 +641,15 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasForeignKey("GroupId");
 
                     b.Navigation("Group");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardArtwork", b =>
+                {
+                    b.HasOne("RestaurantFeedback.Api.Models.OwnerGroup", null)
+                        .WithOne()
+                        .HasForeignKey("RestaurantFeedback.Api.Models.CardArtwork", "GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GuestComment", b =>

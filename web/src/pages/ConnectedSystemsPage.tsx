@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { SystemStatus } from '../api/types'
+import PostGridSitePanel from '../components/PostGridSitePanel'
 import UspsAccountPanel from '../components/UspsAccountPanel'
 import { Alert, Badge } from '../components/ui'
 
 /**
  * The outside services the site connects to, for the System Administrator: where the accounts for them are
- * entered (USPS) and, for the ones managed elsewhere, where that is.
+ * entered (USPS, PostGrid) and, for the ones managed elsewhere, where that is.
  */
 export default function ConnectedSystemsPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null)
@@ -27,6 +28,7 @@ export default function ConnectedSystemsPage() {
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
 
       <UspsAccountPanel onChanged={load} />
+      <PostGridSitePanel onChanged={load} />
 
       <div className="panel">
         <h2>EasyPost (postage)</h2>

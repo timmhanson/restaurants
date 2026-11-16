@@ -14,6 +14,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CommentActivity> CommentActivities => Set<CommentActivity>();
     public DbSet<InteractionLog> InteractionLogs => Set<InteractionLog>();
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
+    public DbSet<CardArtwork> CardArtworks => Set<CardArtwork>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -40,6 +41,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         b.Entity<SiteSetting>().HasKey(s => s.Key);
         b.Entity<SiteSetting>().Property(s => s.Key).HasMaxLength(100);
+
+        b.Entity<CardArtwork>().HasKey(a => a.GroupId);
+        b.Entity<CardArtwork>().HasOne<OwnerGroup>().WithOne().HasForeignKey<CardArtwork>(a => a.GroupId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<CardArtwork>().Property(a => a.ContentType).HasMaxLength(40);
+        b.Entity<CardArtwork>().Property(a => a.Hash).HasMaxLength(40);
+        b.Entity<GuestComment>().HasIndex(c => c.MailId);
 
         var log = b.Entity<InteractionLog>();
         log.HasIndex(l => l.At);

@@ -32,10 +32,11 @@ export function FollowUpBadge({ c }: { c: CommentSummary }) {
 const KIND_LABEL: Record<ActivityKind, string> = {
   Note: 'Note', Attempt: 'Tried to reach guest', Replied: 'Reply confirmed', Reopened: 'Reopened', Printed: 'Card printed', PostageBought: 'Postage',
   Redeemed: 'Coupon redeemed', RedemptionUndone: 'Redemption taken back', FollowedUp: 'Followed up with guest', FollowUpAttempt: 'Tried to follow up',
+  Mailed: 'Sent to PostGrid', MailCancelled: 'PostGrid mailing cancelled',
 }
 const KIND_BADGE: Record<ActivityKind, 'neutral' | 'warn' | 'ok' | 'danger' | 'accent'> = {
   Note: 'neutral', Attempt: 'warn', Replied: 'ok', Reopened: 'danger', Printed: 'neutral', PostageBought: 'neutral', Redeemed: 'accent',
-  RedemptionUndone: 'danger', FollowedUp: 'ok', FollowUpAttempt: 'warn',
+  RedemptionUndone: 'danger', FollowedUp: 'ok', FollowUpAttempt: 'warn', Mailed: 'neutral', MailCancelled: 'danger',
 }
 
 const TITLES: Record<Exclude<Mode, null>, string> = {
@@ -76,6 +77,11 @@ export const followUpDue = (c: CommentSummary) => Boolean(c.followUpDueOn && c.f
 export function AfterSendBadges({ c }: { c: CommentSummary }) {
   return (
     <>
+      {c.mailStatus && c.mailStatus !== 'cancelled' && (
+        <Badge kind={c.mailTest ? 'warn' : 'neutral'} title={c.mailTest ? 'Sent with a PostGrid test key: not printed, mailed or charged' : 'Printed and mailed by PostGrid'}>
+          {c.mailTest ? 'PostGrid test order' : 'Mailed by PostGrid'}
+        </Badge>
+      )}
       {c.redeemedOn && <Badge kind="accent" title={`Redeemed ${fmtDate(c.redeemedOn)} (recorded by ${c.redeemedByName ?? 'someone'})`}>Redeemed</Badge>}
       {c.followedUpOn && <Badge kind="ok" title={`Followed up ${fmtDate(c.followedUpOn)} by ${c.followedUpByName ?? 'someone'}`}>Followed up</Badge>}
       {followUpDue(c) && <Badge kind="warn" title={`Due since ${fmtDate(c.followUpDueOn)}`}>Follow-up due</Badge>}

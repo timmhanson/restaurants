@@ -122,7 +122,15 @@ work as a fallback when nothing is entered in the site. The audit log records, p
 version passed over), including when a card is saved without choosing. Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
 USPS's request allowance. USPS allows this only to help send mail, which is what it is used for.
 
-**Postage.** The print screen offers two choices every time:
+PostGrid can check addresses too (`PostGridAddressVerifier`, PostGrid Address Verification, which uses USPS
+data), as a backup for USPS or instead of it. The System Administrator enters PostGrid's *Address
+Verification* API key under **Connected Systems, PostGrid, Checking guest addresses** (`PostGridAddressAccountStore`,
+encrypted the same way) and picks **USPS first** (PostGrid answers only when USPS is not set up or cannot answer)
+or **PostGrid first**. `AddressCheckers` asks them in that order and moves to the next whenever one cannot
+answer. PostGrid charges per lookup after its free allowance, billed to the account whose key is entered; the
+`PostGrid__AddressApiKey` app setting is a fallback when nothing is entered in the site.
+
+**Postage.** The print screen offers three choices every time:
 
 - **Stamps by hand:** nothing is charged; the card prints with the guest's address and a stamp box.
 - **Buy and print postage:** USPS First-Class postage is bought per card through EasyPost
@@ -135,6 +143,23 @@ USPS's request allowance. USPS allows this only to help send mail, which is what
   Buying also needs the group's "allow postage" setting and the `BuyPostage` permission. A card is never charged twice, nothing is bought above `Postage__MaxCentsPerCard` (150), and
   each purchase is audited. An EasyPost *test* key buys sample labels at no cost. USPS itself has no
   service for printing postage on postcards; its label service is for packages.
+- **Mailed for you by PostGrid:** nothing is printed in the restaurant. PostGrid (`PostGridMailer`, Print & Mail
+  API) prints both sides of a 6 × 4 postcard on card stock, adds First-Class postage and mails it, usually the
+  next business day. Each investment group uses **its own PostGrid account**, so PostGrid bills each group for
+  its own cards: a group administrator pastes the group's Print & Mail API key under **Settings, PostGrid
+  account** (`GroupPostGridAccounts`, encrypted, shown only by its last four characters, checked with PostGrid
+  before it is saved). The front is the picture uploaded under **Settings, Card front for PostGrid** (PNG or
+  JPEG, ideally 1875 × 1275 pixels, stored in the database and served at `/card-art/{group}/{hash}`); without
+  one, a plain front in the group's colour is generated. The back is the coupon, laid out to leave PostGrid's
+  address and postage area clear. **Preview and mail** shows both sides exactly as sent, then a confirmation
+  naming the number of cards and the expected cost (about $0.91 a card on PostGrid's free plan,
+  `PostGrid__EstimatedCentsPerCard`). Sending needs the `BuyPostage` and `MarkResponded` permissions, at most
+  `PostGrid__MaxCardsPerMailing` (100) cards at a time, and the confirmed count must match. A card is never sent
+  twice: cards already with PostGrid are skipped and each request carries an idempotency key, so a retry returns
+  the first order. Each card is marked sent, gets a history entry and an audit row (`CardMailed` or
+  `CardMailFailed`). **Cancel mailing** works until PostGrid starts printing (`CardMailCancelled`) and puts the
+  card back with the cards not sent. A PostGrid *test* key (`test_…`) makes previews only: nothing is printed,
+  mailed or charged, and test orders are labelled as such everywhere.
 
 **Following up.** Once a card has gone out by mail, the guest is due a follow-up to check it arrived:
 5 days later by default (`FollowUpDays` in group settings), or the number its restaurant chooses. Owners set
@@ -158,7 +183,7 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **Restaurants** | directory of every restaurant in every group: owners, staff counts, cards, waiting; **Open in group** |
 | **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
 | **Reports**, **Activity log**, **Audit log** | see below |
-| **Connected Systems** | the outside services the site uses: the USPS account for address checking is entered here (with Save and test); EasyPost and email are summarised with where each is managed |
+| **Connected Systems** | the outside services the site uses: the USPS account and PostGrid's address verification key for address checking are entered here (with Save and test, and which is asked first); PostGrid mailing, EasyPost and email are summarised with where each is managed |
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
@@ -216,8 +241,11 @@ groups); settings and the top bar echo it.
 
 ```bash
 cd src/RestaurantFeedback.Api && dotnet run        # http://localhost:5298, SQLite in App_Data
-cd web && npm install && npm run dev               # http://localhost:5173, proxies /api
+cd web && npm install && npm run dev               # http://localhost:5173, proxies /api and /card-art
 ```
+
+Set `PostGrid__Sample=true` (and `Postage__Sample=true`) to use stand-ins for PostGrid mailing (and EasyPost)
+that never contact the real service.
 
 Development seeds an owner `owner` / `LocalOwner!2026` with the "Culver's of Joliet" restaurant.
 Put a super admin and any other local-only values in `src/RestaurantFeedback.Api/appsettings.Local.json`

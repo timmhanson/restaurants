@@ -45,6 +45,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public CapturingEmailSender Emails { get; } = new();
     public FakePostageProvider Postage { get; } = new();
     public FakeAddressVerifier Addresses { get; } = new();
+    public FakePostGridMailer Mail { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -54,6 +55,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IEmailSender>(Emails);
             services.AddSingleton<IPostageProvider>(Postage);
             services.AddSingleton<IAddressVerifier>(Addresses);
+            services.AddSingleton<IPostGridMailer>(Mail);
         });
     }
 
@@ -133,6 +135,57 @@ public class FakePostageProvider : IPostageProvider
         lock (Bought) Bought.Add((from, to));
         var n = Bought.Count;
         return Task.FromResult(new PostageResult("Fake", $"shp_test{n}", 65, $"https://labels.test/{n}.png", $"94001{n:000000}", true));
+    }
+}
+
+/// <summary>
+/// Stands in for PostGrid. Keys containing "bad" are refused; a guest named "Refused" is turned down by PostGrid and
+/// one named "Unreachable" gets no answer. Like PostGrid, a repeated idempotency key returns the first card instead of
+/// creating another. <see cref="Created"/> counts the cards really created.
+/// </summary>
+public class FakePostGridMailer : IPostGridMailer
+{
+    private readonly Dictionary<string, MailedPostcard> _byIdempotencyKey = [];
+    private readonly Dictionary<string, string> _status = [];
+    public List<(string Key, MailPostcardRequest Request, string IdempotencyKey)> Requests { get; } = [];
+    public int Created { get; private set; }
+    public string Description => "Fake PostGrid (tests)";
+
+    public Task<(bool Ok, string Message)> TestKeyAsync(string key, CancellationToken ct = default) =>
+        Task.FromResult(key.Contains("bad") ? (false, "PostGrid did not accept this key (401).") : (true, "PostGrid accepted the key."));
+
+    public Task<MailedPostcard> CreatePostcardAsync(string key, MailPostcardRequest request, string idempotencyKey, CancellationToken ct = default)
+    {
+        lock (Requests)
+        {
+            Requests.Add((key, request, idempotencyKey));
+            if (_byIdempotencyKey.TryGetValue(idempotencyKey, out var seen)) return Task.FromResult(seen);
+            if (request.To.LastName?.Contains("Unreachable") == true) throw new PostGridException("PostGrid could not be reached.", answered: false);
+            if (request.To.LastName?.Contains("Refused") == true) throw new PostGridException("PostGrid refused the card (422: address is invalid).", answered: true);
+            Created++;
+            var card = new MailedPostcard($"postcard_test{Created}", MailStatuses.Ready, !MailStatuses.IsKeyForTest(key), $"https://proofs.test/{Created}.pdf", null);
+            _byIdempotencyKey[idempotencyKey] = card;
+            _status[card.Id] = MailStatuses.Ready;
+            return Task.FromResult(card);
+        }
+    }
+
+    /// <summary>Moves a card along, as PostGrid does when it starts printing.</summary>
+    public void SetStatus(string id, string status) { lock (Requests) _status[id] = status; }
+
+    public Task<MailedPostcard> GetPostcardAsync(string key, string id, CancellationToken ct = default)
+    {
+        lock (Requests) return Task.FromResult(new MailedPostcard(id, _status.GetValueOrDefault(id, MailStatuses.Ready), true, $"https://proofs.test/{id}.pdf", null));
+    }
+
+    public Task<MailedPostcard> CancelPostcardAsync(string key, string id, CancellationToken ct = default)
+    {
+        lock (Requests)
+        {
+            if (_status.GetValueOrDefault(id) != MailStatuses.Ready) throw new PostGridException("PostGrid refused the cancellation (400: only ready orders can be cancelled).", answered: true);
+            _status[id] = MailStatuses.Cancelled;
+            return Task.FromResult(new MailedPostcard(id, MailStatuses.Cancelled, true, null, null));
+        }
     }
 }
 

@@ -330,7 +330,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 $"{a.CreatedAt:yyyy-MM-dd} {a.CreatedByName}: {a.Kind}{(a.Method is null ? "" : $" ({a.Method})")}{(a.Text is null ? "" : $" - {a.Text}")}")));
 
         var sb = new StringBuilder();
-        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Printed At,Postage,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
+        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Printed At,Postage,Mailed By PostGrid,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
         foreach (var c in rows)
         {
             sb.AppendLine(string.Join(',', new[]
@@ -340,7 +340,8 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 Csv(c.Reason), Csv(c.ReasonDetails), Csv(c.CouponOffer), c.DateIssued.ToString("yyyy-MM-dd"), c.ExpiresOn.ToString("yyyy-MM-dd"),
                 Csv(c.AuthorizedBy), c.Responded ? "Yes" : "No", Csv(c.ReplyMethod), c.RepliedOn?.ToString("yyyy-MM-dd") ?? "",
                 c.RespondedAt?.ToString("u") ?? "", Csv(c.RespondedByName), c.PrintedAt?.ToString("u") ?? "",
-                c.PostageCents is int cents ? $"{(c.PostageTest ? "test " : "")}{cents / 100m:0.00}" : "", c.FollowedUpOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.FollowedUpByName),
+                c.PostageCents is int cents ? $"{(c.PostageTest ? "test " : "")}{cents / 100m:0.00}" : "",
+                c.MailId is null ? "" : $"{c.MailedAt:yyyy-MM-dd} {(c.MailTest ? "test order" : c.MailStatus)}", c.FollowedUpOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.FollowedUpByName),
                 c.RedeemedOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.RedeemedByName), Csv(c.Notes), Csv(history.GetValueOrDefault(c.Id)),
                 counts.GetValueOrDefault(c.GuestKey, 1).ToString(), Csv(c.CreatedByName), c.CreatedAt.ToString("u")
             }));

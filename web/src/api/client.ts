@@ -110,9 +110,16 @@ function extractMessage(status: number, body: unknown): string {
 
 async function request<T>(method: string, path: string, body?: unknown, raw = false): Promise<T> {
   const headers = authHeaders()
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  // FormData (a file upload) sets its own Content-Type with the boundary.
+  const form = body instanceof FormData
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' })
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : form ? (body as FormData) : JSON.stringify(body),
+    cache: 'no-store',
+  })
   noteVersion(res)
   if (res.status === 204) return undefined as T
   if (raw && res.ok) return (await res.blob()) as T
@@ -137,6 +144,12 @@ export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
+  /** Uploads one file as multipart form data under the field name "file". */
+  upload: <T>(path: string, file: File, method: 'PUT' | 'POST' = 'PUT') => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<T>(method, path, form)
+  },
   delete: <T = void>(path: string) => request<T>('DELETE', path),
   blob: (path: string) => request<Blob>('GET', path, undefined, true),
 }

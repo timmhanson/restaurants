@@ -2,7 +2,9 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import type { GroupSettings } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import CardFrontPanel from '../components/CardFrontPanel'
 import PostageAccountPanel from '../components/PostageAccountPanel'
+import PostGridAccountPanel from '../components/PostGridAccountPanel'
 import PostcardSettingsEditor from '../components/PostcardSettingsEditor'
 import { Alert, Field, Spinner, fmtDateTime } from '../components/ui'
 
@@ -147,7 +149,13 @@ export default function SettingsPage() {
           </div>
         </form>
       )}
-      {s && <PostageAccountPanel />}
+      {s && (
+        <>
+          <PostGridAccountPanel />
+          <CardFrontPanel />
+          <PostageAccountPanel />
+        </>
+      )}
     </>
   )
 }

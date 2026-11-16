@@ -19,7 +19,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize]
 public class CardMailingController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
     CommentSummaryBuilder summaries, CardFollowUps followUps, IPostageProvider postage, PostageOptions postageOptions,
-    GroupPostageAccounts postageAccounts) : ControllerBase
+    GroupPostageAccounts postageAccounts, IPostGridMailer mailer, GroupPostGridAccounts mailAccounts, PostGridOptions mailOptions) : ControllerBase
 {
     // ---- Printing and postage -------------------------------------------------------------------------------
 
@@ -32,7 +32,220 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var own = me.GroupId is int gid && postage.AcceptsAccountKeys && (await postageAccounts.DescribeAsync(gid, ct)).HasOwnAccount;
         var available = (own || postage.Configured) && (settings.Postcard?.AllowBoughtPostage ?? true);
         var paidBy = own ? $"{postage.Description}, your investment group's account" : postage.Description;
-        return new PrintConfig(available, paidBy, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings));
+        var mail = me.GroupId is int g2 ? await mailAccounts.DescribeAsync(g2, ct) : new PostageAccountInfo(false, null, false, null, null);
+        var art = me.GroupId is int g3 && await db.CardArtworks.AnyAsync(a => a.GroupId == g3, ct);
+        return new PrintConfig(available, paidBy, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings))
+        {
+            MailAvailable = mail.HasOwnAccount,
+            CanMail = mail.HasOwnAccount && me.Has(ManagerPermission.BuyPostage),
+            MailTest = mail.LooksLikeTestKey,
+            MailCentsPerCard = mailOptions.EstimatedCentsPerCard,
+            MailMaxCards = mailOptions.MaxCardsPerMailing,
+            HasCardArt = art
+        };
+    }
+
+    // ---- Printed and mailed by PostGrid ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Sends each card to PostGrid, which prints both sides and mails it, billed to the investment group's own
+    /// PostGrid account. Money is spent, so it needs the BuyPostage permission, a confirmed count, a cap per mailing,
+    /// and never sends a card twice: a card already with PostGrid is skipped, and each request carries an idempotency
+    /// key so a retried request cannot mail the same card again. Sent cards are marked as sent to the guest.
+    /// </summary>
+    [HttpPost("comments/mail")]
+    public async Task<ActionResult<List<MailOutcome>>> Mail(MailRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.BuyPostage) || !me.Has(ManagerPermission.MarkResponded)) return Forbid();
+        if (me.GroupId is not int groupId) return BadRequest(new { message = "Select an investment group first." });
+        var ids = (req.CommentIds ?? []).Distinct().ToArray();
+        if (ids.Length == 0) return BadRequest(new { message = "Choose at least one card to mail." });
+        if (ids.Length > mailOptions.MaxCardsPerMailing)
+            return BadRequest(new { message = $"Up to {mailOptions.MaxCardsPerMailing} cards can be mailed at a time. Mail these in smaller batches." });
+        if (req.ConfirmCount != ids.Length)
+            return BadRequest(new { message = "The number of cards confirmed does not match the cards chosen. Nothing was sent; review the cards and confirm again." });
+        var key = await mailAccounts.KeyAsync(groupId, ct);
+        if (key is null)
+            return BadRequest(new { message = "This investment group has no PostGrid account. An Investment Group Administrator can add it in Settings, under PostGrid account." });
+        var cards = await Cards(me, ids, ct);
+        if (cards.Count == 0) return NotFound();
+        var settings = await settingsStore.GetAsync(groupId, ct);
+        var art = await db.CardArtworks.AsNoTracking().Where(a => a.GroupId == groupId).Select(a => new { a.Hash, a.ContentType }).FirstOrDefaultAsync(ct);
+        var artUrl = art is null ? null : ArtUrl(groupId, art.Hash, art.ContentType);
+        var test = MailStatuses.IsKeyForTest(key);
+        var method = MailedMethod(settings);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var results = new List<MailOutcome>();
+        foreach (var c in cards)
+        {
+            if (c.MailId is not null && c.MailStatus != MailStatuses.Cancelled)
+            {
+                results.Add(new(c.Id, true, c.MailStatus, c.MailTest, true, null));
+                continue;
+            }
+            if (c.Responded)
+            {
+                results.Add(new(c.Id, false, null, false, false, "This card is already marked as sent. Reopen it first if it really needs to go out again."));
+                continue;
+            }
+            var problem = MissingAddress(c);
+            if (problem is not null)
+            {
+                results.Add(new(c.Id, false, null, false, false, problem.Replace("to buy postage", "to mail the card")));
+                continue;
+            }
+            var r = c.Restaurant;
+            var request = new MailPostcardRequest(
+                new MailContact(c.GuestFirstName, c.GuestLastName, null, c.StreetAddress!, null, c.City!, c.State!, c.Zip!),
+                new MailContact(null, null, r.Name, r.StreetAddress!, null, r.City!, r.State!, r.Zip!),
+                PostGridCardDesign.Front(artUrl, settings.AccentColor, r.Name, c.CouponOffer),
+                PostGridCardDesign.Back(c, r, settings.CouponValidityMonths, settings.AccentColor),
+                $"Coupon card for {c.GuestFirstName} {c.GuestLastName} ({r.Name})",
+                new Dictionary<string, string> { ["cardId"] = c.Id.ToString(), ["restaurant"] = r.Name });
+            try
+            {
+                var sent = await mailer.CreatePostcardAsync(key, request, $"rf-g{groupId}-card{c.Id}-{c.MailAttempts}", ct);
+                var now = DateTime.UtcNow;
+                c.MailAttempts++;
+                c.MailProvider = "PostGrid";
+                c.MailId = sent.Id;
+                c.MailStatus = sent.Status;
+                c.MailTest = test || !sent.Live;
+                c.MailedAt = now;
+                c.MailedByName = me.DisplayName;
+                c.MailEstimateCents = c.MailTest ? 0 : mailOptions.EstimatedCentsPerCard;
+                c.Responded = true;
+                c.RespondedAt = now;
+                c.RespondedByUserId = me.Id;
+                c.RespondedByName = me.DisplayName;
+                c.ReplyMethod = method;
+                c.RepliedOn = today < c.VisitDate ? c.VisitDate : today;
+                var how = c.MailTest ? "PostGrid test order: not printed, mailed or charged" : "PostGrid prints and mails it";
+                Activity(c, me, ActivityKind.Mailed, text: $"Sent to PostGrid to print and mail ({how}).");
+                var entry = Activity(c, me, ActivityKind.Replied, method, c.RepliedOn, "Coupon card mailed by PostGrid.");
+                c.LastActivityAt = entry.CreatedAt;
+                // Saved card by card: once a card is with PostGrid the record must exist even if a later one fails.
+                await db.SaveChangesAsync(ct);
+                await audit.LogAsync(me, "CardMailed", "Comment", c.Id,
+                    new { Provider = "PostGrid", sent.Id, sent.Status, Test = c.MailTest, EstimatedCents = c.MailEstimateCents, PaidBy = "the investment group's PostGrid account" }, c.RestaurantId);
+                results.Add(new(c.Id, true, sent.Status, c.MailTest, false, null));
+            }
+            catch (PostGridException ex)
+            {
+                // A definite refusal: the next try for this card must use a new idempotency key, or PostGrid would
+                // just repeat this answer. When PostGrid could not be reached the key is kept, so a retry can never
+                // create a second card if the first request did get through.
+                if (ex.Answered)
+                {
+                    c.MailAttempts++;
+                    await db.SaveChangesAsync(ct);
+                }
+                await audit.LogAsync(me, "CardMailFailed", "Comment", c.Id, new { Provider = "PostGrid", error = ex.Message }, c.RestaurantId);
+                results.Add(new(c.Id, false, null, false, false, ex.Message));
+            }
+        }
+        return results;
+    }
+
+    /// <summary>Asks PostGrid where each mailed card is (and for a fresh link to its preview).</summary>
+    [HttpPost("comments/mail/status")]
+    public async Task<ActionResult<List<MailStatusDto>>> MailStatus(CardIdsRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
+        if (me.GroupId is not int groupId) return BadRequest(new { message = "Select an investment group first." });
+        var cards = (await Cards(me, req.CommentIds, ct)).Where(c => c.MailId is not null).ToList();
+        var key = await mailAccounts.KeyAsync(groupId, ct);
+        var results = new List<MailStatusDto>();
+        foreach (var c in cards)
+        {
+            if (key is null)
+            {
+                results.Add(new(c.Id, c.MailStatus, c.MailTest, null, "The group's PostGrid account has been removed, so the latest status cannot be fetched."));
+                continue;
+            }
+            try
+            {
+                var now = await mailer.GetPostcardAsync(key, c.MailId!, ct);
+                c.MailStatus = now.Status;
+                results.Add(new(c.Id, now.Status, c.MailTest, now.PreviewUrl, null));
+            }
+            catch (PostGridException ex)
+            {
+                results.Add(new(c.Id, c.MailStatus, c.MailTest, null, ex.Message));
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        return results;
+    }
+
+    /// <summary>
+    /// Cancels a card PostGrid has not started printing, and puts it back in the list of cards waiting to be sent.
+    /// </summary>
+    [HttpPost("comments/{id:int}/mail/cancel")]
+    public async Task<ActionResult<MailStatusDto>> CancelMail(int id, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.BuyPostage) || !me.Has(ManagerPermission.MarkResponded)) return Forbid();
+        if (me.GroupId is not int groupId) return BadRequest(new { message = "Select an investment group first." });
+        var c = await One(me, id, ct);
+        if (c is null) return NotFound();
+        if (c.MailId is null || c.MailStatus == MailStatuses.Cancelled) return BadRequest(new { message = "This card is not waiting to be mailed by PostGrid." });
+        var key = await mailAccounts.KeyAsync(groupId, ct);
+        if (key is null) return BadRequest(new { message = "The group's PostGrid account has been removed, so the card can only be cancelled in PostGrid's own dashboard." });
+        MailedPostcard after;
+        try
+        {
+            after = await mailer.CancelPostcardAsync(key, c.MailId, ct);
+        }
+        catch (PostGridException ex)
+        {
+            // Most likely it has started printing. Show where it is now.
+            try { c.MailStatus = (await mailer.GetPostcardAsync(key, c.MailId, ct)).Status; await db.SaveChangesAsync(ct); } catch (PostGridException) { }
+            await audit.LogAsync(me, "CardMailCancelFailed", "Comment", c.Id, new { c.MailId, error = ex.Message }, c.RestaurantId);
+            return BadRequest(new { message = $"PostGrid could not cancel this card: {ex.Message} A card can only be cancelled until it starts printing." });
+        }
+        c.MailStatus = after.Status == MailStatuses.Ready ? MailStatuses.Cancelled : after.Status;
+        var wasSentOn = c.RepliedOn;
+        if (c.MailStatus == MailStatuses.Cancelled && c.Responded)
+        {
+            // Not going out after all: back to "not sent", so it shows up to print or mail again.
+            c.Responded = false; c.RespondedAt = null; c.RespondedByUserId = null; c.RespondedByName = null; c.ReplyMethod = null; c.RepliedOn = null;
+        }
+        var entry = Activity(c, me, ActivityKind.MailCancelled, text: "PostGrid mailing cancelled before printing. The card is waiting to be sent again.");
+        c.LastActivityAt = entry.CreatedAt;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(me, "CardMailCancelled", "Comment", c.Id, new { c.MailId, c.MailStatus, wasSentOn }, c.RestaurantId);
+        return new MailStatusDto(c.Id, c.MailStatus, c.MailTest, null, null);
+    }
+
+    /// <summary>Both sides of a card exactly as they would be sent to PostGrid, for the preview.</summary>
+    [HttpGet("comments/{id:int}/mail/preview")]
+    public async Task<ActionResult<MailPreview>> MailPreview(int id, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
+        var c = await One(me, id, ct);
+        if (c is null) return NotFound();
+        var groupId = c.Restaurant.GroupId;
+        var settings = await settingsStore.GetAsync(groupId, ct);
+        var art = await db.CardArtworks.AsNoTracking().Where(a => a.GroupId == groupId).Select(a => new { a.Hash, a.ContentType }).FirstOrDefaultAsync(ct);
+        var artUrl = art is null ? null : ArtUrl(groupId, art.Hash, art.ContentType);
+        return new MailPreview(PostGridCardDesign.Front(artUrl, settings.AccentColor, c.Restaurant.Name, c.CouponOffer),
+            PostGridCardDesign.Back(c, c.Restaurant, settings.CouponValidityMonths, settings.AccentColor));
+    }
+
+    /// <summary>The public address of a group's card artwork, which PostGrid downloads when it prints.</summary>
+    private string ArtUrl(int groupId, string hash, string contentType)
+    {
+        var host = Request.Host.Host;
+        var local = host is "localhost" or "127.0.0.1" or "[::1]";
+        var site = !string.IsNullOrWhiteSpace(mailOptions.PublicBaseUrl)
+            ? mailOptions.PublicBaseUrl.TrimEnd('/')
+            : $"{(local ? Request.Scheme : "https")}://{Request.Host}";
+        return $"{site}/card-art/{groupId}/{hash}{(contentType == "image/png" ? ".png" : ".jpg")}";
     }
 
     /// <summary>

@@ -78,10 +78,24 @@ builder.Services.AddMemoryCache();
 // The System Administrator enters the USPS account on System status (stored encrypted); the Usps__* app settings
 // are a fallback. Until one exists, address checking simply stays off.
 builder.Services.AddSingleton<UspsAccountStore>();
+// PostGrid: each investment group's own account prints and mails cards; the site's PostGrid address verification
+// key (Connected Systems) checks addresses before or after USPS, as the System Administrator chose.
+var postGrid = config.GetSection("PostGrid").Get<PostGridOptions>() ?? new PostGridOptions();
+builder.Services.AddSingleton(postGrid);
+builder.Services.AddSingleton<PostGridAddressAccountStore>();
+builder.Services.AddScoped<GroupPostGridAccounts>();
+if (postGrid.Sample && builder.Environment.IsDevelopment())
+    builder.Services.AddSingleton<IPostGridMailer, SamplePostGridMailer>();
+else
+    builder.Services.AddHttpClient<IPostGridMailer, PostGridMailer>();
 if (usps.Sample && builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IAddressVerifier, SampleAddressVerifier>();
 else
-    builder.Services.AddHttpClient<IAddressVerifier, UspsAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
+{
+    builder.Services.AddHttpClient<UspsAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
+    builder.Services.AddHttpClient<PostGridAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
+    builder.Services.AddTransient<IAddressVerifier, AddressCheckers>();
+}
 
 // ---- Postage for printed coupon cards (optional; stamps by hand always work) ----
 var postage = config.GetSection("Postage").Get<PostageOptions>() ?? new PostageOptions();
@@ -144,6 +158,15 @@ app.MapGet("/api/info", (IGroupSettingsStore store, IEmailSender mail, IWebHostE
     version = appVersion,
     utc = DateTime.UtcNow
 });
+// The front of an investment group's coupon cards, for PostGrid to print. Public (PostGrid downloads it without
+// signing in); the address includes a hash of the image, so it changes with every upload and cannot be guessed.
+app.MapGet("/card-art/{groupId:int}/{file}", async (int groupId, string file, AppDbContext db, HttpContext http) =>
+{
+    var art = await db.CardArtworks.AsNoTracking().FirstOrDefaultAsync(a => a.GroupId == groupId);
+    if (art is null || art.Hash != Path.GetFileNameWithoutExtension(file)) return Results.NotFound();
+    CachePolicy.NoStore(http.Response.Headers);
+    return Results.File(art.Data, art.ContentType);
+});
 // An unknown API address is "not found", never the web page (which would look like a successful answer).
 app.MapFallback("/api/{**path}", () => Results.NotFound(new { message = "Not found." }));
 // Serve the React app for any non-API route (client-side routing).
@@ -151,6 +174,7 @@ app.MapFallbackToFile("index.html", CachePolicy.StaticFiles());
 
 await DbSeeder.SeedAsync(app.Services);
 await app.Services.GetRequiredService<UspsAccountStore>().LoadAsync();
+await app.Services.GetRequiredService<PostGridAddressAccountStore>().LoadAsync();
 app.Run();
 
 public partial class Program;
