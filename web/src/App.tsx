@@ -17,7 +17,10 @@ import GroupsPage from './pages/GroupsPage'
 import LoginPage from './pages/LoginPage'
 import OverviewPage from './pages/OverviewPage'
 import PeoplePage from './pages/PeoplePage'
+import BillingPage from './pages/BillingPage'
+import CardDesignPage from './pages/CardDesignPage'
 import MailCardsPage from './pages/MailCardsPage'
+import SystemBillingPage from './pages/SystemBillingPage'
 import PrintCardsPage from './pages/PrintCardsPage'
 import PrintCenterPage from './pages/PrintCenterPage'
 import PrintTestPage from './pages/PrintTestPage'
@@ -99,6 +102,9 @@ export default function App() {
         <Route path="/users" element={overseeing ? <Navigate to="/people" replace /> : <Guard home={home} allow={isAdmin || perm('ManageTeamLogin')}><UsersPage /></Guard>} />
         <Route path="/restaurants" element={<Guard home={home} allow={inGroup && isAdmin}><RestaurantsPage /></Guard>} />
         <Route path="/settings" element={<Guard home={home} allow={inGroup && isGroupWide}><SettingsPage /></Guard>} />
+        <Route path="/card-design" element={<Guard home={home} allow={inGroup && isAdmin}><CardDesignPage /></Guard>} />
+        <Route path="/billing" element={<Guard home={home} allow={inGroup && isAdmin}><BillingPage /></Guard>} />
+        <Route path="/system-billing" element={<Guard home={home} allow={overseeing}><SystemBillingPage /></Guard>} />
         <Route path="/audit" element={<Guard home={home} allow={perm('ViewAudit')}><AuditPage /></Guard>} />
         <Route path="/groups" element={<Guard home={home} allow={overseeing}><GroupsPage /></Guard>} />
         {/* System Administrator only: their own area about the whole site, never restaurant-level screens. */}

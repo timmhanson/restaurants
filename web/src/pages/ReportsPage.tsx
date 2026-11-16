@@ -37,10 +37,17 @@ function cardColumns<T extends { stats: CardStats }>(): Column<T>[] {
     { key: 'mailed', label: 'Mailed by PostGrid', num: true, value: (r) => r.stats.mailedByPostGrid },
     {
       key: 'mailCost',
-      label: 'PostGrid (est.)',
+      label: 'PostGrid cost (est.)',
       num: true,
       value: (r) => r.stats.mailEstimateCents / 100,
       render: (r) => (r.stats.mailEstimateCents ? dollars(r.stats.mailEstimateCents) : '—'),
+    },
+    {
+      key: 'mailFee',
+      label: 'Your mailing fee',
+      num: true,
+      value: (r) => r.stats.mailFeeCents / 100,
+      render: (r) => (r.stats.mailFeeCents ? dollars(r.stats.mailFeeCents) : '—'),
     },
     { key: 'followedUp', label: 'Followed up', num: true, value: (r) => r.stats.followedUp },
     { key: 'redeemed', label: 'Redeemed', num: true, value: (r) => r.stats.redeemed },

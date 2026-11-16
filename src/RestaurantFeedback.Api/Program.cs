@@ -78,12 +78,26 @@ builder.Services.AddMemoryCache();
 // The System Administrator enters the USPS account on System status (stored encrypted); the Usps__* app settings
 // are a fallback. Until one exists, address checking simply stays off.
 builder.Services.AddSingleton<UspsAccountStore>();
-// PostGrid: each investment group's own account prints and mails cards; the site's PostGrid address verification
-// key (Connected Systems) checks addresses before or after USPS, as the System Administrator chose.
+// PostGrid: the site's own account prints and mails cards for every investment group (billed on to each group
+// with the site's fee); its address verification key checks addresses before or after USPS. Both keys are
+// entered by the System Administrator on Connected Systems.
 var postGrid = config.GetSection("PostGrid").Get<PostGridOptions>() ?? new PostGridOptions();
 builder.Services.AddSingleton(postGrid);
 builder.Services.AddSingleton<PostGridAddressAccountStore>();
-builder.Services.AddScoped<GroupPostGridAccounts>();
+builder.Services.AddSingleton<SiteMailing>();
+builder.Services.AddScoped<MailLedger>();
+builder.Services.AddScoped<BillingService>();
+builder.Services.AddHostedService<BillingWorker>();
+// Stripe takes payment for the monthly mailing bills, on the site's own Stripe account (Connected Systems).
+var payments = config.GetSection("Payments").Get<PaymentOptions>() ?? new PaymentOptions();
+builder.Services.AddSingleton(payments);
+builder.Services.AddSingleton<PaymentAccountStore>();
+if (payments.Sample && builder.Environment.IsDevelopment())
+    builder.Services.AddSingleton<IPaymentProvider, SamplePayments>();
+else
+    builder.Services.AddHttpClient<IPaymentProvider, StripePayments>();
+builder.Services.AddScoped<CardDesigns>();
+builder.Services.AddHttpClient();
 if (postGrid.Sample && builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IPostGridMailer, SamplePostGridMailer>();
 else
@@ -158,12 +172,14 @@ app.MapGet("/api/info", (IGroupSettingsStore store, IEmailSender mail, IWebHostE
     version = appVersion,
     utc = DateTime.UtcNow
 });
-// The front of an investment group's coupon cards, for PostGrid to print. Public (PostGrid downloads it without
-// signing in); the address includes a hash of the image, so it changes with every upload and cannot be guessed.
+// Pictures on the coupon cards the mail house prints (a front, a logo or a photo). Public, because the mail house
+// downloads them without signing in; the address includes a hash of the image, so it changes with every upload
+// and cannot be guessed.
 app.MapGet("/card-art/{groupId:int}/{file}", async (int groupId, string file, AppDbContext db, HttpContext http) =>
 {
-    var art = await db.CardArtworks.AsNoTracking().FirstOrDefaultAsync(a => a.GroupId == groupId);
-    if (art is null || art.Hash != Path.GetFileNameWithoutExtension(file)) return Results.NotFound();
+    var hash = Path.GetFileNameWithoutExtension(file);
+    var art = await db.CardImages.AsNoTracking().Where(i => i.GroupId == groupId && i.Hash == hash).Select(i => new { i.Data, i.ContentType }).FirstOrDefaultAsync();
+    if (art is null) return Results.NotFound();
     CachePolicy.NoStore(http.Response.Headers);
     return Results.File(art.Data, art.ContentType);
 });
@@ -175,6 +191,8 @@ app.MapFallbackToFile("index.html", CachePolicy.StaticFiles());
 await DbSeeder.SeedAsync(app.Services);
 await app.Services.GetRequiredService<UspsAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<PostGridAddressAccountStore>().LoadAsync();
+await app.Services.GetRequiredService<SiteMailing>().LoadAsync();
+await app.Services.GetRequiredService<PaymentAccountStore>().LoadAsync();
 app.Run();
 
 public partial class Program;

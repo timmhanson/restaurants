@@ -73,14 +73,6 @@ public class OwnerGroup
     public DateTime? PostageKeySetAt { get; set; }
     public string? PostageKeySetBy { get; set; }
 
-    // The group's own PostGrid account, which prints and mails coupon cards and bills the group directly.
-    // Stored encrypted like the EasyPost key (see GroupPostGridAccounts); only its last four characters are shown.
-    public string? PostGridKeyEncrypted { get; set; }
-    public string? PostGridKeyEnding { get; set; }
-    public bool PostGridKeyIsTest { get; set; }
-    public DateTime? PostGridKeySetAt { get; set; }
-    public string? PostGridKeySetBy { get; set; }
-
     public List<Restaurant> Restaurants { get; set; } = [];
     public List<AppUser> Users { get; set; } = [];
 }
@@ -220,8 +212,10 @@ public class GuestComment
     public string? MailedByName { get; set; }
     /// <summary>Sent with the mail house's test key: nothing is printed, mailed or charged.</summary>
     public bool MailTest { get; set; }
-    /// <summary>What one card was expected to cost when it was sent (the mail house does not report its price per card).</summary>
+    /// <summary>What the mail house was expected to charge the site for this card when it was sent (it does not report its price per card).</summary>
     public int? MailEstimateCents { get; set; }
+    /// <summary>The site's own fee for this card when it was sent. The investment group is billed MailEstimateCents + MailFeeCents.</summary>
+    public int? MailFeeCents { get; set; }
     /// <summary>Times this card has been sent to the mail house; part of the key that stops one request mailing it twice.</summary>
     public int MailAttempts { get; set; }
 
@@ -279,12 +273,139 @@ public enum ActivityKind
 }
 
 /// <summary>
-/// The picture an investment group uses for the front of the coupon cards a mail house prints. Kept in its own
-/// table so loading a group never loads the image.
+/// How one investment group is billed for the cards the site mails for it: its own fee and monthly limit where they
+/// differ from the site's, where its bills go, and the payment method it has saved with the payment service.
 /// </summary>
-public class CardArtwork
+public class GroupBilling
 {
     public int GroupId { get; set; }
+    /// <summary>The site's fee per card for this group, in cents. Null uses the site's default.</summary>
+    public int? FeeCents { get; set; }
+    /// <summary>The most this group may be billed for mailed cards in a calendar month, in cents. Null uses the site's default; 0 switches mailing off.</summary>
+    public int? MonthlyLimitCents { get; set; }
+    public string? BillingName { get; set; }
+    /// <summary>Where bills are emailed. Empty sends them to the group's administrators.</summary>
+    public string? BillingEmail { get; set; }
+    public string? Street { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Zip { get; set; }
+
+    // The payment service's records for this group. No card or bank number is ever stored here: only the payment
+    // service's own references and a label such as "Visa credit card ending 4242".
+    public string? PayCustomerId { get; set; }
+    public string? PayMethodId { get; set; }
+    /// <summary>card or bank.</summary>
+    public string? PayKind { get; set; }
+    /// <summary>For a card: credit, debit or prepaid. The card fee applies to credit cards only.</summary>
+    public string? PayFunding { get; set; }
+    public string? PayLabel { get; set; }
+    public string? PayMandateId { get; set; }
+    public DateTime? PaySetAt { get; set; }
+    public string? PaySetBy { get; set; }
+    /// <summary>Charge the saved payment method automatically when a bill is issued.</summary>
+    public bool AutoPay { get; set; }
+}
+
+public static class InvoiceStatuses
+{
+    public const string Open = "open", Processing = "processing", Paid = "paid", Void = "void";
+}
+
+/// <summary>
+/// One month's bill to one investment group for mailed cards, frozen when it is issued: the cards, what the mail
+/// house cost the site, the site's fee, and how and when it was paid.
+/// </summary>
+public class MailInvoice
+{
+    public int Id { get; set; }
+    public int GroupId { get; set; }
+    /// <summary>yyyy-MM. One bill per group per month.</summary>
+    public string Month { get; set; } = "";
+    public string Number { get; set; } = "";
+    public int Cards { get; set; }
+    public int CostCents { get; set; }
+    public int FeeCents { get; set; }
+    /// <summary>What the group owes: CostCents + FeeCents.</summary>
+    public int TotalCents { get; set; }
+    /// <summary>Per-restaurant lines as JSON: [{restaurantId, restaurant, cards, cents}].</summary>
+    public string LinesJson { get; set; } = "[]";
+    public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
+    public DateOnly DueOn { get; set; }
+    public string Status { get; set; } = InvoiceStatuses.Open;
+    public DateTime? PaidAt { get; set; }
+    /// <summary>bank, card, check, cash or other.</summary>
+    public string? PaidHow { get; set; }
+    public string? PaidNote { get; set; }
+    public string? PaidBy { get; set; }
+    /// <summary>The credit card fee added when it was paid by credit card, on top of TotalCents.</summary>
+    public int SurchargeCents { get; set; }
+    /// <summary>The payment service's reference for the payment, and how many payments have been tried (part of the key that stops a double charge).</summary>
+    public string? PaymentRef { get; set; }
+    public int PaymentAttempts { get; set; }
+    public string? PaymentError { get; set; }
+    public DateTime? EmailedAt { get; set; }
+    public string? EmailedTo { get; set; }
+    /// <summary>The mail house's reference for the printed statement, when one was posted.</summary>
+    public string? PrintedId { get; set; }
+    public DateTime? PrintedAt { get; set; }
+    public string? DeliveryError { get; set; }
+}
+
+/// <summary>
+/// How the coupon cards a mail house prints look: one for the investment group (RestaurantId null, the default for
+/// every restaurant) and optionally one for a restaurant, which then replaces the group's for that restaurant.
+/// </summary>
+public class CardDesign
+{
+    public int Id { get; set; }
+    public int GroupId { get; set; }
+    public int? RestaurantId { get; set; }
+    /// <summary>plain (the restaurant's name on the group's colour), designed (a layout with words, logo and photo) or picture (finished artwork).</summary>
+    public string Front { get; set; } = CardFronts.Plain;
+    /// <summary>For a designed front: centered, photo or split.</summary>
+    public string Layout { get; set; } = CardLayouts.Centered;
+    public string? Headline { get; set; }
+    public string? Message { get; set; }
+    /// <summary>A short personal line printed above the coupon on the back.</summary>
+    public string? BackMessage { get; set; }
+    public string? BackgroundColor { get; set; }
+    public string? TextColor { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public string UpdatedBy { get; set; } = "";
+    public List<CardImage> Images { get; set; } = [];
+}
+
+public static class CardFronts
+{
+    public const string Plain = "plain", Designed = "designed", Picture = "picture";
+    public static readonly string[] All = [Plain, Designed, Picture];
+}
+
+public static class CardLayouts
+{
+    public const string Centered = "centered", Photo = "photo", Split = "split";
+    public static readonly string[] All = [Centered, Photo, Split];
+}
+
+public static class CardImageKinds
+{
+    /// <summary>Finished artwork for the whole front.</summary>
+    public const string Picture = "picture";
+    public const string Logo = "logo";
+    public const string Photo = "photo";
+    public static readonly string[] All = [Picture, Logo, Photo];
+}
+
+/// <summary>A picture belonging to a card design. Kept in its own table so loading a design never loads the image.</summary>
+public class CardImage
+{
+    public int Id { get; set; }
+    public int DesignId { get; set; }
+    public CardDesign Design { get; set; } = null!;
+    /// <summary>Copied from the design: the picture's public address is /card-art/{group}/{hash}.</summary>
+    public int GroupId { get; set; }
+    public string Kind { get; set; } = CardImageKinds.Picture;
     public string ContentType { get; set; } = "image/jpeg";
     public byte[] Data { get; set; } = [];
     /// <summary>Short hash of the image, part of its public address so a new upload gets a new address.</summary>

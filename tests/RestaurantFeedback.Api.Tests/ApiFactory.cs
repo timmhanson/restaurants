@@ -38,6 +38,8 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             ["Seed__OwnerPassword"] = OwnerPassword,
             ["Seed__GroupName"] = "Test Group",
             ["Seed__RestaurantName"] = "Test Culver's",
+            // The hourly billing round would create and send bills behind the tests' backs.
+            ["PostGrid__BillingSchedule"] = "false",
         };
         foreach (var (k, v) in values) Environment.SetEnvironmentVariable(k, v);
     }
@@ -46,6 +48,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public FakePostageProvider Postage { get; } = new();
     public FakeAddressVerifier Addresses { get; } = new();
     public FakePostGridMailer Mail { get; } = new();
+    public FakePayments Payments { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -56,6 +59,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IPostageProvider>(Postage);
             services.AddSingleton<IAddressVerifier>(Addresses);
             services.AddSingleton<IPostGridMailer>(Mail);
+            services.AddSingleton<IPaymentProvider>(Payments);
         });
     }
 
@@ -187,6 +191,62 @@ public class FakePostGridMailer : IPostGridMailer
             return Task.FromResult(new MailedPostcard(id, MailStatuses.Cancelled, true, null, null));
         }
     }
+
+    public List<(MailLetterRequest Request, string IdempotencyKey)> Letters { get; } = [];
+
+    public Task<MailedPostcard> CreateLetterAsync(string key, MailLetterRequest request, string idempotencyKey, CancellationToken ct = default)
+    {
+        lock (Requests)
+        {
+            Letters.Add((request, idempotencyKey));
+            return Task.FromResult(new MailedPostcard($"letter_test{Letters.Count}", MailStatuses.Ready, !MailStatuses.IsKeyForTest(key), null, null));
+        }
+    }
+}
+
+/// <summary>
+/// Stands in for Stripe. Saving a payment method gives <see cref="NextMethod"/> (a credit card unless a test sets
+/// something else); a charge succeeds at once for a card and is "processing" for a bank account until
+/// <see cref="Settle"/>. Like Stripe, a repeated idempotency key returns the first payment instead of charging again.
+/// </summary>
+public class FakePayments : IPaymentProvider
+{
+    private readonly Dictionary<string, PaymentState> _byIdempotencyKey = [];
+    private readonly Dictionary<string, PaymentState> _payments = [];
+    public List<(ChargeRequest Request, string IdempotencyKey)> Charges { get; } = [];
+    public SavedMethod NextMethod { get; set; } = new("pm_card1", PayKinds.Card, "credit", "Visa credit card ending 4242", null);
+    /// <summary>The next charge is declined.</summary>
+    public bool DeclineNext { get; set; }
+    public string Description => "Fake Stripe (tests)";
+
+    public Task<(bool Ok, string Message)> TestKeyAsync(string key, CancellationToken ct = default) =>
+        Task.FromResult(key.Contains("bad") ? (false, "Stripe did not accept the site's key.") : (true, "Stripe accepted the key."));
+    public Task<string> CreateCustomerAsync(string key, string name, string? email, int groupId, CancellationToken ct = default) => Task.FromResult($"cus_test{groupId}");
+    public Task<PaymentSetupLink> StartSetupAsync(string key, string customerId, string returnUrl, string cancelUrl, CancellationToken ct = default) =>
+        Task.FromResult(new PaymentSetupLink("cs_test_1", "https://pay.test/setup?return=" + Uri.EscapeDataString(returnUrl)));
+    public Task<SavedMethod?> FinishSetupAsync(string key, string sessionId, string customerId, CancellationToken ct = default) =>
+        Task.FromResult(sessionId == "cs_abandoned" ? null : NextMethod);
+
+    public Task<PaymentState> ChargeAsync(string key, ChargeRequest request, string idempotencyKey, CancellationToken ct = default)
+    {
+        lock (Charges)
+        {
+            if (_byIdempotencyKey.TryGetValue(idempotencyKey, out var seen)) return Task.FromResult(seen);
+            Charges.Add((request, idempotencyKey));
+            var id = $"pi_test{Charges.Count}";
+            var state = DeclineNext ? new PaymentState(id, PayStates.Failed, "Your card was declined.")
+                : new PaymentState(id, request.Kind == PayKinds.Bank ? PayStates.Processing : PayStates.Succeeded, null);
+            DeclineNext = false;
+            _byIdempotencyKey[idempotencyKey] = state;
+            _payments[id] = state;
+            return Task.FromResult(state);
+        }
+    }
+
+    /// <summary>The bank payment arrives.</summary>
+    public void Settle(string id) { lock (Charges) _payments[id] = new PaymentState(id, PayStates.Succeeded, null); }
+    public Task<PaymentState> GetPaymentAsync(string key, string id, CancellationToken ct = default) { lock (Charges) return Task.FromResult(_payments[id]); }
+    public Task RemoveMethodAsync(string key, string methodId, CancellationToken ct = default) => Task.CompletedTask;
 }
 
 /// <summary>

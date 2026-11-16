@@ -135,7 +135,8 @@ public class SystemController(AppDbContext db, AuditService audit, CurrentUserPr
                 Printed = c.PrintedAt != null, Redeemed = c.RedeemedOn != null, FollowedUp = c.FollowedUpOn != null,
                 PostageCents = c.PostageTest ? 0 : (c.PostageCents ?? 0),
                 MailedByPostGrid = c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled,
-                MailEstimateCents = c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled ? (c.MailEstimateCents ?? 0) : 0
+                MailEstimateCents = c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled ? (c.MailEstimateCents ?? 0) : 0,
+                MailFeeCents = c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled ? (c.MailFeeCents ?? 0) : 0
             }).ToListAsync();
         // Cards entered in range, by who entered them and on which day.
         var entered = await db.Comments.AsNoTracking()
@@ -211,6 +212,7 @@ public class SystemController(AppDbContext db, AuditService audit, CurrentUserPr
         public int PostageCents { get; init; }
         public bool MailedByPostGrid { get; init; }
         public int MailEstimateCents { get; init; }
+        public int MailFeeCents { get; init; }
     }
 
     private static CardStats Stats(IEnumerable<CardRow> rows, DateOnly today)
@@ -226,7 +228,8 @@ public class SystemController(AppDbContext db, AuditService audit, CurrentUserPr
             Printed = list.Count(c => c.Printed), Redeemed = list.Count(c => c.Redeemed), FollowedUp = list.Count(c => c.FollowedUp),
             PostageCents = list.Sum(c => c.PostageCents),
             MailedByPostGrid = list.Count(c => c.MailedByPostGrid),
-            MailEstimateCents = list.Sum(c => c.MailEstimateCents)
+            MailEstimateCents = list.Sum(c => c.MailEstimateCents),
+            MailFeeCents = list.Sum(c => c.MailFeeCents)
         };
     }
 

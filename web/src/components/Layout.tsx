@@ -37,6 +37,7 @@ export default function Layout() {
         { to: '/all-restaurants', label: 'Restaurants', show: true },
         { to: '/people', label: 'People', show: true },
         { to: '/reports', label: 'Reports', show: true, section: 'Insight' },
+        { to: '/system-billing', label: 'Billing', show: true },
         { to: '/activity', label: 'Activity log', show: true },
         { to: '/audit', label: 'Audit log', show: true },
         { to: '/security', label: 'Security', show: true, section: 'System' },
@@ -50,6 +51,8 @@ export default function Layout() {
         { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
         { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
         { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },
+        { to: '/card-design', label: 'Card design', show: isAdmin },
+        { to: '/billing', label: 'Billing', show: isAdmin },
         { to: '/settings', label: 'Settings', show: isGroupWide },
         { to: '/audit', label: 'Audit log', show: has('ViewAudit') },
       ]

@@ -17,7 +17,7 @@ const LIMIT = 200
  * one day or a range of days), for every restaurant or just one, set the print options, then preview and print.
  */
 export default function PrintCenterPage() {
-  const { restaurants, settings, isGroupWide } = useAuth()
+  const { restaurants, settings, isGroupWide, isAdmin } = useAuth()
   const nav = useNavigate()
   const [which, setWhich] = useState<Which>('not-sent')
   const [dateKind, setDateKind] = useState<DateKind>('entered')
@@ -181,15 +181,17 @@ export default function PrintCenterPage() {
             </label>
             <label className={postage === 'mail' ? 'selected' : ''} style={config?.canMail ? undefined : { opacity: 0.6 }}>
               <input type="radio" name="postage" checked={postage === 'mail'} disabled={!config?.canMail} onChange={() => setPostage('mail')} />
-              <span className="source-label">Mailed for you by PostGrid</span>
+              <span className="source-label">Mailed for you</span>
               <span className="source-hint">
                 {config?.canMail
-                  ? `PostGrid prints both sides, adds postage and mails each card${config.mailTest ? ' (test account: nothing is mailed or charged)' : `, about $${(config.mailCentsPerCard / 100).toFixed(2)} a card`}. Nothing to print here. You confirm on the next screen.`
-                  : !config?.mailAvailable
+                  ? `Both sides are printed and each card is mailed for you${config.mailTest ? ' (test mode: nothing is mailed or charged)' : `, $${(config.mailCentsPerCard / 100).toFixed(2)} a card on your group’s monthly bill`}. Nothing to print here. You confirm on the next screen.`
+                  : config?.mailNeedsPayMethod
                     ? isGroupWide
-                      ? 'Add your group’s PostGrid account in Settings to use this.'
-                      : 'Not set up for your group. Ask your Investment Group Administrator.'
-                    : 'You need the "buy postage" permission. Ask an owner or administrator.'}
+                      ? 'Save a payment method on Billing to use this. Until then, print the cards here.'
+                      : 'Your Investment Group Administrator needs to save a payment method on Billing first.'
+                    : !config?.mailAvailable
+                      ? 'Not switched on for your investment group.'
+                      : 'You need the "buy postage" permission. Ask an owner or administrator.'}
               </span>
             </label>
           </div>
@@ -203,8 +205,8 @@ export default function PrintCenterPage() {
         )}
         {postage === 'mail' ? (
           <p className="legend-note" style={{ marginTop: '0.75rem' }}>
-            PostGrid prints on blank 6 × 4 card stock, {config?.hasCardArt ? 'with your group’s uploaded front picture' : 'with a plain front (no front picture uploaded yet)'}. Cards are
-            marked as sent when PostGrid takes them. {isGroupWide && <Link to="/settings">PostGrid settings</Link>}
+            Cards are printed on 6 × 4 card stock with your card design, and marked as sent when they are taken for printing.{' '}
+            {isAdmin && <Link to="/card-design">Card design</Link>}{isAdmin && isGroupWide && ' · '}{isGroupWide && <Link to="/billing">Billing</Link>}
           </p>
         ) : card && (
           <p className="legend-note" style={{ marginTop: '0.75rem' }}>

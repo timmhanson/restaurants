@@ -17,7 +17,7 @@ See README.md for the architecture, roles and deployment.
 - **Reports for System Administrators must filter by investment group and/or restaurant.** When a feature adds
   data worth reporting on, add it to `GET /api/system/reports` and the Reports page.
 - **System Administrators oversee the site, not restaurants.** Their menu (Overview, Investment groups,
-  Restaurants, People, Reports, Activity log, Audit log, Security, Connected Systems, System status) is entirely
+  Restaurants, People, Reports, Billing, Activity log, Audit log, Security, Connected Systems, System status) is entirely
   their own. Accounts for outside services the whole site uses are entered on Connected Systems. Never
   show them restaurant-level screens unless they chose "View as admin". Put new site-wide features in that area
   (`SystemAdminController`, `/api/system/*`, `SuperAdmin` only) and surface anything needing action in the
@@ -28,6 +28,13 @@ See README.md for the architecture, roles and deployment.
   permission, a confirmation naming what will be charged, protection against charging twice, and an audit row.
   Third-party keys are entered in the site and stored encrypted with Data Protection (never returned to a
   browser, logged or audited beyond their last four characters), or live in App Service settings.
+- **Investment groups never see which companies the site uses for mailing (PostGrid).** Screens, messages, history
+  entries, exports and audit rows a group can read say "mailed for you" or "the mailing service"
+  (`MailStatuses.ForClients`); the names appear only in the System Administrator's area. Groups also see one
+  price per card, never the split between the mail house's cost and the site's fee.
+- **Card and bank numbers never touch the site.** Payment methods are entered on Stripe's own page; store only
+  Stripe's references and a label. A charge needs the amount confirmed by the person (or automatic payment they
+  switched on), an idempotency key so a bill cannot be charged twice, and an audit row.
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use

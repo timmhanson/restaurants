@@ -19,7 +19,8 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
-    IAddressVerifier addressVerifier, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount) : ControllerBase
+    IAddressVerifier addressVerifier, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
+    MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -58,6 +59,29 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         bool OverAWeek(DateOnly visit) => todayDate.DayNumber - visit.DayNumber > 7;
 
         var attention = new List<AttentionItem>();
+        // Money the site has paid the mail house for and is still owed, and groups about to hit their monthly limit.
+        var billingRows = await db.GroupBilling.AsNoTracking().ToListAsync();
+        var openBills = await db.MailInvoices.AsNoTracking().Where(i => i.Status == InvoiceStatuses.Open).ToListAsync();
+        var overdue = openBills.Where(i => i.DueOn < todayDate).ToList();
+        if (overdue.Count > 0)
+            attention.Add(new("high", $"{overdue.Count} mailing bill{(overdue.Count == 1 ? " is" : "s are")} overdue ({BillingService.Dollars(overdue.Sum(i => i.TotalCents))})",
+                "The site has already paid the mail house for these cards. Billing shows who owes what; mark each as paid when the money arrives.", "/system-billing?status=overdue"));
+        var undelivered = openBills.Count(i => i.DeliveryError != null);
+        if (undelivered > 0)
+            attention.Add(new("medium", $"{undelivered} mailing bill{(undelivered == 1 ? " was" : "s were")} not sent", "Billing shows why for each one, with Send again.", "/system-billing"));
+        var failedPayments = openBills.Count(i => i.PaymentError != null);
+        if (failedPayments > 0)
+            attention.Add(new("medium", $"{failedPayments} mailing bill payment{(failedPayments == 1 ? "" : "s")} did not go through", "The group has been shown why on its Billing page. Billing lists them.", "/system-billing"));
+        var monthFrom = MailLedger.MonthStart(now);
+        var usedThisMonth = (await ledger.Billed().Where(c => c.MailedAt >= monthFrom)
+            .Select(c => new { c.Restaurant.GroupId, Cents = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0) }).ToListAsync()).GroupBy(c => c.GroupId).ToDictionary(g => g.Key, g => g.Sum(c => c.Cents));
+        foreach (var g in groups.Where(g => g.IsActive && usedThisMonth.ContainsKey(g.Id)))
+        {
+            var limit = billingRows.FirstOrDefault(b => b.GroupId == g.Id)?.MonthlyLimitCents ?? siteMailing.Billing.MonthlyLimitCents;
+            if (limit > 0 && usedThisMonth[g.Id] * 10 >= limit * 9)
+                attention.Add(new("info", $"{g.Name} has used {BillingService.Dollars(usedThisMonth[g.Id])} of its {BillingService.Dollars(limit)} mailing limit this month",
+                    "Once it reaches the limit it cannot mail more cards until next month, unless you raise the limit on Billing.", "/system-billing"));
+        }
         if (errors24h > 0)
             attention.Add(new("high", $"{errors24h} server error{(errors24h == 1 ? "" : "s")} in the last 24 hours", "Something failed for someone. System status lists what and when.", "/system"));
         var failed24h = signIns.Where(s => s.Action == SignInFailed && s.At >= dayAgo).ToList();
@@ -284,11 +308,11 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
     // ---- PostGrid: the site's address verification key, and how groups use PostGrid for mailing -------------------
 
     [HttpGet("postgrid")]
-    public Task<PostGridAddressDto> PostGrid(CancellationToken ct) => PostGridDto(ct);
+    public Task<PostGridSiteDto> PostGrid(CancellationToken ct) => PostGridDto(ct);
 
     /// <summary>Saves the PostGrid address verification key, encrypted; it is never shown again or written to any log.</summary>
     [HttpPut("postgrid")]
-    public async Task<ActionResult<PostGridAddressDto>> SetPostGrid(PostGridAddressRequest req, CancellationToken ct)
+    public async Task<ActionResult<PostGridSiteDto>> SetPostGrid(PostGridAddressRequest req, CancellationToken ct)
     {
         var me = await users.GetAsync();
         var key = (req.ApiKey ?? "").Trim();
@@ -301,7 +325,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
 
     /// <summary>Changes which service checks addresses first, keeping the saved key.</summary>
     [HttpPut("postgrid/order")]
-    public async Task<ActionResult<PostGridAddressDto>> SetPostGridOrder(PostGridAddressOrderRequest req, CancellationToken ct)
+    public async Task<ActionResult<PostGridSiteDto>> SetPostGridOrder(PostGridAddressOrderRequest req, CancellationToken ct)
     {
         var me = await users.GetAsync();
         if (!await postGridAccount.SetUseFirstAsync(req.UseFirst, me.DisplayName, ct))
@@ -311,7 +335,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
     }
 
     [HttpDelete("postgrid")]
-    public async Task<ActionResult<PostGridAddressDto>> RemovePostGrid(CancellationToken ct)
+    public async Task<ActionResult<PostGridSiteDto>> RemovePostGrid(CancellationToken ct)
     {
         var me = await users.GetAsync();
         var before = postGridAccount.Current;
@@ -332,16 +356,131 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         return new ServiceTestResult(ok, message);
     }
 
-    private async Task<PostGridAddressDto> PostGridDto(CancellationToken ct)
+    /// <summary>
+    /// Checks the Print &amp; Mail key with PostGrid, then saves it encrypted. Every investment group's cards are
+    /// printed and mailed on this account, so PostGrid bills the site; the site bills the groups (see Billing).
+    /// </summary>
+    [HttpPut("postgrid/mail")]
+    public async Task<ActionResult<PostGridSiteDto>> SetPostGridMail(PostGridMailKeyRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var key = (req.ApiKey ?? "").Trim();
+        if (key.Length is < 12 or > 200 || key.Any(char.IsWhiteSpace))
+            return BadRequest(new { message = "That does not look like a PostGrid API key. Copy the whole Print & Mail key from PostGrid (Settings, API Keys), with no spaces." });
+        var (ok, message) = await mailer.TestKeyAsync(key, ct);
+        if (!ok)
+        {
+            await audit.LogAsync(me, "PostGridMailKeyRejected", details: new { KeyEnding = key[^4..], message });
+            return BadRequest(new { message });
+        }
+        await siteMailing.SaveKeyAsync(key, me.DisplayName, ct);
+        await audit.LogAsync(me, "PostGridMailKeySet", details: new { KeyEnding = key[^4..], TestKey = MailStatuses.IsKeyForTest(key) });
+        return await PostGridDto(ct);
+    }
+
+    [HttpPost("postgrid/mail/test")]
+    public async Task<ServiceTestResult> TestPostGridMail(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (siteMailing.Account is not { } account) return new ServiceTestResult(false, "No PostGrid Print & Mail key has been entered.");
+        var (ok, message) = await mailer.TestKeyAsync(account.ApiKey, ct);
+        await audit.LogAsync(me, ok ? "PostGridMailTestPassed" : "PostGridMailTestFailed", details: new { message });
+        return new ServiceTestResult(ok, message);
+    }
+
+    [HttpDelete("postgrid/mail")]
+    public async Task<ActionResult<PostGridSiteDto>> RemovePostGridMail(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var before = siteMailing.Account;
+        await siteMailing.RemoveKeyAsync(ct);
+        if (before?.Source == "Saved in the site") await audit.LogAsync(me, "PostGridMailKeyRemoved", details: new { KeyEnding = before.ApiKey[^4..] });
+        return await PostGridDto(ct);
+    }
+
+    private async Task<PostGridSiteDto> PostGridDto(CancellationToken ct)
     {
         var a = postGridAccount.Current;
-        var groups = await db.Groups.CountAsync(g => g.PostGridKeyEncrypted != null, ct);
-        var mailed = await db.Comments.CountAsync(c => c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled, ct);
+        var m = siteMailing.Account;
+        var mail = m is null
+            ? new PostGridMailAccountDto(false, "None", null, false, null, null)
+            : new PostGridMailAccountDto(true, m.Source, m.ApiKey.Length >= 4 ? m.ApiKey[^4..] : null, m.Test, m.SavedAt, m.SavedBy);
+        var mailed = await ledger.Billed().CountAsync(ct);
+        var month = MailLedger.MonthStart(DateTime.UtcNow);
+        var thisMonth = await ledger.Billed().CountAsync(c => c.MailedAt >= month, ct);
         var tests = await db.Comments.CountAsync(c => c.MailId != null && c.MailTest && c.MailStatus != MailStatuses.Cancelled, ct);
         var real = addressVerifier is AddressCheckers;
         return a is null
-            ? new PostGridAddressDto(false, "None", null, false, null, null, real, groups, mailed, tests)
-            : new PostGridAddressDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.UseFirst, a.SavedAt, a.SavedBy, real, groups, mailed, tests);
+            ? new PostGridSiteDto(false, "None", null, false, null, null, real, mail, mailed, tests, thisMonth)
+            : new PostGridSiteDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.UseFirst, a.SavedAt, a.SavedBy, real, mail, mailed, tests, thisMonth);
+    }
+
+    // ---- Stripe: the site's account that takes payment for mailing bills -----------------------------------------
+
+    [HttpGet("stripe")]
+    public Task<StripeAccountDto> Stripe(CancellationToken ct) => StripeDto(ct);
+
+    /// <summary>
+    /// Checks the secret key with Stripe, then saves it encrypted; it is never shown again or written to any log.
+    /// Payment methods saved under a different Stripe account or mode cannot be used with this one, so they are cleared.
+    /// </summary>
+    [HttpPut("stripe")]
+    public async Task<ActionResult<StripeAccountDto>> SetStripe(StripeKeyRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var key = (req.SecretKey ?? "").Trim();
+        if (key.Length is < 20 or > 300 || key.Any(char.IsWhiteSpace) || !(key.StartsWith("sk_") || key.StartsWith("rk_")))
+            return BadRequest(new { message = "Enter Stripe's secret key (it begins sk_test_ or sk_live_), from Stripe's Developers, API keys page. Not the publishable key." });
+        var (ok, message) = await payments.TestKeyAsync(key, ct);
+        if (!ok)
+        {
+            await audit.LogAsync(me, "StripeKeyRejected", details: new { KeyEnding = key[^4..], message });
+            return BadRequest(new { message });
+        }
+        var before = payAccount.Current;
+        await payAccount.SaveAsync(key, me.DisplayName, ct);
+        var cleared = 0;
+        if (before is not null && before.SecretKey != key)
+        {
+            var saved = await db.GroupBilling.Where(b => b.PayCustomerId != null).ToListAsync(ct);
+            foreach (var b in saved)
+            {
+                b.PayCustomerId = null; b.PayMethodId = null; b.PayKind = null; b.PayFunding = null; b.PayLabel = null; b.PayMandateId = null; b.PaySetAt = null; b.PaySetBy = null; b.AutoPay = false;
+            }
+            cleared = saved.Count;
+            await db.SaveChangesAsync(ct);
+        }
+        await audit.LogAsync(me, "StripeKeySet", details: new { KeyEnding = key[^4..], TestKey = StripePayments.IsKeyForTest(key), PaymentMethodsCleared = cleared });
+        return await StripeDto(ct);
+    }
+
+    [HttpPost("stripe/test")]
+    public async Task<ServiceTestResult> TestStripe(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (payAccount.Current is not { } account) return new ServiceTestResult(false, "No Stripe key has been entered.");
+        var (ok, message) = await payments.TestKeyAsync(account.SecretKey, ct);
+        await audit.LogAsync(me, ok ? "StripeTestPassed" : "StripeTestFailed", details: new { message });
+        return new ServiceTestResult(ok, message);
+    }
+
+    [HttpDelete("stripe")]
+    public async Task<ActionResult<StripeAccountDto>> RemoveStripe(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var before = payAccount.Current;
+        await payAccount.RemoveAsync(ct);
+        if (before?.Source == "Saved in the site") await audit.LogAsync(me, "StripeKeyRemoved", details: new { KeyEnding = before.SecretKey[^4..] });
+        return await StripeDto(ct);
+    }
+
+    private async Task<StripeAccountDto> StripeDto(CancellationToken ct)
+    {
+        var a = payAccount.Current;
+        var groups = await db.GroupBilling.CountAsync(b => b.PayMethodId != null, ct);
+        return a is null
+            ? new StripeAccountDto(false, "None", null, false, null, null, groups, true)
+            : new StripeAccountDto(true, a.Source, a.SecretKey[^4..], a.Test, a.SavedAt, a.SavedBy, groups, true);
     }
 
     // ---- Directories across every investment group ----------------------------------------------------------

@@ -95,6 +95,10 @@ export const fmtDate = (d?: string | null) => {
   return new Date(y, m - 1, day).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+/** The local calendar day of a moment (a UTC timestamp from the server). */
+export const fmtDay = (d?: string | null) =>
+  d ? new Date(d.endsWith('Z') || d.includes('+') ? d : d + 'Z').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''
+
 export const fmtDateTime = (d?: string | null) => (d ? new Date(d.endsWith('Z') || d.includes('+') ? d : d + 'Z').toLocaleString() : '')
 
 export const today = () => {

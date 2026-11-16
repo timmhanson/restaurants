@@ -142,22 +142,89 @@ export interface PrintConfig {
   canBuyPostage: boolean
   maxCentsPerCard: number
   mailedMethod: string
-  /** The group has a PostGrid account, which prints and mails cards. */
+  /** The site can print and mail cards for this group (its monthly limit is above zero). */
   mailAvailable: boolean
-  /** mailAvailable, and this person has the "buy postage" permission. */
+  /** mailAvailable, a payment method is saved if one is required, and this person has the "buy postage" permission. */
   canMail: boolean
-  /** The group's PostGrid key is a test key: nothing is printed, mailed or charged. */
+  /** Mailing is on, but the group must first save a payment method on Billing. */
+  mailNeedsPayMethod: boolean
+  /** The site is in test mode for mailing: nothing is printed, mailed or charged. */
   mailTest: boolean
+  /** What the group is billed for each mailed card, in cents. */
   mailCentsPerCard: number
   mailMaxCards: number
-  hasCardArt: boolean
+  /** The group's limit for mailed cards this calendar month, and what has been billed so far, in cents. */
+  mailLimitCents: number
+  mailUsedCents: number
 }
-/** PostGrid's status for a mailed card. */
+/** Where a mailed card is. */
 export type MailStatus = 'ready' | 'printing' | 'processed_for_delivery' | 'completed' | 'cancelled'
 export interface MailOutcome { commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null }
-export interface MailStatusInfo { commentId: number; status?: MailStatus | null; test: boolean; previewUrl?: string | null; error?: string | null }
+export interface MailStatusInfo { commentId: number; status?: MailStatus | null; test: boolean; hasProof: boolean; error?: string | null }
 export interface MailPreview { frontHtml: string; backHtml: string }
-export interface CardArt { hasArt: boolean; url?: string | null; widthPx?: number | null; heightPx?: number | null; bytes: number; uploadedAt?: string | null; uploadedBy?: string | null }
+
+// ---- How mailed cards look ----
+export type CardFront = 'plain' | 'designed' | 'picture'
+export type CardLayout = 'centered' | 'photo' | 'split'
+export type CardImageKind = 'picture' | 'logo' | 'photo'
+/** fromGroup: borrowed from the group's card, because this restaurant has not uploaded its own. */
+export interface CardImage { kind: CardImageKind; url: string; widthPx?: number | null; heightPx?: number | null; bytes: number; uploadedAt: string; uploadedBy: string; fromGroup: boolean }
+export interface CardDesignFields {
+  front: CardFront; layout: CardLayout; headline?: string | null; message?: string | null; backMessage?: string | null; backgroundColor?: string | null; textColor?: string | null
+}
+/** scope is "group" or a restaurant's id. hasOwn is false when a restaurant uses the group's card. */
+export interface CardDesign extends CardDesignFields {
+  scope: string; restaurantId?: number | null; name: string; canEdit: boolean; hasOwn: boolean; backgroundColor: string; textColor: string
+  images: CardImage[]; updatedAt?: string | null; updatedBy?: string | null
+}
+export interface CardDesignScope { scope: string; restaurantId?: number | null; name: string; canEdit: boolean; hasOwn: boolean }
+
+// ---- Billing for mailed cards ----
+export interface InvoiceLine { restaurantId: number; restaurant: string; cards: number; cents: number }
+export interface MailMonthRow { restaurantId: number; restaurant: string; cards: number; totalCents: number }
+export interface MailMonth { month: string; monthName: string; cards: number; totalCents: number; restaurants: MailMonthRow[] }
+export interface PayMethod { kind: 'card' | 'bank'; funding?: string | null; label: string; setAt?: string | null; setBy?: string | null }
+export interface BillingContact { name?: string | null; email?: string | null; street?: string | null; city?: string | null; state?: string | null; zip?: string | null }
+export type InvoiceStatus = 'open' | 'processing' | 'paid' | 'void'
+export interface Invoice {
+  id: number; number: string; month: string; monthName: string; cards: number; totalCents: number; issuedAt: string; dueOn: string; status: InvoiceStatus; overdue: boolean
+  paidAt?: string | null; paidHow?: string | null; surchargeCents: number
+  /** What paying with the saved payment method would add (a credit card or a bank account). */
+  payFeeCents: number
+  paymentError?: string | null; lines: InvoiceLine[]
+}
+export interface GroupBilling {
+  /** A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage. */
+  canManage: boolean
+  mailAvailable: boolean; test: boolean; centsPerCard: number; limitCents: number; usedCents: number; cardsThisMonth: number
+  payAvailable: boolean; payRequired: boolean; payTest: boolean; cardFeePercent: number; bankFeePercent: number; method?: PayMethod | null; autoPay: boolean; contact: BillingContact
+  businessName: string; businessEmail?: string | null; payInstructions?: string | null; billDay: number; dueDays: number
+  months: MailMonth[]; invoices: Invoice[]; owedCents: number
+}
+export interface BillingActionResult { ok: boolean; message: string; billing: GroupBilling }
+
+export interface BillingSettings {
+  costCents: number; feeCents: number; monthlyLimitCents: number; billDay: number; dueDays: number; emailBills: boolean; printBills: boolean
+  cardFeePercent: number; bankFeePercent: number; requirePaymentMethod: boolean; businessName: string; businessEmail?: string | null
+  street?: string | null; city?: string | null; state?: string | null; zip?: string | null; payInstructions?: string | null; siteUrl?: string | null
+}
+export interface SystemInvoice extends Omit<Invoice, 'payFeeCents'> {
+  groupId: number; group: string; costCents: number; feeCents: number; paidNote?: string | null; paidBy?: string | null; paymentRef?: string | null
+  emailedAt?: string | null; emailedTo?: string | null; printedAt?: string | null; deliveryError?: string | null
+}
+export interface GroupBillingRow {
+  groupId: number; group: string; active: boolean; feeCents?: number | null; effectiveFeeCents: number; limitCents?: number | null; effectiveLimitCents: number
+  cardsThisMonth: number; billedThisMonthCents: number; owedCents: number; payLabel?: string | null; autoPay: boolean; billingEmail?: string | null
+}
+export interface SystemBilling {
+  settings: BillingSettings; mailReady: boolean; mailTest: boolean; payReady: boolean; payTest: boolean; emailReady: boolean
+  groups: GroupBillingRow[]; invoices: SystemInvoice[]; unbilledMonths: string[]; owedCents: number; overdueCents: number
+}
+export interface SiteMailStatementRow { groupId: number; group: string; restaurantId: number; restaurant: string; cards: number; costCents: number; feeCents: number; totalCents: number }
+export interface SiteMailStatement { month: string; months: string[]; rows: SiteMailStatementRow[]; cards: number; costCents: number; feeCents: number; totalCents: number }
+/** A key saved on Connected Systems: never sent to the browser, only its last four characters. */
+export interface SiteKeyInfo { configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; test: boolean; savedAt?: string | null; savedBy?: string | null }
+export interface StripeAccount extends SiteKeyInfo { groupsWithMethod: number; canEnter: boolean }
 export interface PostageOutcome { commentId: number; ok: boolean; cents?: number | null; labelUrl?: string | null; test: boolean; alreadyBought: boolean; error?: string | null }
 export interface FollowUpRestaurant { id: number; name: string; days?: number | null; effectiveDays: number; canSet: boolean }
 export interface FollowUpSummary { due: number; oldestDueOn?: string | null; defaultDays: number; restaurants: FollowUpRestaurant[] }
@@ -252,7 +319,6 @@ export interface CommentSummary {
   postageLabelUrl?: string | null
   postageTrackingCode?: string | null
   postageTest: boolean
-  mailProvider?: string | null
   mailStatus?: MailStatus | null
   mailedAt?: string | null
   mailTest?: boolean
@@ -416,9 +482,10 @@ export interface CardStats {
   redeemed: number
   followedUp: number
   postageCents: number
-  /** Cards printed and mailed by PostGrid, and what they were expected to cost (cents). */
+  /** Cards printed and mailed by PostGrid, what they were expected to cost and the site's fee (cents). */
   mailedByPostGrid: number
   mailEstimateCents: number
+  mailFeeCents: number
   replied: number
   waiting: number
   waitingOverAWeek: number
@@ -515,7 +582,7 @@ export interface UspsAccount {
 }
 export interface ServiceTestResult { ok: boolean; message: string }
 
-/** The site's PostGrid address verification key (never sent to the browser) and how groups use PostGrid for mailing. */
+/** PostGrid on Connected Systems: the address verification key (top level) and the Print & Mail key that mails every group's cards. */
 export interface PostGridSite {
   configured: boolean
   source: 'Saved in the site' | 'App settings' | 'None'
@@ -525,7 +592,8 @@ export interface PostGridSite {
   savedAt?: string | null
   savedBy?: string | null
   canEnter: boolean
-  groupsWithMailAccounts: number
+  mail: SiteKeyInfo
   cardsMailed: number
   testCardsMailed: number
+  cardsThisMonth: number
 }

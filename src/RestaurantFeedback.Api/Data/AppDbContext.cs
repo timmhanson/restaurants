@@ -14,7 +14,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CommentActivity> CommentActivities => Set<CommentActivity>();
     public DbSet<InteractionLog> InteractionLogs => Set<InteractionLog>();
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
-    public DbSet<CardArtwork> CardArtworks => Set<CardArtwork>();
+    public DbSet<CardDesign> CardDesigns => Set<CardDesign>();
+    public DbSet<CardImage> CardImages => Set<CardImage>();
+    public DbSet<GroupBilling> GroupBilling => Set<GroupBilling>();
+    public DbSet<MailInvoice> MailInvoices => Set<MailInvoice>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -42,11 +45,39 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<SiteSetting>().HasKey(s => s.Key);
         b.Entity<SiteSetting>().Property(s => s.Key).HasMaxLength(100);
 
-        b.Entity<CardArtwork>().HasKey(a => a.GroupId);
-        b.Entity<CardArtwork>().HasOne<OwnerGroup>().WithOne().HasForeignKey<CardArtwork>(a => a.GroupId).OnDelete(DeleteBehavior.Cascade);
-        b.Entity<CardArtwork>().Property(a => a.ContentType).HasMaxLength(40);
-        b.Entity<CardArtwork>().Property(a => a.Hash).HasMaxLength(40);
+        var design = b.Entity<CardDesign>();
+        design.HasIndex(d => new { d.GroupId, d.RestaurantId });
+        design.HasOne<OwnerGroup>().WithMany().HasForeignKey(d => d.GroupId).OnDelete(DeleteBehavior.Cascade);
+        design.HasOne<Restaurant>().WithMany().HasForeignKey(d => d.RestaurantId).OnDelete(DeleteBehavior.Cascade);
+        design.Property(d => d.Front).HasMaxLength(20);
+        design.Property(d => d.Layout).HasMaxLength(20);
+        design.Property(d => d.Headline).HasMaxLength(80);
+        design.Property(d => d.Message).HasMaxLength(300);
+        design.Property(d => d.BackMessage).HasMaxLength(200);
+        design.Property(d => d.BackgroundColor).HasMaxLength(9);
+        design.Property(d => d.TextColor).HasMaxLength(9);
+        var image = b.Entity<CardImage>();
+        image.HasOne(i => i.Design).WithMany(d => d.Images).HasForeignKey(i => i.DesignId).OnDelete(DeleteBehavior.Cascade);
+        image.HasIndex(i => new { i.GroupId, i.Hash });
+        image.Property(i => i.Kind).HasMaxLength(20);
+        image.Property(i => i.ContentType).HasMaxLength(40);
+        image.Property(i => i.Hash).HasMaxLength(40);
         b.Entity<GuestComment>().HasIndex(c => c.MailId);
+
+        var billing = b.Entity<GroupBilling>();
+        billing.HasKey(g => g.GroupId);
+        billing.Property(g => g.GroupId).ValueGeneratedNever();
+        billing.HasOne<OwnerGroup>().WithOne().HasForeignKey<GroupBilling>(g => g.GroupId).OnDelete(DeleteBehavior.Cascade);
+        billing.Property(g => g.BillingName).HasMaxLength(200);
+        billing.Property(g => g.BillingEmail).HasMaxLength(200);
+        var invoice = b.Entity<MailInvoice>();
+        invoice.HasIndex(i => new { i.GroupId, i.Month }).IsUnique();
+        invoice.HasIndex(i => i.Status);
+        invoice.HasOne<OwnerGroup>().WithMany().HasForeignKey(i => i.GroupId).OnDelete(DeleteBehavior.Cascade);
+        invoice.Property(i => i.Month).HasMaxLength(7);
+        invoice.Property(i => i.Number).HasMaxLength(40);
+        invoice.Property(i => i.Status).HasMaxLength(20);
+        invoice.Property(i => i.PaidNote).HasMaxLength(500);
 
         var log = b.Entity<InteractionLog>();
         log.HasIndex(l => l.At);

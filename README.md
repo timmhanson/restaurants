@@ -130,7 +130,7 @@ or **PostGrid first**. `AddressCheckers` asks them in that order and moves to th
 answer. PostGrid charges per lookup after its free allowance, billed to the account whose key is entered; the
 `PostGrid__AddressApiKey` app setting is a fallback when nothing is entered in the site.
 
-**Postage.** The print screen offers three choices every time:
+**How the cards go out.** The print screen offers three choices every time:
 
 - **Stamps by hand:** nothing is charged; the card prints with the guest's address and a stamp box.
 - **Buy and print postage:** USPS First-Class postage is bought per card through EasyPost
@@ -143,23 +143,78 @@ answer. PostGrid charges per lookup after its free allowance, billed to the acco
   Buying also needs the group's "allow postage" setting and the `BuyPostage` permission. A card is never charged twice, nothing is bought above `Postage__MaxCentsPerCard` (150), and
   each purchase is audited. An EasyPost *test* key buys sample labels at no cost. USPS itself has no
   service for printing postage on postcards; its label service is for packages.
-- **Mailed for you by PostGrid:** nothing is printed in the restaurant. PostGrid (`PostGridMailer`, Print & Mail
-  API) prints both sides of a 6 × 4 postcard on card stock, adds First-Class postage and mails it, usually the
-  next business day. Each investment group uses **its own PostGrid account**, so PostGrid bills each group for
-  its own cards: a group administrator pastes the group's Print & Mail API key under **Settings, PostGrid
-  account** (`GroupPostGridAccounts`, encrypted, shown only by its last four characters, checked with PostGrid
-  before it is saved). The front is the picture uploaded under **Settings, Card front for PostGrid** (PNG or
-  JPEG, ideally 1875 × 1275 pixels, stored in the database and served at `/card-art/{group}/{hash}`); without
-  one, a plain front in the group's colour is generated. The back is the coupon, laid out to leave PostGrid's
-  address and postage area clear. **Preview and mail** shows both sides exactly as sent, then a confirmation
-  naming the number of cards and the expected cost (about $0.91 a card on PostGrid's free plan,
-  `PostGrid__EstimatedCentsPerCard`). Sending needs the `BuyPostage` and `MarkResponded` permissions, at most
-  `PostGrid__MaxCardsPerMailing` (100) cards at a time, and the confirmed count must match. A card is never sent
-  twice: cards already with PostGrid are skipped and each request carries an idempotency key, so a retry returns
-  the first order. Each card is marked sent, gets a history entry and an audit row (`CardMailed` or
-  `CardMailFailed`). **Cancel mailing** works until PostGrid starts printing (`CardMailCancelled`) and puts the
-  card back with the cards not sent. A PostGrid *test* key (`test_…`) makes previews only: nothing is printed,
-  mailed or charged, and test orders are labelled as such everywhere.
+- **Mailed for you:** nothing is printed in the restaurant. The site sends the card to a mail house (PostGrid,
+  `PostGridMailer`, Print & Mail API), which prints both sides of a 6 × 4 postcard on card stock, adds
+  First-Class postage and mails it, usually the next business day. It runs on **the site's own PostGrid
+  account**: the System Administrator enters the Print & Mail key once under **Connected Systems, PostGrid**
+  (`SiteMailing`, encrypted, shown only by its last four characters, checked with PostGrid before it is saved;
+  `PostGrid__MailApiKey` is a fallback). PostGrid bills the site, and the site bills each investment group (see
+  *Billing for mailed cards*). **Groups never see PostGrid's name:** every screen, message, history entry,
+  export column and audit row they can read says "mailed for you" or "the mailing service"
+  (`MailStatuses.ForClients`), and the printed proof is fetched by the site and handed on
+  (`comments/{id}/mail/proof`) instead of linking to PostGrid.
+  **Preview and mail** shows both sides exactly as sent, then a confirmation naming the number of cards and the
+  group's exact price. Sending needs the `BuyPostage` and `MarkResponded` permissions, at most
+  `PostGrid__MaxCardsPerMailing` (100) cards at a time; the confirmed count and the confirmed price must both
+  match; the group must be under its monthly limit; and, when the System Administrator requires it, the group
+  must have a payment method saved (otherwise it prints its own cards). A card is never sent twice: cards already
+  with the mail house are skipped and each request carries an idempotency key, so a retry returns the first
+  order. Each card is marked sent, gets a history entry and an audit row (`CardMailed`, `CardMailFailed`,
+  `CardMailOverLimit`). **Cancel mailing** works until printing starts (`CardMailCancelled`), puts the card back
+  with the cards not sent, and the card is not billed. A PostGrid *test* key (`test_…`) makes proofs only:
+  nothing is printed, mailed, charged or billed, and test orders are labelled as such everywhere.
+
+**Card design.** The **Card design** page (group administrators and owners) sets how mailed cards look
+(`CardDesign`, `CardImage`, `CardDesignController`). The investment group has one card for every restaurant; a
+restaurant can have **its own** instead, changed by its owners or the group's administrators, and goes back to
+the group's with one button. The front is one of: **plain** (the restaurant's name on the group's colour),
+**designed here** (three layouts, a headline, a message, background and text colours, a logo and a photo), or
+**your own artwork** (a finished picture, ideally 1875 × 1275 pixels). A restaurant's own design borrows any
+picture it has not uploaded (typically the logo) from the group's. The back is the coupon, laid out to leave
+the address and postage area clear, with an optional short note from the restaurant above it. Both sides are
+drawn by the server from the same HTML the mail house receives (`PostGridCardDesign`), so the live preview on
+the page is exactly what prints. Pictures are PNG or JPEG up to 5 MB, stored in the database and served at
+`/card-art/{group}/{hash}` (public, because the mail house downloads them; the address cannot be guessed).
+
+**Billing for mailed cards.** The site pays the mail house first, so every mailed card is recorded with what it
+cost the site and the site's fee at the moment it was sent (`MailEstimateCents`, `MailFeeCents`); later price
+changes never rewrite history. The System Administrator's **Billing** page (`SystemBillingController`,
+`/api/system/billing`) sets:
+
+- what a card costs the site and **the site's fee per card**, for every group and optionally **per group**;
+- a **monthly limit** per group (site default and per group; $0 switches mailing off), which caps what any
+  group can owe;
+- the **bill day** (last month's bills are created on it), days to pay, whether bills are **emailed** and whether
+  a **printed statement** is also posted through the mail house (PostGrid letters, paid by the site);
+- the **credit card fee** (3% by default), the **bank account fee** (0.08% by default) and whether a **payment
+  method is required** before a group may mail;
+- who the bills are from (business name, address, how to pay).
+
+`BillingWorker` runs hourly: on or after the bill day it creates one bill per group for the finished month
+(`MailInvoice`, unique per group and month, frozen with a line per restaurant), sends it, charges the groups that
+chose automatic payment, and checks bank payments that were on their way. Bills can also be created at once for
+any finished month. The System Administrator sees every bill (filtered by group, status and month), what is owed
+and overdue, **marks a bill paid** (check, bank transfer, cash; with a note and date), reopens or cancels one, and
+sends one again. A month-by-month statement splits the mail house's cost from the site's fee by group and
+restaurant. Overdue bills, bills that could not be sent, failed payments and groups near their limit appear in the
+Overview's "Needs your attention".
+
+Investment groups have their own **Billing** page (`BillingController`, `/api/billing`): the price per card, this
+month's use against the limit, each month by restaurant, their bills, where bills go, and their payment method.
+They see one price per card, never the split between cost and fee. Owners see the use of their own restaurants;
+only the group's administrators see bills, save a payment method or pay.
+
+**Paying on the site** uses the site's own **Stripe** account (`StripePayments`, secret key entered under
+**Connected Systems, Stripe**, encrypted; `Payments__SecretKey` is a fallback). A group administrator saves a
+bank account or a card on Stripe's own page (Checkout in setup mode), so no card or bank number ever reaches the
+site; the site keeps only Stripe's references and a label such as "Visa credit card ending 4242". A bill is
+paid with that saved method: the confirmation names the exact amount, the confirmed amount must match, and the
+payment carries an idempotency key made of the bill and its attempt number, so a bill is never charged twice.
+**Credit cards add the card fee and connected bank accounts add the bank fee (to the nearest cent); debit
+cards add nothing.** Bank payments show as "on their
+way" until Stripe reports them settled. A group can switch on **automatic payment** of each new bill. A Stripe
+*test* key (`sk_test_…`) moves no money. Every step is audited (`MailBillCreated`, `MailBillEmailed`,
+`MailBillPosted`, `MailBillCharged`, `MailBillPaymentFailed`, `MailBillMarkedPaid`, `PaymentMethodSaved`, …).
 
 **Following up.** Once a card has gone out by mail, the guest is due a follow-up to check it arrived:
 5 days later by default (`FollowUpDays` in group settings), or the number its restaurant chooses. Owners set
@@ -170,7 +225,7 @@ and leaves it due. No follow-up is asked for once the coupon is redeemed.
 
 **Redeeming.** **Coupon redeemed** records the day the guest used the coupon (and can be undone with a
 reason). Analytics, the export and the System Administrator's reports show cards printed, guests followed
-up with, coupons redeemed and postage bought.
+up with, coupons redeemed, postage bought, and cards mailed with their cost and the site's fee.
 
 ## System administration
 
@@ -183,7 +238,8 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **Restaurants** | directory of every restaurant in every group: owners, staff counts, cards, waiting; **Open in group** |
 | **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
 | **Reports**, **Activity log**, **Audit log** | see below |
-| **Connected Systems** | the outside services the site uses: the USPS account and PostGrid's address verification key for address checking are entered here (with Save and test, and which is asked first); PostGrid mailing, EasyPost and email are summarised with where each is managed |
+| **Billing** | what mailed cards cost and the site's fee (for every group and per group), monthly limits, when and how bills go out, every bill and whether it is paid, and what was mailed month by month |
+| **Connected Systems** | the accounts for outside services the whole site uses, each with Save and test: USPS and PostGrid's address verification key (and which is asked first), PostGrid's Print & Mail key (mails every group's cards), and Stripe (takes payment for mailing bills); EasyPost and email are summarised with where each is managed |
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
@@ -244,8 +300,8 @@ cd src/RestaurantFeedback.Api && dotnet run        # http://localhost:5298, SQLi
 cd web && npm install && npm run dev               # http://localhost:5173, proxies /api and /card-art
 ```
 
-Set `PostGrid__Sample=true` (and `Postage__Sample=true`) to use stand-ins for PostGrid mailing (and EasyPost)
-that never contact the real service.
+Set `PostGrid__Sample=true`, `Payments__Sample=true` and `Postage__Sample=true` to use stand-ins for PostGrid
+mailing, Stripe and EasyPost that never contact the real service.
 
 Development seeds an owner `owner` / `LocalOwner!2026` with the "Culver's of Joliet" restaurant.
 Put a super admin and any other local-only values in `src/RestaurantFeedback.Api/appsettings.Local.json`

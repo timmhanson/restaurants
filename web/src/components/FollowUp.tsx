@@ -32,7 +32,7 @@ export function FollowUpBadge({ c }: { c: CommentSummary }) {
 const KIND_LABEL: Record<ActivityKind, string> = {
   Note: 'Note', Attempt: 'Tried to reach guest', Replied: 'Reply confirmed', Reopened: 'Reopened', Printed: 'Card printed', PostageBought: 'Postage',
   Redeemed: 'Coupon redeemed', RedemptionUndone: 'Redemption taken back', FollowedUp: 'Followed up with guest', FollowUpAttempt: 'Tried to follow up',
-  Mailed: 'Sent to PostGrid', MailCancelled: 'PostGrid mailing cancelled',
+  Mailed: 'Sent to be mailed', MailCancelled: 'Mailing cancelled',
 }
 const KIND_BADGE: Record<ActivityKind, 'neutral' | 'warn' | 'ok' | 'danger' | 'accent'> = {
   Note: 'neutral', Attempt: 'warn', Replied: 'ok', Reopened: 'danger', Printed: 'neutral', PostageBought: 'neutral', Redeemed: 'accent',
@@ -78,8 +78,8 @@ export function AfterSendBadges({ c }: { c: CommentSummary }) {
   return (
     <>
       {c.mailStatus && c.mailStatus !== 'cancelled' && (
-        <Badge kind={c.mailTest ? 'warn' : 'neutral'} title={c.mailTest ? 'Sent with a PostGrid test key: not printed, mailed or charged' : 'Printed and mailed by PostGrid'}>
-          {c.mailTest ? 'PostGrid test order' : 'Mailed by PostGrid'}
+        <Badge kind={c.mailTest ? 'warn' : 'neutral'} title={c.mailTest ? 'A test order: not printed, mailed or charged' : 'Printed and mailed for you'}>
+          {c.mailTest ? 'Mailing test order' : 'Mailed for you'}
         </Badge>
       )}
       {c.redeemedOn && <Badge kind="accent" title={`Redeemed ${fmtDate(c.redeemedOn)} (recorded by ${c.redeemedByName ?? 'someone'})`}>Redeemed</Badge>}

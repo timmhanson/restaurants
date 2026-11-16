@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using RestaurantFeedback.Api.Data;
 using RestaurantFeedback.Api.Models;
@@ -12,8 +13,9 @@ using RestaurantFeedback.Api.Models;
 namespace RestaurantFeedback.Api.Services;
 
 /// <summary>
-/// PostGrid (postgrid.com) prints and mails coupon cards for an investment group, billed to that group's own PostGrid
-/// account, and can check guest addresses for the whole site. Settings section "PostGrid".
+/// PostGrid (postgrid.com) prints and mails coupon cards on the site's own PostGrid account, and can check guest
+/// addresses for the whole site. Investment groups never see PostGrid: they are billed by the site, per card, at
+/// PostGrid's cost plus the site's fee. Settings section "PostGrid".
 /// </summary>
 public class PostGridOptions
 {
@@ -21,18 +23,26 @@ public class PostGridOptions
     public string AddressBaseUrl { get; set; } = "https://api.postgrid.com";
     /// <summary>Optional site-wide address verification key (App Service setting PostGrid__AddressApiKey), used only when none is saved on Connected Systems.</summary>
     public string? AddressApiKey { get; set; }
+    /// <summary>Optional Print &amp; Mail key (App Service setting PostGrid__MailApiKey), used only when none is saved on Connected Systems.</summary>
+    public string? MailApiKey { get; set; }
     /// <summary>
-    /// What one 6x4 First-Class card is expected to cost, shown before anything is sent. PostGrid's published price on
-    /// its free Starter plan is $0.902 (printing and postage included); paid plans are cheaper. PostGrid does not
-    /// report the price of each card, so this is an estimate.
+    /// What PostGrid is expected to charge the site for one 6x4 First-Class card, until the System Administrator
+    /// sets it on Connected Systems. PostGrid's published price on its free Starter plan is $0.902 (printing and
+    /// postage included); paid plans are cheaper. PostGrid does not report the price of each card.
     /// </summary>
     public int EstimatedCentsPerCard { get; set; } = 91;
+    /// <summary>The site's own fee per card, until the System Administrator sets it on Connected Systems.</summary>
+    public int FeeCentsPerCard { get; set; } = 5;
+    /// <summary>The most one group may be billed in a calendar month, until the System Administrator sets it on Connected Systems.</summary>
+    public int MonthlyLimitCents { get; set; } = 5000;
     /// <summary>The most cards one mailing may send; a guard against sending far more than intended.</summary>
     public int MaxCardsPerMailing { get; set; } = 100;
-    /// <summary>The site's public address, used for the card artwork link PostGrid downloads. Defaults to the address of the request.</summary>
+    /// <summary>The site's public address, used for the card picture links PostGrid downloads. Defaults to the address of the request.</summary>
     public string? PublicBaseUrl { get; set; }
     /// <summary>Local development only: use <see cref="SamplePostGridMailer"/> instead of PostGrid.</summary>
     public bool Sample { get; set; }
+    /// <summary>Run the hourly billing round (create, send and collect monthly bills). Off in automated tests.</summary>
+    public bool BillingSchedule { get; set; } = true;
 }
 
 public record MailContact(string? FirstName, string? LastName, string? CompanyName, string AddressLine1, string? AddressLine2, string City, string State, string Zip);
@@ -41,6 +51,8 @@ public record MailPostcardRequest(MailContact To, MailContact From, string Front
 /// <param name="Live">False for a test-key order: nothing is printed, mailed or charged.</param>
 /// <param name="PreviewUrl">A short-lived link to PostGrid's PDF of the printed card.</param>
 public record MailedPostcard(string Id, string Status, bool Live, string? PreviewUrl, string? SendDate);
+/// <summary>A letter (a printed bill): PostGrid adds a first page with the addresses, so the HTML needs no address block.</summary>
+public record MailLetterRequest(MailContact To, MailContact From, string Html, string Description, Dictionary<string, string> Metadata);
 
 /// <summary>A problem with PostGrid, in words fit to show the person mailing.</summary>
 /// <param name="Answered">PostGrid gave a definite answer (so trying again needs a new idempotency key); false when it could not be reached.</param>
@@ -49,7 +61,7 @@ public class PostGridException(string message, bool answered) : Exception(messag
     public bool Answered { get; } = answered;
 }
 
-/// <summary>Sends postcards through PostGrid's Print &amp; Mail API with a group's own key.</summary>
+/// <summary>Sends postcards through PostGrid's Print &amp; Mail API with the site's key.</summary>
 public interface IPostGridMailer
 {
     string Description { get; }
@@ -59,6 +71,8 @@ public interface IPostGridMailer
     Task<MailedPostcard> GetPostcardAsync(string key, string id, CancellationToken ct = default);
     /// <summary>Cancels a card that has not started printing (status ready).</summary>
     Task<MailedPostcard> CancelPostcardAsync(string key, string id, CancellationToken ct = default);
+    /// <summary>Prints and posts a letter (a monthly bill), black and white, First-Class.</summary>
+    Task<MailedPostcard> CreateLetterAsync(string key, MailLetterRequest request, string idempotencyKey, CancellationToken ct = default);
 }
 
 public static class MailStatuses
@@ -66,6 +80,18 @@ public static class MailStatuses
     public const string Ready = "ready";
     public const string Cancelled = "cancelled";
     public static bool IsKeyForTest(string key) => key.StartsWith("test_", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The same message without the mail house's name, for investment groups: they deal with this site, and which
+    /// company prints the cards is the site's business.
+    /// </summary>
+    public static string ForClients(string message)
+    {
+        var s = Regex.Replace(message, @"PostGrid(?:'s|\u2019s)", "the mailing service's");
+        s = s.Replace("PostGrid", "the mailing service");
+        s = Regex.Replace(s, @"(^|[.!?]\s+)the mailing service", m => m.Groups[1].Value + "The mailing service");
+        return s;
+    }
 }
 
 public class PostGridMailer : IPostGridMailer
@@ -133,6 +159,26 @@ public class PostGridMailer : IPostGridMailer
         return Read(await SendAsync(req, ct));
     }
 
+    public async Task<MailedPostcard> CreateLetterAsync(string key, MailLetterRequest r, string idempotencyKey, CancellationToken ct = default)
+    {
+        var body = new
+        {
+            to = Contact(r.To),
+            from = Contact(r.From),
+            html = r.Html,
+            addressPlacement = "insert_blank_page",
+            color = false,
+            doubleSided = false,
+            mailingClass = "first_class",
+            description = r.Description,
+            metadata = r.Metadata
+        };
+        using var req = Request(HttpMethod.Post, "letters", key);
+        req.Content = JsonContent.Create(body);
+        req.Headers.Add("Idempotency-Key", idempotencyKey);
+        return Read(await SendAsync(req, ct));
+    }
+
     private static HttpRequestMessage Request(HttpMethod method, string path, string key)
     {
         var req = new HttpRequestMessage(method, path);
@@ -170,10 +216,10 @@ public class PostGridMailer : IPostGridMailer
                 catch (JsonException) { throw new PostGridException($"PostGrid gave an unexpected answer ({(int)res.StatusCode}).", answered: true); }
             }
             if (res.StatusCode is HttpStatusCode.Unauthorized)
-                throw new PostGridException("PostGrid did not accept the group's account key. An administrator can check it under Settings, PostGrid account.", answered: true);
+                throw new PostGridException("PostGrid did not accept the site's mailing key. The System Administrator can check it on Connected Systems.", answered: true);
             if ((int)res.StatusCode >= 500)
                 throw new PostGridException($"PostGrid had a problem ({(int)res.StatusCode}{Said(text)}). Try again in a few minutes.", answered: false);
-            throw new PostGridException($"PostGrid refused the card ({(int)res.StatusCode}{Said(text)}).", answered: true);
+            throw new PostGridException($"PostGrid refused it ({(int)res.StatusCode}{Said(text)}).", answered: true);
         }
     }
 
@@ -219,15 +265,22 @@ public class SamplePostGridMailer : IPostGridMailer
 {
     private int _count;
     private readonly Dictionary<string, string> _status = [];
+    private readonly Dictionary<string, string> _byKey = [];
     public string Description => "Sample mailing (not PostGrid)";
     public Task<(bool Ok, string Message)> TestKeyAsync(string key, CancellationToken ct = default) =>
         Task.FromResult((true, "Sample mailing accepted the key (nothing is sent anywhere on this computer)."));
 
     public Task<MailedPostcard> CreatePostcardAsync(string key, MailPostcardRequest request, string idempotencyKey, CancellationToken ct = default)
     {
-        var id = $"postcard_sample{Interlocked.Increment(ref _count)}";
-        lock (_status) _status[id] = MailStatuses.Ready;
-        return Task.FromResult(new MailedPostcard(id, MailStatuses.Ready, false, null, DateTime.UtcNow.ToString("yyyy-MM-dd")));
+        lock (_status)
+        {
+            if (!_byKey.TryGetValue(idempotencyKey, out var id))
+            {
+                id = _byKey[idempotencyKey] = $"postcard_sample{Interlocked.Increment(ref _count)}";
+                _status[id] = MailStatuses.Ready;
+            }
+            return Task.FromResult(new MailedPostcard(id, _status[id], !MailStatuses.IsKeyForTest(key), null, DateTime.UtcNow.ToString("yyyy-MM-dd")));
+        }
     }
 
     public Task<MailedPostcard> GetPostcardAsync(string key, string id, CancellationToken ct = default)
@@ -240,57 +293,123 @@ public class SamplePostGridMailer : IPostGridMailer
         lock (_status) _status[id] = MailStatuses.Cancelled;
         return Task.FromResult(new MailedPostcard(id, MailStatuses.Cancelled, false, null, null));
     }
+
+    public Task<MailedPostcard> CreateLetterAsync(string key, MailLetterRequest request, string idempotencyKey, CancellationToken ct = default) =>
+        Task.FromResult(new MailedPostcard($"letter_sample{Interlocked.Increment(ref _count)}", MailStatuses.Ready, false, null, null));
+}
+
+/// <param name="Source">"Saved in the site" or "App settings".</param>
+public record MailAccount(string ApiKey, string Source, DateTime? SavedAt, string? SavedBy)
+{
+    public bool Test => MailStatuses.IsKeyForTest(ApiKey);
 }
 
 /// <summary>
-/// Each investment group's own PostGrid Print &amp; Mail key, so each group pays for its own mailings. Encrypted with
-/// Data Protection before it is stored and only decrypted to send or check a card; never returned to a browser,
-/// logged or audited beyond its last four characters.
+/// The site's own PostGrid Print &amp; Mail key, entered by the System Administrator on Connected Systems. Encrypted
+/// with Data Protection before it is stored and never returned to a browser, logged or audited beyond its last four
+/// characters. PostGrid__MailApiKey is a fallback. Also holds the site's billing settings (see BillingSettings).
 /// </summary>
-public class GroupPostGridAccounts(AppDbContext db, IDataProtectionProvider protection, ILogger<GroupPostGridAccounts> log)
+public class SiteMailing(IServiceScopeFactory scopes, IDataProtectionProvider protection, PostGridOptions options, ILogger<SiteMailing> log)
 {
-    private readonly IDataProtector _protector = protection.CreateProtector("RestaurantFeedback.GroupPostGridKey.v1");
+    private const string KeySetting = "postgrid.mail";
+    private const string BillingSetting = "mail.billing";
+    private readonly IDataProtector _protector = protection.CreateProtector("RestaurantFeedback.SiteSecret.PostGridMail.v1");
+    private volatile MailAccount? _account;
+    private volatile BillingSettings? _billing;
 
-    public async Task<PostageAccountInfo> DescribeAsync(int groupId, CancellationToken ct = default)
-    {
-        var g = await db.Groups.FindAsync([groupId], ct);
-        return g?.PostGridKeyEncrypted is null
-            ? new PostageAccountInfo(false, null, false, null, null)
-            : new PostageAccountInfo(true, g.PostGridKeyEnding, g.PostGridKeyIsTest, g.PostGridKeySetAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null, g.PostGridKeySetBy);
-    }
+    private record SavedKey(string ApiKey);
 
-    public async Task<string?> KeyAsync(int groupId, CancellationToken ct = default)
+    public MailAccount? Account => _account;
+    public BillingSettings Billing => _billing ?? Defaults;
+    private BillingSettings Defaults => new() { CostCents = options.EstimatedCentsPerCard, FeeCents = options.FeeCentsPerCard, MonthlyLimitCents = options.MonthlyLimitCents };
+
+    public async Task LoadAsync(CancellationToken ct = default)
     {
-        var g = await db.Groups.FindAsync([groupId], ct);
-        if (g?.PostGridKeyEncrypted is null) return null;
-        try { return _protector.Unprotect(g.PostGridKeyEncrypted); }
-        catch (System.Security.Cryptography.CryptographicException ex)
+        MailAccount? account = null;
+        BillingSettings? billing = null;
+        using (var scope = scopes.CreateScope())
         {
-            log.LogError(ex, "The PostGrid key for group {GroupId} can no longer be decrypted", groupId);
-            return null;
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            try
+            {
+                var row = await db.SiteSettings.FindAsync([KeySetting], ct);
+                if (row is not null)
+                {
+                    var saved = JsonSerializer.Deserialize<SavedKey>(_protector.Unprotect(row.Value))!;
+                    account = new MailAccount(saved.ApiKey, "Saved in the site", DateTime.SpecifyKind(row.UpdatedAt, DateTimeKind.Utc), row.UpdatedBy);
+                }
+            }
+            catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or JsonException)
+            {
+                log.LogError(ex, "The saved PostGrid mailing key can no longer be read and must be entered again");
+            }
+            try
+            {
+                var row = await db.SiteSettings.FindAsync([BillingSetting], ct);
+                if (row is not null) billing = JsonSerializer.Deserialize<BillingSettings>(row.Value)?.Normalize();
+            }
+            catch (JsonException ex)
+            {
+                log.LogError(ex, "The saved billing settings could not be read; the defaults are used");
+            }
         }
+        if (account is null && !string.IsNullOrWhiteSpace(options.MailApiKey))
+            account = new MailAccount(options.MailApiKey.Trim(), "App settings", null, null);
+        _account = account;
+        _billing = billing;
     }
 
-    public async Task<PostageAccountInfo> SetAsync(int groupId, string key, string by, CancellationToken ct = default)
+    public async Task SaveKeyAsync(string apiKey, string by, CancellationToken ct = default)
     {
-        var g = await db.Groups.FindAsync([groupId], ct) ?? throw new InvalidOperationException("No such group.");
-        key = key.Trim();
-        g.PostGridKeyEncrypted = _protector.Protect(key);
-        g.PostGridKeyEnding = key[^4..];
-        g.PostGridKeyIsTest = MailStatuses.IsKeyForTest(key);
-        g.PostGridKeySetAt = DateTime.UtcNow;
-        g.PostGridKeySetBy = by;
-        await db.SaveChangesAsync(ct);
-        return await DescribeAsync(groupId, ct);
+        await SiteSettingRows.SetAsync(scopes, KeySetting, _protector.Protect(JsonSerializer.Serialize(new SavedKey(apiKey.Trim()))), by, ct);
+        await LoadAsync(ct);
     }
 
-    public async Task RemoveAsync(int groupId, CancellationToken ct = default)
+    public async Task RemoveKeyAsync(CancellationToken ct = default)
     {
-        var g = await db.Groups.FindAsync([groupId], ct);
-        if (g is null) return;
-        g.PostGridKeyEncrypted = null; g.PostGridKeyEnding = null; g.PostGridKeyIsTest = false; g.PostGridKeySetAt = null; g.PostGridKeySetBy = null;
+        await SiteSettingRows.RemoveAsync(scopes, KeySetting, ct);
+        await LoadAsync(ct);
+    }
+
+    public async Task SaveBillingAsync(BillingSettings billing, string by, CancellationToken ct = default)
+    {
+        await SiteSettingRows.SetAsync(scopes, BillingSetting, JsonSerializer.Serialize(billing.Normalize()), by, ct);
+        await LoadAsync(ct);
+    }
+}
+
+/// <summary>Reads and writes rows of the SiteSettings table from singletons.</summary>
+public static class SiteSettingRows
+{
+    public static async Task SetAsync(IServiceScopeFactory scopes, string key, string value, string by, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.SiteSettings.FindAsync([key], ct);
+        if (row is null) db.SiteSettings.Add(row = new SiteSetting { Key = key });
+        row.Value = value;
+        row.UpdatedAt = DateTime.UtcNow;
+        row.UpdatedBy = by;
         await db.SaveChangesAsync(ct);
     }
+
+    public static async Task RemoveAsync(IServiceScopeFactory scopes, string key, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.SiteSettings.FindAsync([key], ct);
+        if (row is null) return;
+        db.SiteSettings.Remove(row);
+        await db.SaveChangesAsync(ct);
+    }
+}
+
+/// <summary>How one card looks, with the pictures already turned into the public addresses the mail house downloads.</summary>
+public record CardLook(string Front, string Layout, string? Headline, string? Message, string? BackMessage, string Background, string Text,
+    string? PictureUrl, string? LogoUrl, string? PhotoUrl)
+{
+    public static CardLook Plain(string? accent) =>
+        new(CardFronts.Plain, CardLayouts.Centered, null, null, null, PostGridCardDesign.SafeColor(accent), "#ffffff", null, null, null);
 }
 
 /// <summary>
@@ -301,36 +420,77 @@ public class GroupPostGridAccounts(AppDbContext db, IDataProtectionProvider prot
 public static class PostGridCardDesign
 {
     private const string Page = "@page{size:6.25in 4.25in;margin:0}html,body{margin:0;padding:0;width:6.25in;height:4.25in;overflow:hidden;position:relative;font-family:Arial,Helvetica,sans-serif;color:#1d1d1f}";
+    public const string DefaultHeadline = "Thank you!";
 
-    public static string SafeColor(string? accent) => Regex.IsMatch(accent ?? "", "^#[0-9a-fA-F]{6}$") ? accent! : "#005daa";
+    public static string SafeColor(string? color, string fallback = "#005daa") => Regex.IsMatch(color ?? "", "^#[0-9a-fA-F]{6}$") ? color! : fallback;
 
-    /// <summary>The picture side: the group's uploaded artwork edge to edge, or a plain card in the group's colour.</summary>
-    public static string Front(string? artUrl, string? accent, string restaurantName, string? offer)
+    private static string Doc(string css, string body) =>
+        $"<!doctype html><html><head><meta charset=\"utf-8\"><style>{Page}{css}</style></head><body>{body}</body></html>";
+
+    /// <summary>
+    /// The picture side: finished artwork edge to edge, a designed layout (words, logo and photo), or a plain card in
+    /// the group's colour. Words stay 3/8 inch inside the page, clear of the 1/8 inch that is trimmed off.
+    /// </summary>
+    public static string Front(CardLook look, string restaurantName, string? offer)
     {
-        if (!string.IsNullOrWhiteSpace(artUrl))
-            return $"<!doctype html><html><head><meta charset=\"utf-8\"><style>{Page}img{{position:absolute;left:0;top:0;width:6.25in;height:4.25in;object-fit:cover}}</style></head>"
-                   + $"<body><img src=\"{H(artUrl)}\" alt=\"\"></body></html>";
-        var color = SafeColor(accent);
-        var enjoy = string.IsNullOrWhiteSpace(offer) ? "" : $"<p class=\"offer\">Please enjoy <strong>{H(offer)}</strong> on your next visit.</p>";
-        return $"<!doctype html><html><head><meta charset=\"utf-8\"><style>{Page}body{{background:{color};color:#fff}}"
-               + ".box{position:absolute;left:.45in;top:.45in;right:.45in;bottom:.45in;display:flex;flex-direction:column;justify-content:center}"
-               + "h1{font-size:26pt;margin:0 0 .12in}.thanks{font-size:15pt;margin:0 0 .25in}.offer{font-size:13pt;margin:0}</style></head>"
-               + $"<body><div class=\"box\"><h1>{H(restaurantName)}</h1><p class=\"thanks\">Thank you for letting us know about your visit.</p>{enjoy}</div></body></html>";
+        if (look.Front == CardFronts.Picture && !string.IsNullOrWhiteSpace(look.PictureUrl))
+            return Doc("img{position:absolute;left:0;top:0;width:6.25in;height:4.25in;object-fit:cover}", $"<img src=\"{H(look.PictureUrl)}\" alt=\"\">");
+
+        var bg = SafeColor(look.Background);
+        var fg = SafeColor(look.Text, "#ffffff");
+        if (look.Front != CardFronts.Designed)
+        {
+            var enjoy = string.IsNullOrWhiteSpace(offer) ? "" : $"<p class=\"offer\">Please enjoy <strong>{H(offer)}</strong> on your next visit.</p>";
+            return Doc($"body{{background:{bg};color:#fff}}"
+                       + ".box{position:absolute;left:.45in;top:.45in;right:.45in;bottom:.45in;display:flex;flex-direction:column;justify-content:center}"
+                       + "h1{font-size:26pt;margin:0 0 .12in}.thanks{font-size:15pt;margin:0 0 .25in}.offer{font-size:13pt;margin:0}",
+                $"<div class=\"box\"><h1>{H(restaurantName)}</h1><p class=\"thanks\">Thank you for letting us know about your visit.</p>{enjoy}</div>");
+        }
+
+        var headline = string.IsNullOrWhiteSpace(look.Headline) ? DefaultHeadline : look.Headline.Trim();
+        var words = $"<h1>{H(headline)}</h1>" + (string.IsNullOrWhiteSpace(look.Message) ? "" : $"<p class=\"msg\">{H(look.Message.Trim())}</p>");
+        var logo = string.IsNullOrWhiteSpace(look.LogoUrl) ? "" : $"<img class=\"logo\" src=\"{H(look.LogoUrl)}\" alt=\"\">";
+        var name = $"<p class=\"name\">{H(restaurantName)}</p>";
+        var common = $"body{{background:{bg};color:{fg}}}h1{{margin:0;font-size:27pt;line-height:1.1}}.msg{{margin:.12in 0 0;font-size:12.5pt;line-height:1.3}}"
+                     + ".name{margin:.16in 0 0;font-size:10pt;letter-spacing:.04em;text-transform:uppercase;opacity:.85}.logo{object-fit:contain}"
+                     + ".photo{position:absolute;object-fit:cover}";
+        var hasPhoto = !string.IsNullOrWhiteSpace(look.PhotoUrl);
+
+        if (look.Layout == CardLayouts.Photo && hasPhoto)
+            return Doc(common
+                       + ".photo{left:0;top:0;width:6.25in;height:4.25in}"
+                       + $".band{{position:absolute;left:0;right:0;bottom:0;height:1.75in;background:{bg};opacity:.92}}"
+                       + ".in{position:absolute;left:.4in;right:.4in;bottom:.38in;height:1.2in;display:flex;align-items:center;gap:.25in}"
+                       + ".logo{max-height:1in;max-width:1.4in;flex:none}h1{font-size:22pt}.msg{margin-top:.06in;font-size:11pt}.name{margin-top:.06in;font-size:8.5pt}",
+                $"<img class=\"photo\" src=\"{H(look.PhotoUrl!)}\" alt=\"\"><div class=\"band\"></div><div class=\"in\">{logo}<div>{words}{name}</div></div>");
+
+        if (look.Layout == CardLayouts.Split && hasPhoto)
+            return Doc(common
+                       + ".photo{left:0;top:0;width:2.9in;height:4.25in}"
+                       + ".side{position:absolute;left:3.15in;top:.4in;right:.4in;bottom:.4in;display:flex;flex-direction:column;justify-content:center}"
+                       + ".logo{max-height:.9in;max-width:1.8in;align-self:flex-start;margin:0 0 .18in}h1{font-size:22pt}.msg{font-size:11.5pt}",
+                $"<img class=\"photo\" src=\"{H(look.PhotoUrl!)}\" alt=\"\"><div class=\"side\">{logo}{words}{name}</div>");
+
+        return Doc(common
+                   + ".mid{position:absolute;left:.5in;top:.4in;right:.5in;bottom:.4in;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}"
+                   + ".logo{max-height:1.15in;max-width:2.8in;margin:0 0 .2in}",
+            $"<div class=\"mid\">{logo}{words}{name}</div>");
     }
 
     /// <summary>The coupon side. PostGrid adds the guest's address, the return address and the postage on the right.</summary>
-    public static string Back(GuestComment c, Restaurant r, int validityMonths, string? accent)
+    public static string Back(GuestComment c, Restaurant r, int validityMonths, string? accent, string? backMessage = null)
     {
         var color = SafeColor(accent);
         string Day(DateOnly d) => d.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
         var months = $"{validityMonths} month{(validityMonths == 1 ? "" : "s")}";
         var sb = new StringBuilder();
         sb.Append($"<!doctype html><html><head><meta charset=\"utf-8\"><style>{Page}");
-        sb.Append(".coupon{position:absolute;left:.3in;top:.3in;width:3.4in;height:3.15in;font-size:9.5pt;line-height:1.3}");
-        sb.Append($"h2{{font-size:13pt;margin:0 0 .06in;color:{color}}}.enjoy{{margin:0 0 .1in;font-size:10.5pt}}");
+        sb.Append(".coupon{position:absolute;left:.3in;top:.3in;width:3.4in;height:3.15in;font-size:9.5pt;line-height:1.3;overflow:hidden}");
+        sb.Append($"h2{{font-size:13pt;margin:0 0 .06in;color:{color}}}.enjoy{{margin:0 0 .1in;font-size:10.5pt}}.note{{margin:0 0 .08in;font-size:9pt;font-style:italic;color:#333}}");
         sb.Append(".line{display:flex;gap:.08in;margin:.03in 0}.line span:first-child{width:1in;color:#555}.line span:last-child{flex:1;border-bottom:1px solid #999;font-weight:bold}");
         sb.Append(".legal{font-size:6.5pt;line-height:1.25;color:#444;margin:.1in 0 0}</style></head><body><div class=\"coupon\">");
         sb.Append($"<h2>{H(r.Name)}</h2>");
+        if (!string.IsNullOrWhiteSpace(backMessage)) sb.Append($"<p class=\"note\">{H(backMessage.Trim())}</p>");
         sb.Append($"<p class=\"enjoy\">Please enjoy <strong>{H(string.IsNullOrWhiteSpace(c.CouponOffer) ? "a treat on us" : c.CouponOffer)}</strong> the next time you visit us.</p>");
         sb.Append($"<div class=\"line\"><span>Date issued</span><span>{Day(c.DateIssued)}</span></div>");
         sb.Append($"<div class=\"line\"><span>Good until</span><span>{Day(c.ExpiresOn)}</span></div>");
@@ -342,6 +502,61 @@ public static class PostGridCardDesign
     }
 
     private static string H(string s) => WebUtility.HtmlEncode(s);
+}
+
+/// <summary>
+/// Card designs: the investment group's, and each restaurant's own where it has one. A restaurant without its own
+/// uses the group's; a group without one gets the plain card in its accent colour.
+/// </summary>
+public class CardDesigns(AppDbContext db, PostGridOptions options, IHttpContextAccessor http)
+{
+    public record Loaded(CardDesign Design, List<ImageRef> Images);
+    public record ImageRef(string Kind, string Hash, string ContentType, int? WidthPx, int? HeightPx, long Bytes, DateTime UploadedAt, string UploadedBy);
+
+    /// <summary>Every design in a group with its pictures' details (never the picture data).</summary>
+    public async Task<List<Loaded>> ForGroupAsync(int groupId, CancellationToken ct = default)
+    {
+        var designs = await db.CardDesigns.AsNoTracking().Where(d => d.GroupId == groupId).ToListAsync(ct);
+        var images = await db.CardImages.AsNoTracking().Where(i => i.GroupId == groupId)
+            .Select(i => new { i.DesignId, Ref = new ImageRef(i.Kind, i.Hash, i.ContentType, i.WidthPx, i.HeightPx, (long)i.Data.Length, i.UploadedAt, i.UploadedBy) }).ToListAsync(ct);
+        return designs.Select(d => new Loaded(d, images.Where(i => i.DesignId == d.Id).Select(i => i.Ref).ToList())).ToList();
+    }
+
+    /// <summary>
+    /// The design a restaurant's cards use: its own, else the group's, else none. A restaurant's own design borrows
+    /// any picture it has not uploaded itself (typically the logo) from the group's.
+    /// </summary>
+    public static Loaded? For(List<Loaded> all, int restaurantId)
+    {
+        var group = all.FirstOrDefault(l => l.Design.RestaurantId == null);
+        var own = all.FirstOrDefault(l => l.Design.RestaurantId == restaurantId);
+        return own is null ? group : own with { Images = WithGroupPictures(own.Images, group) };
+    }
+
+    public static List<ImageRef> WithGroupPictures(List<ImageRef> own, Loaded? group) =>
+        group is null ? own : [.. own, .. group.Images.Where(g => own.All(o => o.Kind != g.Kind))];
+
+    public CardLook Look(Loaded? l, int groupId, string? accent)
+    {
+        if (l is null) return CardLook.Plain(accent);
+        var d = l.Design;
+        string? Url(string kind) => l.Images.FirstOrDefault(i => i.Kind == kind) is { } i ? ImageUrl(groupId, i.Hash, i.ContentType, absolute: true) : null;
+        return new CardLook(d.Front, d.Layout, d.Headline, d.Message, d.BackMessage,
+            PostGridCardDesign.SafeColor(d.BackgroundColor, PostGridCardDesign.SafeColor(accent)), PostGridCardDesign.SafeColor(d.TextColor, "#ffffff"),
+            Url(CardImageKinds.Picture), Url(CardImageKinds.Logo), Url(CardImageKinds.Photo));
+    }
+
+    /// <summary>A picture's address: on this site for the browser, or in full for the mail house, which downloads it when it prints.</summary>
+    public string ImageUrl(int groupId, string hash, string contentType, bool absolute)
+    {
+        var path = $"/card-art/{groupId}/{hash}{(contentType == "image/png" ? ".png" : ".jpg")}";
+        if (!absolute) return path;
+        if (!string.IsNullOrWhiteSpace(options.PublicBaseUrl)) return options.PublicBaseUrl.TrimEnd('/') + path;
+        var req = http.HttpContext?.Request;
+        if (req is null) return path;
+        var local = req.Host.Host is "localhost" or "127.0.0.1" or "[::1]";
+        return $"{(local ? req.Scheme : "https")}://{req.Host}{path}";
+    }
 }
 
 /// <summary>Reads the size and type of an uploaded PNG or JPEG without an imaging library.</summary>

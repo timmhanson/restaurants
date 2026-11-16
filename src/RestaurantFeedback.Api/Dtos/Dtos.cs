@@ -161,8 +161,7 @@ public record CommentSummary(
     public string? PostageLabelUrl { get; init; }
     public string? PostageTrackingCode { get; init; }
     public bool PostageTest { get; init; }
-    /// <summary>Printed and mailed by PostGrid: its status (ready, printing, processed_for_delivery, completed, cancelled).</summary>
-    public string? MailProvider { get; init; }
+    /// <summary>Printed and mailed for the group by the site's mail house: its status (ready, printing, processed_for_delivery, completed, cancelled).</summary>
     public string? MailStatus { get; init; }
     public DateTime? MailedAt { get; init; }
     public bool MailTest { get; init; }
@@ -189,7 +188,7 @@ public record CommentSummary(
     {
         Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
         PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest,
-        MailProvider = c.MailProvider, MailStatus = c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
+        MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
         RedeemedByName = c.RedeemedByName, FollowedUpOn = c.FollowedUpOn, FollowedUpByName = c.FollowedUpByName,
         ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
     };
@@ -292,9 +291,10 @@ public record CardStats(int Cards, int Replied, int Waiting, int WaitingOverAWee
     public int Redeemed { get; init; }
     public int FollowedUp { get; init; }
     public int PostageCents { get; init; }
-    /// <summary>Cards printed and mailed by PostGrid (not test orders or cancelled ones), and their expected cost in cents.</summary>
+    /// <summary>Cards printed and mailed by PostGrid (not test orders or cancelled ones), their expected cost and the site's fee, in cents.</summary>
     public int MailedByPostGrid { get; init; }
     public int MailEstimateCents { get; init; }
+    public int MailFeeCents { get; init; }
 }
 
 public record GroupReportRow(int Id, string Name, bool IsActive, int Restaurants, int Users, int ActiveUsers, int SignIns, int Interactions,
@@ -356,25 +356,83 @@ public record SystemPerson(UserDto User, string[] Restaurants, DateTime? LastSee
 
 public record PrintConfig(bool PostageAvailable, string PostageProvider, bool CanBuyPostage, int MaxCentsPerCard, string MailedMethod)
 {
-    /// <summary>The group has a PostGrid account, so cards can be printed and mailed by PostGrid.</summary>
+    /// <summary>The site has a mailing account and this group's monthly limit is above zero, so cards can be printed and mailed for it.</summary>
     public bool MailAvailable { get; init; }
     /// <summary>MailAvailable, and this person may spend money (the BuyPostage permission).</summary>
     public bool CanMail { get; init; }
-    /// <summary>The group's PostGrid key is a test key: nothing is printed, mailed or charged.</summary>
+    /// <summary>Mailing is on, but the group must first save a payment method on Billing.</summary>
+    public bool MailNeedsPayMethod { get; init; }
+    /// <summary>The site's mailing key is a test key: nothing is printed, mailed or charged.</summary>
     public bool MailTest { get; init; }
+    /// <summary>What the group is billed for each mailed card, in cents.</summary>
     public int MailCentsPerCard { get; init; }
     public int MailMaxCards { get; init; }
-    /// <summary>The group has uploaded a picture for the front of the card.</summary>
-    public bool HasCardArt { get; init; }
+    /// <summary>The group's limit for mailed cards this calendar month, and what has been billed so far, in cents.</summary>
+    public int MailLimitCents { get; init; }
+    public int MailUsedCents { get; init; }
 }
 /// <param name="ConfirmCount">The number of cards the person confirmed; the request is refused if it does not match.</param>
-public record MailRequest(int[] CommentIds, int ConfirmCount);
-/// <param name="Status">PostGrid's status: ready, printing, processed_for_delivery, completed or cancelled.</param>
+/// <param name="ConfirmCentsPerCard">The price per card the person was shown; the request is refused if the price has changed since.</param>
+public record MailRequest(int[] CommentIds, int ConfirmCount, int ConfirmCentsPerCard);
+/// <param name="Status">The mail house's status: ready, printing, processed_for_delivery, completed or cancelled.</param>
 public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, bool AlreadyMailed, string? Error);
-public record MailStatusDto(int CommentId, string? Status, bool Test, string? PreviewUrl, string? Error);
+/// <param name="HasProof">The mail house has a proof of the printed card, fetched through comments/{id}/mail/proof.</param>
+public record MailStatusDto(int CommentId, string? Status, bool Test, bool HasProof, string? Error);
 public record MailPreview(string FrontHtml, string BackHtml);
-/// <param name="Url">Public address of the picture (PostGrid downloads it from here).</param>
-public record CardArtDto(bool HasArt, string? Url, int? WidthPx, int? HeightPx, long Bytes, DateTime? UploadedAt, string? UploadedBy);
+
+// ---- How mailed cards look: the group's design and each restaurant's own ---------------------------------
+
+/// <param name="Url">Public address of the picture (the mail house downloads it from here).</param>
+/// <param name="FromGroup">Borrowed from the group's card, because this restaurant has not uploaded its own.</param>
+public record CardImageDto(string Kind, string Url, int? WidthPx, int? HeightPx, long Bytes, DateTime UploadedAt, string UploadedBy, bool FromGroup);
+public record CardDesignFields(string? Front, string? Layout, string? Headline, string? Message, string? BackMessage, string? BackgroundColor, string? TextColor);
+/// <param name="Scope">"group" or a restaurant's id.</param>
+/// <param name="HasOwn">False when a restaurant has no design of its own and uses the group's.</param>
+public record CardDesignDto(string Scope, int? RestaurantId, string Name, bool CanEdit, bool HasOwn, string Front, string Layout, string? Headline, string? Message,
+    string? BackMessage, string BackgroundColor, string TextColor, List<CardImageDto> Images, DateTime? UpdatedAt, string? UpdatedBy);
+public record CardDesignScope(string Scope, int? RestaurantId, string Name, bool CanEdit, bool HasOwn);
+
+// ---- Billing for mailed cards: what a group sees ------------------------------------------------------------
+
+public record MailMonthRow(int RestaurantId, string Restaurant, int Cards, int TotalCents);
+/// <param name="Month">yyyy-MM.</param>
+public record MailMonth(string Month, string MonthName, int Cards, int TotalCents, List<MailMonthRow> Restaurants);
+/// <param name="Kind">card or bank.</param>
+/// <param name="Label">Such as "Visa credit card ending 4242"; never a full number.</param>
+public record PayMethodDto(string Kind, string? Funding, string Label, DateTime? SetAt, string? SetBy);
+public record BillingContact(string? Name, string? Email, string? Street, string? City, string? State, string? Zip);
+/// <param name="PayFeeCents">What paying this bill with the saved payment method would add (a credit card or a bank account).</param>
+public record InvoiceDto(int Id, string Number, string Month, string MonthName, int Cards, int TotalCents, DateTime IssuedAt, DateOnly DueOn, string Status, bool Overdue,
+    DateTime? PaidAt, string? PaidHow, int SurchargeCents, int PayFeeCents, string? PaymentError, List<Services.InvoiceLine> Lines);
+/// <param name="CanManage">A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage.</param>
+public record GroupBillingDto(bool CanManage, bool MailAvailable, bool Test, int CentsPerCard, int LimitCents, int UsedCents, int CardsThisMonth,
+    bool PayAvailable, bool PayRequired, bool PayTest, decimal CardFeePercent, decimal BankFeePercent, PayMethodDto? Method, bool AutoPay, BillingContact Contact,
+    string BusinessName, string? BusinessEmail, string? PayInstructions, int BillDay, int DueDays, List<MailMonth> Months, List<InvoiceDto> Invoices, int OwedCents);
+/// <param name="ConfirmCents">The amount the person was shown and agreed to; the payment is refused if it no longer matches.</param>
+public record PayInvoiceRequest(int ConfirmCents);
+public record PaySetupStart(string Url);
+public record PaySetupFinish(string? SessionId);
+public record AutoPayRequest(bool On);
+public record BillingActionResult(bool Ok, string Message, GroupBillingDto Billing);
+
+// ---- Billing for mailed cards: what the System Administrator sees ---------------------------------------------
+
+public record SystemInvoiceDto(int Id, int GroupId, string Group, string Number, string Month, string MonthName, int Cards, int CostCents, int FeeCents, int TotalCents,
+    DateTime IssuedAt, DateOnly DueOn, string Status, bool Overdue, DateTime? PaidAt, string? PaidHow, string? PaidNote, string? PaidBy, int SurchargeCents,
+    string? PaymentRef, string? PaymentError, DateTime? EmailedAt, string? EmailedTo, DateTime? PrintedAt, string? DeliveryError, List<Services.InvoiceLine> Lines);
+/// <param name="FeeCents">The group's own fee per card, or null when it uses the site's.</param>
+/// <param name="LimitCents">The group's own monthly limit, or null when it uses the site's.</param>
+public record GroupBillingRow(int GroupId, string Group, bool Active, int? FeeCents, int EffectiveFeeCents, int? LimitCents, int EffectiveLimitCents, int CardsThisMonth,
+    int BilledThisMonthCents, int OwedCents, string? PayLabel, bool AutoPay, string? BillingEmail);
+/// <param name="UnbilledMonths">Finished months that have mailed cards with no bill yet.</param>
+public record SystemBillingDto(Services.BillingSettings Settings, bool MailReady, bool MailTest, bool PayReady, bool PayTest, bool EmailReady, List<GroupBillingRow> Groups,
+    List<SystemInvoiceDto> Invoices, List<string> UnbilledMonths, int OwedCents, int OverdueCents);
+public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents);
+/// <param name="How">check, bank, card, cash or other.</param>
+public record MarkPaidRequest(string? How, string? Note, DateOnly? PaidOn);
+public record IssueBillsRequest(string? Month);
+public record StripeKeyRequest(string? SecretKey);
+public record StripeAccountDto(bool Configured, string Source, string? KeyEnding, bool Test, DateTime? SavedAt, string? SavedBy, int GroupsWithMethod, bool CanEnter);
 public record CardIdsRequest(int[] CommentIds);
 public record PostageOutcome(int CommentId, bool Ok, int? Cents, string? LabelUrl, bool Test, bool AlreadyBought, string? Error);
 /// <param name="Postage">"bought" (postage printed on the card) or "stamp" (a stamp goes on by hand).</param>
@@ -412,12 +470,17 @@ public record UspsAccountRequest(string? ConsumerKey, string? ConsumerSecret, bo
 public record UspsAccountDto(bool Configured, string Source, string? KeyEnding, bool TestEnvironment, DateTime? SavedAt, string? SavedBy, bool CanEnter);
 public record ServiceTestResult(bool Ok, string Message);
 
-// ---- PostGrid: each group's mailing account, and the site's address verification key ---------------------------
+// ---- PostGrid: the site's mailing account, prices and limits, and its address verification key -----------------
 
 /// <param name="UseFirst">Ask PostGrid before USPS (otherwise PostGrid is the backup for when USPS cannot answer).</param>
 public record PostGridAddressRequest(string? ApiKey, bool UseFirst);
 public record PostGridAddressOrderRequest(bool UseFirst);
-/// <param name="KeyEnding">The last four characters of the key; the key is never returned.</param>
-/// <param name="GroupsWithMailAccounts">Investment groups that have added their own PostGrid mailing account.</param>
-public record PostGridAddressDto(bool Configured, string Source, string? KeyEnding, bool UseFirst, DateTime? SavedAt, string? SavedBy, bool CanEnter,
-    int GroupsWithMailAccounts, int CardsMailed, int TestCardsMailed);
+public record PostGridMailKeyRequest(string? ApiKey);
+public record PostGridMailAccountDto(bool Configured, string Source, string? KeyEnding, bool Test, DateTime? SavedAt, string? SavedBy);
+/// <param name="KeyEnding">The last four characters of the address verification key; the key is never returned.</param>
+public record PostGridSiteDto(bool Configured, string Source, string? KeyEnding, bool UseFirst, DateTime? SavedAt, string? SavedBy, bool CanEnter,
+    PostGridMailAccountDto Mail, int CardsMailed, int TestCardsMailed, int CardsThisMonth);
+
+/// <param name="Month">yyyy-MM.</param>
+public record SiteMailStatementRow(int GroupId, string Group, int RestaurantId, string Restaurant, int Cards, int CostCents, int FeeCents, int TotalCents);
+public record SiteMailStatement(string Month, List<string> Months, List<SiteMailStatementRow> Rows, int Cards, int CostCents, int FeeCents, int TotalCents);

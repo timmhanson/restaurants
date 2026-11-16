@@ -330,7 +330,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 $"{a.CreatedAt:yyyy-MM-dd} {a.CreatedByName}: {a.Kind}{(a.Method is null ? "" : $" ({a.Method})")}{(a.Text is null ? "" : $" - {a.Text}")}")));
 
         var sb = new StringBuilder();
-        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Printed At,Postage,Mailed By PostGrid,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
+        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Printed At,Postage,Mailed For You,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
         foreach (var c in rows)
         {
             sb.AppendLine(string.Join(',', new[]

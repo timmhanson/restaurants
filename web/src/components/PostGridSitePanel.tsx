@@ -2,11 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PostGridSite, ServiceTestResult } from '../api/types'
+import SiteKeyBlock from './SiteKeyBlock'
 import { Alert, Badge, Confirm, Field, Spinner, fmtDateTime } from './ui'
 
 /**
- * PostGrid on Connected Systems: the site's address verification key (checks guest addresses before or after USPS),
- * and a summary of the investment groups that mail cards through their own PostGrid accounts.
+ * PostGrid on Connected Systems: the site's Print & Mail key, which prints and mails every investment group's cards
+ * on the site's own PostGrid account, and its address verification key (checks guest addresses before or after USPS).
  */
 export default function PostGridSitePanel({ onChanged }: { onChanged?: () => void }) {
   const [site, setSite] = useState<PostGridSite | null>(null)
@@ -91,16 +92,25 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
         <>
           <h3 style={{ marginTop: 0 }}>Printing and mailing cards</h3>
           <p className="muted">
-            Each investment group adds its own PostGrid account in its Settings, so PostGrid bills each group for its own cards. To add one for a group,
-            open the group with <strong>View as admin</strong> on <Link to="/groups">Investment groups</Link>, then go to Settings.
+            Every investment group’s cards are printed and mailed on this one PostGrid account, so PostGrid bills you. You bill each group on{' '}
+            <Link to="/system-billing">Billing</Link>, where you set your fee per card and each group’s monthly limit. Groups see “Mailed for you”; they never
+            see PostGrid’s name. Copy the <strong>Print &amp; Mail API key</strong> from PostGrid (Settings, API Keys).
           </p>
+          <SiteKeyBlock
+            info={site.mail}
+            label="PostGrid Print & Mail API key"
+            hint="Start with the test key (it begins test_) to try it at no cost. Stored encrypted and never shown again."
+            testNote="Test mode: cards are not printed, mailed or charged, and nothing is billed to groups. PostGrid makes a proof of each one."
+            liveNote="Live: cards are printed, mailed and charged to this PostGrid account, then billed to each group."
+            onSave={async (k) => { setSite(await api.put<PostGridSite>('/system/postgrid/mail', { apiKey: k })); onChanged?.() }}
+            onTest={() => api.post<ServiceTestResult>('/system/postgrid/mail/test')}
+            onRemove={async () => { setSite(await api.delete<PostGridSite>('/system/postgrid/mail')); onChanged?.() }}
+            removeTitle="Remove the PostGrid mailing key?"
+            removeMessage="No group will be able to have cards mailed until a key is entered again; they can still print their own. Cards already sent are not affected, but their status can no longer be checked. Nothing is changed at PostGrid."
+            onError={setError}
+          />
           <p>
-            {site.groupsWithMailAccounts > 0 ? (
-              <Badge kind="ok">{site.groupsWithMailAccounts} group account{site.groupsWithMailAccounts === 1 ? '' : 's'}</Badge>
-            ) : (
-              <Badge kind="neutral">no group accounts yet</Badge>
-            )}{' '}
-            {site.cardsMailed} card{site.cardsMailed === 1 ? '' : 's'} mailed by PostGrid
+            {site.cardsMailed} card{site.cardsMailed === 1 ? '' : 's'} mailed ({site.cardsThisMonth} this month)
             {site.testCardsMailed > 0 ? `, ${site.testCardsMailed} test order${site.testCardsMailed === 1 ? '' : 's'} (not mailed)` : ''}.
           </p>
 
@@ -175,7 +185,7 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
       {removing && (
         <Confirm
           title="Remove the PostGrid address key?"
-          message="PostGrid will no longer check guest addresses; USPS still does if its account is set up. Group mailing accounts are not affected. Nothing is changed at PostGrid."
+          message="PostGrid will no longer check guest addresses; USPS still does if its account is set up. Mailing cards is not affected. Nothing is changed at PostGrid."
           confirmLabel="Remove"
           danger
           busy={busy === 'remove'}

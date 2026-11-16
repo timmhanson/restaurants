@@ -133,9 +133,68 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("AuditLogs");
                 });
 
-            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardArtwork", b =>
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardDesign", b =>
                 {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BackMessage")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BackgroundColor")
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Front")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Headline")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Layout")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RestaurantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TextColor")
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RestaurantId");
+
+                    b.HasIndex("GroupId", "RestaurantId");
+
+                    b.ToTable("CardDesigns");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardImage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ContentType")
@@ -147,6 +206,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int>("DesignId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Hash")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -154,6 +219,11 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<int?>("HeightPx")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UploadedAt")
                         .HasColumnType("TEXT");
@@ -165,9 +235,13 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int?>("WidthPx")
                         .HasColumnType("INTEGER");
 
-                    b.HasKey("GroupId");
+                    b.HasKey("Id");
 
-                    b.ToTable("CardArtworks");
+                    b.HasIndex("DesignId");
+
+                    b.HasIndex("GroupId", "Hash");
+
+                    b.ToTable("CardImages");
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.CommentActivity", b =>
@@ -211,6 +285,69 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.HasIndex("CommentId", "CreatedAt");
 
                     b.ToTable("CommentActivities");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupBilling", b =>
+                {
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AutoPay")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BillingEmail")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BillingName")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("City")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("FeeCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MonthlyLimitCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PayCustomerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayFunding")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayKind")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayLabel")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayMandateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayMethodId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PaySetAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaySetBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Street")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Zip")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("GroupId");
+
+                    b.ToTable("GroupBilling");
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GuestComment", b =>
@@ -281,6 +418,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("MailEstimateCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MailFeeCents")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("MailId")
@@ -503,6 +643,102 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("InteractionLogs");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.MailInvoice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Cards")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CostCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeliveryError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("DueOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("EmailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EmailedTo")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FeeCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("IssuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LinesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Month")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaidBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaidHow")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaidNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PaymentAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PaymentError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaymentRef")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PrintedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrintedId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SurchargeCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TotalCents")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("GroupId", "Month")
+                        .IsUnique();
+
+                    b.ToTable("MailInvoices");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.OwnerGroup", b =>
                 {
                     b.Property<int>("Id")
@@ -517,21 +753,6 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PostGridKeyEncrypted")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PostGridKeyEnding")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("PostGridKeyIsTest")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("PostGridKeySetAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PostGridKeySetBy")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PostageKeyEncrypted")
@@ -643,11 +864,36 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Navigation("Group");
                 });
 
-            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardArtwork", b =>
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardDesign", b =>
+                {
+                    b.HasOne("RestaurantFeedback.Api.Models.OwnerGroup", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RestaurantFeedback.Api.Models.Restaurant", null)
+                        .WithMany()
+                        .HasForeignKey("RestaurantId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardImage", b =>
+                {
+                    b.HasOne("RestaurantFeedback.Api.Models.CardDesign", "Design")
+                        .WithMany("Images")
+                        .HasForeignKey("DesignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Design");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupBilling", b =>
                 {
                     b.HasOne("RestaurantFeedback.Api.Models.OwnerGroup", null)
                         .WithOne()
-                        .HasForeignKey("RestaurantFeedback.Api.Models.CardArtwork", "GroupId")
+                        .HasForeignKey("RestaurantFeedback.Api.Models.GroupBilling", "GroupId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
@@ -661,6 +907,15 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Restaurant");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.MailInvoice", b =>
+                {
+                    b.HasOne("RestaurantFeedback.Api.Models.OwnerGroup", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.Restaurant", b =>
@@ -696,6 +951,11 @@ namespace RestaurantFeedback.Api.Data.Migrations
             modelBuilder.Entity("RestaurantFeedback.Api.Models.AppUser", b =>
                 {
                     b.Navigation("UserRestaurants");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardDesign", b =>
+                {
+                    b.Navigation("Images");
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.OwnerGroup", b =>
