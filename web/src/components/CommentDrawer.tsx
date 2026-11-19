@@ -77,6 +77,7 @@ export default function CommentDrawer({ comment, onClose, onEdit, onChanged, onD
               Issued {fmtDate(comment.dateIssued)} · good until {fmtDate(comment.expiresOn)}
               {comment.authorizedBy ? ` · signed by ${comment.authorizedBy}` : ''}
             </div>
+            <div className="muted small" title="The card’s own ID, carried by the QR code printed on it">Card ID <code>{comment.cardId}</code></div>
           </dd>
           <dt>Phone</dt>
           <dd>{comment.phone || <span className="muted">—</span>}</dd>

@@ -46,6 +46,12 @@ export default function CommentsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<CommentSummary | null>(null)
+  // The check-a-card page links here with ?card=123 to open that card's full record.
+  const openCard = Number(params.get('card')) || 0
+  useEffect(() => {
+    if (!openCard) return
+    api.get<PagedResult<CommentSummary>>(`/comments?ids=${openCard}`).then((r) => { if (r.items[0]) setSelected(r.items[0]) }).catch(() => undefined)
+  }, [openCard])
   const [replyFirst, setReplyFirst] = useState(false)
   const [editing, setEditing] = useState<CommentSummary | null>(null)
   const [deleting, setDeleting] = useState<CommentSummary | null>(null)

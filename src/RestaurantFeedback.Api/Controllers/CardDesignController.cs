@@ -20,6 +20,10 @@ namespace RestaurantFeedback.Api.Controllers;
 public class CardDesignController(AppDbContext db, AuditService audit, CurrentUserProvider users, IGroupSettingsStore settingsStore, CardDesigns designs) : ControllerBase
 {
     private const int MaxPictureBytes = 5 * 1024 * 1024;
+    /// <summary>How many pictures of its own a laid-out card can place, besides the logo, photo and the other named ones.</summary>
+    private const int MaxPlacedPictures = 12;
+    /// <summary>A stand-in code, to show where each card's own QR code is printed.</summary>
+    private static readonly string SampleQr = CardCodes.QrDataUri("https://example.com/v/sample-card-code-shown-in-the-preview");
     private const string GroupScope = "group";
 
     private record Target(int GroupId, Restaurant? Restaurant, bool CanEdit)
@@ -75,7 +79,12 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         d!.UpdatedAt = DateTime.UtcNow;
         d.UpdatedBy = me.DisplayName;
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync(me, "CardDesignSaved", "CardDesign", d.Id, new { Scope = t.Restaurant?.Name ?? "Group", d.Front, d.Layout, d.Headline, d.Message, d.BackMessage, d.BackgroundColor, d.TextColor }, t.RestaurantId);
+        await DropUnusedPictures(t, ct);
+        await audit.LogAsync(me, "CardDesignSaved", "CardDesign", d.Id, new
+        {
+            Scope = t.Restaurant?.Name ?? "Group", d.Front, d.Layout, d.Headline, d.Message, d.BackMessage, d.BackgroundColor, d.TextColor, d.BackStyle, d.InkColor, d.Website, d.LegalText,
+            BackItems = req.BackLayout?.Count, FrontItems = req.FrontLayout?.Count
+        }, t.RestaurantId);
         return await Dto(t, ct);
     }
 
@@ -99,7 +108,9 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
 
     /// <summary>
     /// Uploads one picture: "picture" (finished artwork for the whole front, ideally 1875 x 1275 pixels), "logo" or
-    /// "photo". PNG or JPEG up to 5 MB.
+    /// "photo" for a designed front, "backlogo" (the logo on a classic back) or "footer" (a small picture for the
+    /// back's bottom corner, such as social media icons), or a picture placed in the card designer (el- and a few
+    /// letters and digits). PNG or JPEG up to 5 MB.
     /// </summary>
     [HttpPut("{scope}/images/{kind}")]
     [RequestSizeLimit(MaxPictureBytes + 100_000)]
@@ -109,7 +120,7 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         var (t, problem) = await Resolve(me, scope, ct);
         if (t is null) return problem!;
         if (!t.CanEdit) return Refuse();
-        if (!CardImageKinds.All.Contains(kind)) return NotFound();
+        if (!CardElements.IsImageKind(kind)) return NotFound();
         if (file is null || file.Length == 0) return BadRequest(new { message = "Choose a picture to upload." });
         if (file.Length > MaxPictureBytes) return BadRequest(new { message = "The picture is larger than 5 MB. Save it as a JPEG, or at a smaller size, and try again." });
         using var buffer = new MemoryStream();
@@ -120,6 +131,8 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         var d = (await Own(t, ct, create: true, me))!;
         if (d.Id == 0) await db.SaveChangesAsync(ct);
         var image = await db.CardImages.FirstOrDefaultAsync(i => i.DesignId == d.Id && i.Kind == kind, ct);
+        if (image is null && !CardImageKinds.All.Contains(kind) && await db.CardImages.CountAsync(i => i.DesignId == d.Id && i.Kind.StartsWith("el-"), ct) >= MaxPlacedPictures)
+            return BadRequest(new { message = $"A card can place up to {MaxPlacedPictures} pictures of its own. Remove one from the card, save, and try again." });
         if (image is null) db.CardImages.Add(image = new CardImage { DesignId = d.Id, GroupId = t.GroupId, Kind = kind });
         image.ContentType = info.Value.ContentType;
         image.Data = bytes;
@@ -170,25 +183,55 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         var own = all.FirstOrDefault(l => l.Design.RestaurantId == t.RestaurantId);
         var group = all.FirstOrDefault(l => l.Design.RestaurantId == null);
         var pictures = t.Restaurant is null ? own?.Images ?? [] : CardDesigns.WithGroupPictures(own?.Images ?? [], group);
+        var check = Validate(req);
+        if (check is not null) return BadRequest(new { message = check });
         var draft = new CardDesign { GroupId = t.GroupId, RestaurantId = t.RestaurantId };
         Fill(draft, req);
         var look = designs.Look(new CardDesigns.Loaded(draft, pictures), t.GroupId, settings.AccentColor);
-        var restaurant = t.Restaurant ?? await db.Restaurants.AsNoTracking().Where(r => r.GroupId == t.GroupId && r.IsActive).OrderBy(r => r.Name).FirstOrDefaultAsync(ct)
-                         ?? new Restaurant { Name = "Your restaurant" };
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var sample = new GuestComment
-        {
-            CouponOffer = settings.CouponOffers.FirstOrDefault() ?? "Free Value Basket", DateIssued = today,
-            ExpiresOn = today.AddMonths(settings.CouponValidityMonths), AuthorizedBy = "A. Manager"
-        };
-        return new MailPreview(PostGridCardDesign.Front(look, restaurant.Name, sample.CouponOffer),
-            PostGridCardDesign.Back(sample, restaurant, settings.CouponValidityMonths, settings.AccentColor, look.BackMessage));
+        var restaurant = await SampleRestaurant(t, ct);
+        var sample = SampleCard(settings);
+        return new MailPreview(PostGridCardDesign.Front(look, sample, restaurant, settings.CouponValidityMonths),
+            PostGridCardDesign.Back(sample, restaurant, settings.CouponValidityMonths, settings.AccentColor, look,
+                SampleQr));
     }
 
     // ---- helpers ----------------------------------------------------------------------------------------------
 
     private ObjectResult Refuse() =>
         StatusCode(403, new { message = "Only the group's administrators can change the group's card, and only a restaurant's owners or the group's administrators can change its own card." });
+
+    /// <summary>The restaurant a sample card is drawn for: the one being designed, or the group's first.</summary>
+    private async Task<Restaurant> SampleRestaurant(Target t, CancellationToken ct) =>
+        t.Restaurant ?? await db.Restaurants.AsNoTracking().Where(r => r.GroupId == t.GroupId && r.IsActive).OrderBy(r => r.Name).FirstOrDefaultAsync(ct)
+        ?? new Restaurant { Name = "Your restaurant" };
+
+    private static GuestComment SampleCard(GroupSettings settings)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return new GuestComment
+        {
+            GuestFirstName = "Pat", GuestLastName = "Sample", CouponOffer = settings.CouponOffers.FirstOrDefault() ?? "Free Value Basket", DateIssued = today,
+            ExpiresOn = today.AddMonths(settings.CouponValidityMonths), AuthorizedBy = "A. Manager"
+        };
+    }
+
+    /// <summary>
+    /// Pictures placed in the card designer are removed once no card uses them. The group's are kept while any
+    /// restaurant's own card still places them, since a restaurant borrows the group's pictures.
+    /// </summary>
+    private async Task DropUnusedPictures(Target t, CancellationToken ct)
+    {
+        var all = await db.CardDesigns.AsNoTracking().Where(x => x.GroupId == t.GroupId).Select(x => new { x.Id, x.RestaurantId, x.BackLayoutJson, x.FrontLayoutJson }).ToListAsync(ct);
+        var mine = all.FirstOrDefault(x => x.RestaurantId == t.RestaurantId);
+        if (mine is null) return;
+        var used = all.Where(x => x.Id == mine.Id || t.Restaurant is null)
+            .SelectMany(x => new[] { x.BackLayoutJson, x.FrontLayoutJson }).SelectMany(j => CardElements.Parse(j) ?? [])
+            .Where(e => e.Type == CardElements.Image && e.Image is not null).Select(e => e.Image!).ToHashSet();
+        var unused = (await db.CardImages.Where(i => i.DesignId == mine.Id && i.Kind.StartsWith("el-")).ToListAsync(ct)).Where(i => !used.Contains(i.Kind)).ToList();
+        if (unused.Count == 0) return;
+        db.CardImages.RemoveRange(unused);
+        await db.SaveChangesAsync(ct);
+    }
 
     private static string? Validate(CardDesignFields f)
     {
@@ -197,8 +240,16 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         if ((f.Headline?.Trim().Length ?? 0) > 60) return "Keep the headline to 60 characters so it fits the card.";
         if ((f.Message?.Trim().Length ?? 0) > 220) return "Keep the message on the front to 220 characters so it fits the card.";
         if ((f.BackMessage?.Trim().Length ?? 0) > 160) return "Keep the note on the back to 160 characters so it fits beside the address.";
-        foreach (var c in new[] { f.BackgroundColor, f.TextColor })
+        if (f.BackStyle is not null && !CardBacks.All.Contains(f.BackStyle)) return "Choose how the back is laid out.";
+        if ((f.Website?.Trim().Length ?? 0) > 60) return "Keep the web address to 60 characters.";
+        if ((f.LegalText?.Trim().Length ?? 0) > 420) return "Keep the small print to 420 characters so it fits the card.";
+        foreach (var c in new[] { f.BackgroundColor, f.TextColor, f.InkColor })
             if (!string.IsNullOrWhiteSpace(c) && PostGridCardDesign.SafeColor(c, "") != c) return "Colours are written like #005daa.";
+        // Layouts from the card designer are checked and tidied in place, so what is saved is what was checked.
+        foreach (var layout in new[] { f.BackLayout, f.FrontLayout })
+            if (layout is not null && CardElements.Clean(layout) is { } wrong) return wrong;
+        if (f.BackStyle == CardBacks.Custom && f.BackLayout is not { Count: > 0 }) return "Put at least one item on the back, or choose one of the ready-made backs.";
+        if (f.Front == CardFronts.Custom && f.FrontLayout is not { Count: > 0 }) return "Put at least one item on the front, or choose one of the ready-made fronts.";
         return null;
     }
 
@@ -212,6 +263,14 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         d.BackMessage = Clean(f.BackMessage);
         d.BackgroundColor = Clean(f.BackgroundColor);
         d.TextColor = Clean(f.TextColor);
+        d.BackStyle = f.BackStyle ?? CardBacks.Classic;
+        d.InkColor = Clean(f.InkColor);
+        d.Website = Clean(f.Website);
+        // The standard wording is kept as "none", so a later change to it reaches every card that never changed it.
+        d.LegalText = Clean(f.LegalText) == CardBacks.DefaultLegal ? null : Clean(f.LegalText);
+        // A layout is kept even while a ready-made side is chosen, so switching back does not lose the work.
+        d.BackLayoutJson = f.BackLayout is { Count: > 0 } ? CardElements.Serialize(f.BackLayout) : null;
+        d.FrontLayoutJson = f.FrontLayout is { Count: > 0 } ? CardElements.Serialize(f.FrontLayout) : null;
     }
 
     private async Task<CardDesign?> Own(Target t, CancellationToken ct, bool create, CurrentUser me)
@@ -236,6 +295,17 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
             DateTime.SpecifyKind(i.UploadedAt, DateTimeKind.Utc), i.UploadedBy, !mine.Contains(i))).ToList();
         return new CardDesignDto(t.Scope, t.RestaurantId, name, t.CanEdit, own is not null, d?.Front ?? CardFronts.Plain, d?.Layout ?? CardLayouts.Centered, d?.Headline, d?.Message,
             d?.BackMessage, PostGridCardDesign.SafeColor(d?.BackgroundColor, PostGridCardDesign.SafeColor(settings.AccentColor)), PostGridCardDesign.SafeColor(d?.TextColor, "#ffffff"),
-            images, own is null ? null : DateTime.SpecifyKind(own.Design.UpdatedAt, DateTimeKind.Utc), own?.Design.UpdatedBy);
+            images, own is null ? null : DateTime.SpecifyKind(own.Design.UpdatedAt, DateTimeKind.Utc), own?.Design.UpdatedBy,
+            d is not null && CardBacks.All.Contains(d.BackStyle) ? d.BackStyle : CardBacks.Classic, PostGridCardDesign.SafeColor(d?.InkColor, CardBacks.DefaultInk),
+            d?.Website, d?.LegalText, CardBacks.DefaultLegal,
+            CardElements.Parse(d?.BackLayoutJson), CardElements.Parse(d?.FrontLayoutJson), CardElements.ClassicBack(), CardElements.StarterFront(), await MergeFields(t, settings, d, ct), SampleQr);
+    }
+
+    /// <summary>The fields a card's words can carry, each with what it prints on the sample card, so the designer shows real words.</summary>
+    private async Task<List<CardMergeField>> MergeFields(Target t, GroupSettings settings, CardDesign? d, CancellationToken ct)
+    {
+        var look = CardLook.Plain(settings.AccentColor) with { Website = d?.Website, LegalText = d?.LegalText, BackMessage = d?.BackMessage };
+        var merge = CardMerge.For(SampleCard(settings), await SampleRestaurant(t, ct), settings.CouponValidityMonths, look);
+        return CardMerge.Fields.Select(f => new CardMergeField(f.Key, f.Label, merge.Values.GetValueOrDefault(f.Key, ""))).ToList();
     }
 }

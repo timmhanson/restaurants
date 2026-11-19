@@ -20,7 +20,7 @@ namespace RestaurantFeedback.Api.Controllers;
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
     IAddressVerifier addressVerifier, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
-    MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments) : ControllerBase
+    MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments, PaymentOptions paymentOptions) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -430,7 +430,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var me = await users.GetAsync();
         var key = (req.SecretKey ?? "").Trim();
         if (key.Length is < 20 or > 300 || key.Any(char.IsWhiteSpace) || !(key.StartsWith("sk_") || key.StartsWith("rk_")))
-            return BadRequest(new { message = "Enter Stripe's secret key (it begins sk_test_ or sk_live_), from Stripe's Developers, API keys page. Not the publishable key." });
+            return BadRequest(new { message = "Enter a Stripe restricted key (it begins rk_test_ or rk_live_) from Stripe's Developers, API keys page. A secret key (sk_…) also works; the publishable key (pk_…) does not." });
         var (ok, message) = await payments.TestKeyAsync(key, ct);
         if (!ok)
         {
@@ -450,7 +450,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             cleared = saved.Count;
             await db.SaveChangesAsync(ct);
         }
-        await audit.LogAsync(me, "StripeKeySet", details: new { KeyEnding = key[^4..], TestKey = StripePayments.IsKeyForTest(key), PaymentMethodsCleared = cleared });
+        await audit.LogAsync(me, "StripeKeySet", details: new { KeyEnding = key[^4..], TestKey = StripePayments.IsKeyForTest(key), Restricted = key.StartsWith("rk_"), PaymentMethodsCleared = cleared });
         return await StripeDto(ct);
     }
 
@@ -474,13 +474,41 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         return await StripeDto(ct);
     }
 
+    /// <summary>
+    /// Saves the signing secret of the webhook endpoint added in Stripe (whsec_…), encrypted. Stripe's notifications
+    /// are checked against it; without it they are all refused and bank payments are only noticed by the hourly round.
+    /// </summary>
+    [HttpPut("stripe/webhook")]
+    public async Task<ActionResult<StripeAccountDto>> SetStripeWebhook(StripeWebhookRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var secret = (req.Secret ?? "").Trim();
+        if (secret.Length is < 20 or > 300 || secret.Any(char.IsWhiteSpace) || !secret.StartsWith("whsec_"))
+            return BadRequest(new { message = "Enter the webhook's signing secret, which begins whsec_. Stripe shows it on the webhook's page after you add this site's address." });
+        await payAccount.SaveWebhookSecretAsync(secret, me.DisplayName, ct);
+        await audit.LogAsync(me, "StripeWebhookSecretSet", details: new { SecretEnding = secret[^4..] });
+        return await StripeDto(ct);
+    }
+
+    [HttpDelete("stripe/webhook")]
+    public async Task<ActionResult<StripeAccountDto>> RemoveStripeWebhook(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var before = payAccount.WebhookSecret;
+        await payAccount.RemoveWebhookSecretAsync(ct);
+        if (before is not null) await audit.LogAsync(me, "StripeWebhookSecretRemoved", details: new { SecretEnding = before[^4..] });
+        return await StripeDto(ct);
+    }
+
     private async Task<StripeAccountDto> StripeDto(CancellationToken ct)
     {
         var a = payAccount.Current;
         var groups = await db.GroupBilling.CountAsync(b => b.PayMethodId != null, ct);
+        var hook = payAccount.WebhookSecret;
+        DateTime? last = payAccount.LastNotificationAt;
         return a is null
-            ? new StripeAccountDto(false, "None", null, false, null, null, groups, true)
-            : new StripeAccountDto(true, a.Source, a.SecretKey[^4..], a.Test, a.SavedAt, a.SavedBy, groups, true);
+            ? new StripeAccountDto(false, "None", null, false, null, null, groups, true, false, hook is not null, hook?[^4..], last, paymentOptions.ApiVersion)
+            : new StripeAccountDto(true, a.Source, a.SecretKey[^4..], a.Test, a.SavedAt, a.SavedBy, groups, true, a.Restricted, hook is not null, hook?[^4..], last, paymentOptions.ApiVersion);
     }
 
     // ---- Directories across every investment group ----------------------------------------------------------

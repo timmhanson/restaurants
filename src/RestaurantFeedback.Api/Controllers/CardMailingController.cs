@@ -20,7 +20,7 @@ namespace RestaurantFeedback.Api.Controllers;
 public class CardMailingController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
     CommentSummaryBuilder summaries, CardFollowUps followUps, IPostageProvider postage, PostageOptions postageOptions,
     GroupPostageAccounts postageAccounts, IPostGridMailer mailer, SiteMailing siteMailing, MailLedger ledger, CardDesigns designs,
-    PostGridOptions mailOptions, IHttpClientFactory httpFactory, ILogger<CardMailingController> log) : ControllerBase
+    PostGridOptions mailOptions, IHttpClientFactory httpFactory, ILogger<CardMailingController> log, CardCodes codes, SiteAddress siteAddress) : ControllerBase
 {
     // ---- Printing and postage -------------------------------------------------------------------------------
 
@@ -37,7 +37,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var terms = await ledger.TermsAsync(me.GroupId ?? 0, ct);
         var used = me.GroupId is int g2 ? (await ledger.ThisMonthAsync(g2, ct)).Cents : 0;
         var test = account?.Test ?? false;
-        var needsPayMethod = !test && terms.PayRequired && !terms.HasPayMethod;
+        var needsPayMethod = terms.PayRequired && !terms.HasPayMethod;
         var mailOn = account is not null && me.GroupId is not null && terms.LimitCents > 0;
         return new PrintConfig(available, paidBy, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings))
         {
@@ -50,6 +50,23 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             MailLimitCents = terms.LimitCents,
             MailUsedCents = used
         };
+    }
+
+    /// <summary>
+    /// The QR code for each card, for the cards printed in the restaurant. The code leads to this site's verify page
+    /// for that card; it shows nothing by itself and needs a sign-in to open.
+    /// </summary>
+    [HttpPost("comments/qr")]
+    public async Task<ActionResult<List<CardQr>>> QrCodes(CardIdsRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
+        var origin = siteAddress.Origin();
+        return (await Cards(me, req.CommentIds, ct)).Select(c =>
+        {
+            var url = codes.Url(c.PublicId, origin);
+            return new CardQr(c.Id, c.PublicId, url, CardCodes.QrDataUri(url));
+        }).ToList();
     }
 
     // ---- Printed and mailed for the group ---------------------------------------------------------------------
@@ -79,7 +96,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (siteMailing.Account is not { } account) return BadRequest(new { message = NotSetUp });
         var pricing = await ledger.TermsAsync(groupId, ct);
         var test = account.Test;
-        if (!test && pricing.PayRequired && !pricing.HasPayMethod)
+        if (pricing.PayRequired && !pricing.HasPayMethod)
             return BadRequest(new { message = "Add a payment method on Billing before cards can be mailed for this investment group. Until then, print the cards here." });
         if (!test && req.ConfirmCentsPerCard != pricing.PriceCents)
             return BadRequest(new { message = $"The price is now {Dollars(pricing.PriceCents)} a card. Nothing was sent; review the cards and confirm again." });
@@ -108,6 +125,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var allDesigns = await designs.ForGroupAsync(groupId, ct);
         var method = MailedMethod(settings);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var origin = siteAddress.Origin();
 
         var results = new List<MailOutcome>();
         foreach (var c in cards)
@@ -133,8 +151,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             var request = new MailPostcardRequest(
                 new MailContact(c.GuestFirstName, c.GuestLastName, null, c.StreetAddress!, null, c.City!, c.State!, c.Zip!),
                 new MailContact(null, null, r.Name, r.StreetAddress!, null, r.City!, r.State!, r.Zip!),
-                PostGridCardDesign.Front(look, r.Name, c.CouponOffer),
-                PostGridCardDesign.Back(c, r, settings.CouponValidityMonths, settings.AccentColor, look.BackMessage),
+                PostGridCardDesign.Front(look, c, r, settings.CouponValidityMonths),
+                PostGridCardDesign.Back(c, r, settings.CouponValidityMonths, settings.AccentColor, look, CardCodes.QrDataUri(codes.Url(c.PublicId, origin))),
                 $"Coupon card for {c.GuestFirstName} {c.GuestLastName} ({r.Name})",
                 new Dictionary<string, string> { ["cardId"] = c.Id.ToString(), ["groupId"] = groupId.ToString(), ["restaurant"] = r.Name });
             try
@@ -306,8 +324,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var groupId = c.Restaurant.GroupId;
         var settings = await settingsStore.GetAsync(groupId, ct);
         var look = designs.Look(CardDesigns.For(await designs.ForGroupAsync(groupId, ct), c.RestaurantId), groupId, settings.AccentColor);
-        return new MailPreview(PostGridCardDesign.Front(look, c.Restaurant.Name, c.CouponOffer),
-            PostGridCardDesign.Back(c, c.Restaurant, settings.CouponValidityMonths, settings.AccentColor, look.BackMessage));
+        return new MailPreview(PostGridCardDesign.Front(look, c, c.Restaurant, settings.CouponValidityMonths),
+            PostGridCardDesign.Back(c, c.Restaurant, settings.CouponValidityMonths, settings.AccentColor, look, CardCodes.QrDataUri(codes.Url(c.PublicId, siteAddress.Origin()))));
     }
 
     /// <summary>

@@ -85,8 +85,12 @@ export default function BillingPage() {
       {notice && <Alert kind={notice.ok ? 'success' : 'warn'} onClose={() => setNotice(null)}>{notice.message}</Alert>}
       {!d.mailAvailable && <Alert kind="info">Having cards mailed for you is not switched on for this investment group at the moment. You can still print your own.</Alert>}
       {d.mailAvailable && d.test && <Alert kind="info">Mailing is in test mode: nothing is printed, mailed or billed yet.</Alert>}
-      {d.mailAvailable && !d.test && d.payRequired && !d.method && d.canManage && (
-        <Alert kind="warn">Save a payment method below before cards can be mailed for you. Until then, print the cards from Print cards.</Alert>
+      {d.mailAvailable && d.payRequired && !d.method && d.canManage && (
+        <Alert kind="warn">
+          {d.payAvailable
+            ? 'Save a payment method below before cards can be mailed for you. Until then, print the cards from Print cards.'
+            : 'A payment method is needed before cards can be mailed for you, and paying on the site is not set up yet. Until it is, print the cards from Print cards.'}
+        </Alert>
       )}
 
       <div className="grid grid-4 stat-grid" style={{ marginBottom: '1rem' }}>

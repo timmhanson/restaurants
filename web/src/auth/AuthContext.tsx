@@ -51,7 +51,7 @@ const defaultSettings: GroupSettings = {
     fields: {
       offer: { x: 0.95, y: 1.2, show: true }, dateIssued: { x: 1.15, y: 1.95, show: true }, goodUntil: { x: 1.15, y: 2.3, show: false },
       authorizedBy: { x: 1.6, y: 2.75, show: true }, guestName: { x: 3.45, y: 1.7, show: true }, street: { x: 3.45, y: 2.1, show: true },
-      cityStateZip: { x: 3.45, y: 2.5, show: true },
+      cityStateZip: { x: 3.45, y: 2.5, show: true }, qr: { x: 4.9, y: 1.75, show: true },
     },
   },
 }

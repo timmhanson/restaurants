@@ -123,7 +123,8 @@ export interface GroupRequest {
   restaurants?: RestaurantRequest[]
 }
 
-export type PostcardFieldKey = 'offer' | 'dateIssued' | 'goodUntil' | 'authorizedBy' | 'guestName' | 'street' | 'cityStateZip'
+/** qr is the card's QR code: a square whose top-left corner is at its position. */
+export type PostcardFieldKey = 'offer' | 'dateIssued' | 'goodUntil' | 'authorizedBy' | 'guestName' | 'street' | 'cityStateZip' | 'qr'
 export interface PostcardField { x: number; y: number; show: boolean }
 /** How coupon cards print. Positions are inches from the card's top-left corner. */
 export interface PostcardSettings {
@@ -162,20 +163,61 @@ export type MailStatus = 'ready' | 'printing' | 'processed_for_delivery' | 'comp
 export interface MailOutcome { commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null }
 export interface MailStatusInfo { commentId: number; status?: MailStatus | null; test: boolean; hasProof: boolean; error?: string | null }
 export interface MailPreview { frontHtml: string; backHtml: string }
+/** A card's QR code: the address it holds (this site's verify page) and the code as a picture for an img tag. */
+export interface CardQr { commentId: number; cardId: string; url: string; image: string }
+/** What scanning a card's QR code shows, once signed in. card is null when the code is not genuine or the card is another restaurant's. */
+export interface CardCheck {
+  genuine: boolean; message: string; canRedeem: boolean
+  card?: {
+    commentId: number; cardId: string; restaurant: string; guestName: string; offer?: string | null; dateIssued: string; expiresOn: string; expired: boolean
+    redeemedOn?: string | null; redeemedByName?: string | null; sent: boolean; canOpen: boolean
+  } | null
+}
 
 // ---- How mailed cards look ----
-export type CardFront = 'plain' | 'designed' | 'picture'
+/** custom: laid out item by item in the card designer. */
+export type CardFront = 'plain' | 'designed' | 'picture' | 'custom'
 export type CardLayout = 'centered' | 'photo' | 'split'
-export type CardImageKind = 'picture' | 'logo' | 'photo'
+export type CardBack = 'classic' | 'simple' | 'custom'
+/**
+ * backlogo: the logo on a classic back. footer: a small picture for the back's bottom corner, such as social media
+ * icons. A picture placed in the card designer has a kind of its own, el- and a few letters and digits.
+ */
+export type CardImageKind = 'picture' | 'logo' | 'photo' | 'backlogo' | 'footer' | (string & {})
+export type CardElementType = 'text' | 'fill' | 'line' | 'box' | 'image' | 'qr'
+export type CardFont = 'sans' | 'geometric' | 'narrow'
+/**
+ * One thing placed on a card in the card designer. x, y, w and h are inches from the top-left corner of the finished
+ * 6 x 4 inch card; size and thickness are points; color is a colour such as #2b4a8b or "ink" for the card's ink colour.
+ * text can carry fields in braces ({restaurant}, {offer}, …) that are filled in for each card.
+ */
+export interface CardElement {
+  id: string; type: CardElementType; x: number; y: number; w: number; h: number; text?: string | null; value?: string | null
+  font: CardFont; size: number; bold: boolean; italic: boolean; lineUnderLabel: boolean; align: 'left' | 'center' | 'right'; color: string; lineHeight: number; thickness: number; image?: string | null
+}
+/** A field a card's words can carry, with what it prints on the sample card. */
+export interface CardMergeField { key: string; label: string; sample: string }
 /** fromGroup: borrowed from the group's card, because this restaurant has not uploaded its own. */
 export interface CardImage { kind: CardImageKind; url: string; widthPx?: number | null; heightPx?: number | null; bytes: number; uploadedAt: string; uploadedBy: string; fromGroup: boolean }
 export interface CardDesignFields {
   front: CardFront; layout: CardLayout; headline?: string | null; message?: string | null; backMessage?: string | null; backgroundColor?: string | null; textColor?: string | null
+  /** The back: classic (the restaurant's own coupon card) or simple (a plain coupon box), its ink colour, web address and small print. */
+  backStyle: CardBack; inkColor?: string | null; website?: string | null; legalText?: string | null
+  /** The items on a back or front laid out in the card designer. */
+  backLayout?: CardElement[] | null; frontLayout?: CardElement[] | null
 }
 /** scope is "group" or a restaurant's id. hasOwn is false when a restaurant uses the group's card. */
 export interface CardDesign extends CardDesignFields {
   scope: string; restaurantId?: number | null; name: string; canEdit: boolean; hasOwn: boolean; backgroundColor: string; textColor: string
+  inkColor: string
+  /** The standard small print, printed when legalText is empty. */
+  defaultLegalText: string
   images: CardImage[]; updatedAt?: string | null; updatedBy?: string | null
+  /** The classic back and a starter front as items, which a card laid out in the designer starts from. */
+  standardBack: CardElement[]; starterFront: CardElement[]
+  mergeFields: CardMergeField[]
+  /** A stand-in QR code picture, to show where each card's own code is printed. */
+  sampleQr: string
 }
 export interface CardDesignScope { scope: string; restaurantId?: number | null; name: string; canEdit: boolean; hasOwn: boolean }
 
@@ -224,7 +266,11 @@ export interface SiteMailStatementRow { groupId: number; group: string; restaura
 export interface SiteMailStatement { month: string; months: string[]; rows: SiteMailStatementRow[]; cards: number; costCents: number; feeCents: number; totalCents: number }
 /** A key saved on Connected Systems: never sent to the browser, only its last four characters. */
 export interface SiteKeyInfo { configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; test: boolean; savedAt?: string | null; savedBy?: string | null }
-export interface StripeAccount extends SiteKeyInfo { groupsWithMethod: number; canEnter: boolean }
+/** restricted: the key is a restricted key (rk_). The webhook signing secret is never sent to the browser, only its last four characters. */
+export interface StripeAccount extends SiteKeyInfo {
+  groupsWithMethod: number; canEnter: boolean; restricted: boolean
+  webhookConfigured: boolean; webhookEnding?: string | null; lastNotificationAt?: string | null; apiVersion: string
+}
 export interface PostageOutcome { commentId: number; ok: boolean; cents?: number | null; labelUrl?: string | null; test: boolean; alreadyBought: boolean; error?: string | null }
 export interface FollowUpRestaurant { id: number; name: string; days?: number | null; effectiveDays: number; canSet: boolean }
 export interface FollowUpSummary { due: number; oldestDueOn?: string | null; defaultDays: number; restaurants: FollowUpRestaurant[] }
@@ -319,6 +365,8 @@ export interface CommentSummary {
   postageLabelUrl?: string | null
   postageTrackingCode?: string | null
   postageTest: boolean
+  /** The card's own identifier, carried (signed) by the QR code printed on it. */
+  cardId: string
   mailStatus?: MailStatus | null
   mailedAt?: string | null
   mailTest?: boolean

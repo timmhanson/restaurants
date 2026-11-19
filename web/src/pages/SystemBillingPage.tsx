@@ -412,10 +412,12 @@ function SettingsPanel({ settings, payReady, busy, onSave }: { settings: Billing
           <span>Also post a printed statement <span className="muted">(through the mail house, about $1 a letter charged to you; needs your address below and the group’s billing address)</span></span>
         </label>
         <label className="check">
-          <input type="checkbox" checked={s.requirePaymentMethod} onChange={(e) => set('requirePaymentMethod', e.target.checked)} disabled={!payReady && !s.requirePaymentMethod} />
+          <input type="checkbox" checked={s.requirePaymentMethod} onChange={(e) => set('requirePaymentMethod', e.target.checked)} />
           <span>
-            A group must save a payment method before it can have cards mailed{' '}
-            <span className="muted">{payReady ? '(until then it prints its own cards)' : '(enter the Stripe key on Connected Systems first)'}</span>
+            A group must save a payment method before any of its cards is sent to be mailed{' '}
+            <span className="muted">
+              {payReady ? '(until then it prints its own cards)' : '(no group can mail until the Stripe key is entered on Connected Systems; untick to allow mailing without one)'}
+            </span>
           </span>
         </label>
 

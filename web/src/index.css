@@ -346,7 +346,8 @@ details.audit-details summary { cursor: pointer; color: var(--accent); font-size
 .blank-line { display: flex; gap: 0.1in; align-items: baseline; }
 .blank-line > span:first-child { font-size: 0.8em; min-width: 0.95in; }
 .blank-line .blank-fill { flex: 1; min-width: 0; }
-.blank-legal { font-size: 0.5em; line-height: 1.2; margin: auto 0 0; }
+.blank-foot { display: flex; gap: 0.1in; align-items: flex-end; margin-top: auto; }
+.blank-legal { font-size: 0.5em; line-height: 1.2; margin: 0; }
 .blank-mail { border-left: 1px solid #000; padding-left: 0.18in; position: relative; min-width: 0; }
 .blank-return { font-size: 0.65em; max-width: 1.5in; }
 .blank-stamp { position: absolute; top: 0; right: 0; width: 0.87in; height: 0.98in; border: 1px dashed #777; font-size: 0.55em; color: #777; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.05in; }

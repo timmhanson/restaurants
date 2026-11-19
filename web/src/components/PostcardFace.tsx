@@ -17,7 +17,11 @@ export const FIELD_LABELS: Record<PostcardFieldKey, string> = {
   guestName: 'Guest name',
   street: 'Street address',
   cityStateZip: 'City, state and zip',
+  qr: 'QR code (¾ inch square, leads staff back to the card’s record)',
 }
+
+/** The QR code prints ¾ inch square. */
+export const QR_SIZE_IN = 0.75
 
 export function cardValues(c: CardContent): Record<PostcardFieldKey, string> {
   return {
@@ -28,6 +32,7 @@ export function cardValues(c: CardContent): Record<PostcardFieldKey, string> {
     guestName: `${c.guestFirstName} ${c.guestLastName}`.trim(),
     street: c.streetAddress ?? '',
     cityStateZip: [[c.city, c.state].filter(Boolean).join(', '), c.zip].filter(Boolean).join(' '),
+    qr: '',
   }
 }
 
@@ -47,6 +52,7 @@ export default function PostcardFace({
   validityMonths,
   withAddress = true,
   outline = false,
+  qr,
 }: {
   card: CardContent
   settings: PostcardSettings
@@ -54,6 +60,8 @@ export default function PostcardFace({
   validityMonths: number
   withAddress?: boolean
   outline?: boolean
+  /** The card's QR code as a picture address, or "sample" to show where it goes. Left out, no code is printed. */
+  qr?: string
 }) {
   const v = cardValues(card)
   const size: CSSProperties = { width: `${settings.widthIn}in`, height: `${settings.heightIn}in`, fontSize: `${settings.fontPt}pt` }
@@ -64,12 +72,17 @@ export default function PostcardFace({
       <div className={`print-card preprinted ${outline ? 'outlined' : ''}`} style={size}>
         <div className="print-shift" style={{ transform: shift }}>
           {(Object.keys(settings.fields) as PostcardFieldKey[])
-            .filter((k) => settings.fields[k].show && v[k] && (withAddress || !ADDRESS_FIELDS.includes(k)))
+            .filter((k) => k !== 'qr' && settings.fields[k].show && v[k] && (withAddress || !ADDRESS_FIELDS.includes(k)))
             .map((k) => (
               <span key={k} className="print-field" style={{ left: `${settings.fields[k].x}in`, top: `${settings.fields[k].y}in` }}>
                 {v[k]}
               </span>
             ))}
+          {qr && settings.fields.qr?.show && (
+            <span className="print-field" style={{ left: `${settings.fields.qr.x}in`, top: `${settings.fields.qr.y}in` }}>
+              <QrMark qr={qr} />
+            </span>
+          )}
         </div>
       </div>
     )
@@ -87,11 +100,14 @@ export default function PostcardFace({
           <div className="blank-line"><span>Date issued</span><span className="blank-fill">{v.dateIssued}</span></div>
           <div className="blank-line"><span>Good until</span><span className="blank-fill">{v.goodUntil}</span></div>
           <div className="blank-line"><span>Authorized by</span><span className="blank-fill">{v.authorizedBy || ' '}</span></div>
-          <p className="blank-legal">
-            This coupon is good for {validityMonths} month{validityMonths === 1 ? '' : 's'} from the date of issue. Please present this card prior to
-            ordering. One order per card. Cannot be exchanged for gift certificates or cash in whole or part and has no cash value. Not valid with other
-            promotion or discounts. Valid only with authorized signature.
-          </p>
+          <div className="blank-foot">
+            {qr && <QrMark qr={qr} />}
+            <p className="blank-legal">
+              This coupon is good for {validityMonths} month{validityMonths === 1 ? '' : 's'} from the date of issue. Please present this card prior to
+              ordering. One order per card. Cannot be exchanged for gift certificates or cash in whole or part and has no cash value. Not valid with other
+              promotion or discounts. Valid only with authorized signature.
+            </p>
+          </div>
         </div>
         {withAddress && (
           <div className="blank-mail">
@@ -107,6 +123,18 @@ export default function PostcardFace({
       </div>
     </div>
   )
+}
+
+/** The card's QR code at its printed size, or a stand-in box on the settings preview. */
+function QrMark({ qr }: { qr: string }) {
+  const size = { width: `${QR_SIZE_IN}in`, height: `${QR_SIZE_IN}in`, flex: 'none' as const, display: 'block' }
+  if (qr === 'sample')
+    return (
+      <span style={{ ...size, border: '1px dashed #555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '7pt', textAlign: 'center', lineHeight: 1.1, whiteSpace: 'normal' }}>
+        QR code
+      </span>
+    )
+  return <img src={qr} alt="QR code for this card" style={size} />
 }
 
 /**

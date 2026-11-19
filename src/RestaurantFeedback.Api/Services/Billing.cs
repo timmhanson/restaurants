@@ -32,8 +32,12 @@ public class BillingSettings
     public decimal CardFeePercent { get; set; } = 3m;
     /// <summary>Added to a bill when it is paid from a connected bank account.</summary>
     public decimal BankFeePercent { get; set; } = 0.08m;
-    /// <summary>A group must have a payment method saved before it can have cards mailed.</summary>
-    public bool RequirePaymentMethod { get; set; }
+    /// <summary>
+    /// A group must have a payment method saved before any of its cards is sent to the mail house (test orders
+    /// included). On unless the System Administrator switches it off, so the site never pays for cards it has no
+    /// way to collect on.
+    /// </summary>
+    public bool RequirePaymentMethod { get; set; } = true;
     /// <summary>Who the bills are from.</summary>
     public string BusinessName { get; set; } = "Guest Feedback";
     public string? BusinessEmail { get; set; }
@@ -323,20 +327,32 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         var waiting = await db.MailInvoices.Where(i => i.Status == InvoiceStatuses.Processing && i.PaymentRef != null).ToListAsync(ct);
         foreach (var invoice in waiting)
         {
-            try
-            {
-                var state = await payments.GetPaymentAsync(account.SecretKey, invoice.PaymentRef!, ct);
-                if (state.Status == PayStates.Processing) continue;
-                Apply(invoice, state, invoice.PaidBy ?? Schedule);
-                await db.SaveChangesAsync(ct);
-                await audit.LogRawAsync(null, Schedule, null, invoice.GroupId, invoice.Status == InvoiceStatuses.Paid ? "MailBillPaymentArrived" : "MailBillPaymentFailed", "MailInvoice", invoice.Id,
-                    new { invoice.Number, invoice.Status, PaymentRef = state.Id, Error = invoice.PaymentError });
-            }
-            catch (PaymentException ex)
-            {
-                log.LogWarning("Could not check the payment for bill {Number}: {Message}", invoice.Number, ex.Message);
-            }
+            try { await SettleAsync(invoice, account, Schedule, ct); }
+            catch (PaymentException ex) { log.LogWarning("Could not check the payment for bill {Number}: {Message}", invoice.Number, ex.Message); }
         }
+    }
+
+    /// <summary>
+    /// The payment service says something happened to a payment. Its word is not taken for what: the site asks the
+    /// payment service itself how that payment stands and settles the bill it belongs to. True when a bill was waiting on it.
+    /// </summary>
+    public async Task<bool> PaymentNotifiedAsync(string paymentId, CancellationToken ct = default)
+    {
+        if (payAccount.Current is not { } account) return false;
+        var invoice = await db.MailInvoices.FirstOrDefaultAsync(i => i.PaymentRef == paymentId && i.Status == InvoiceStatuses.Processing, ct);
+        if (invoice is null) return false;
+        await SettleAsync(invoice, account, "Payment notification", ct);
+        return true;
+    }
+
+    private async Task SettleAsync(MailInvoice invoice, PaymentAccount account, string by, CancellationToken ct)
+    {
+        var state = await payments.GetPaymentAsync(account.SecretKey, invoice.PaymentRef!, ct);
+        if (state.Status == PayStates.Processing) return;
+        Apply(invoice, state, invoice.PaidBy ?? by);
+        await db.SaveChangesAsync(ct);
+        await audit.LogRawAsync(null, by, null, invoice.GroupId, invoice.Status == InvoiceStatuses.Paid ? "MailBillPaymentArrived" : "MailBillPaymentFailed", "MailInvoice", invoice.Id,
+            new { invoice.Number, invoice.Status, PaymentRef = state.Id, Error = invoice.PaymentError });
     }
 
     /// <summary>

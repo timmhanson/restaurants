@@ -13,8 +13,15 @@ namespace RestaurantFeedback.Api.Services;
 public class PaymentOptions
 {
     public string BaseUrl { get; set; } = "https://api.stripe.com";
-    /// <summary>Optional Stripe secret key (App Service setting Payments__SecretKey), used only when none is saved on Connected Systems.</summary>
+    /// <summary>Optional Stripe key (App Service setting Payments__SecretKey), used only when none is saved on Connected Systems.</summary>
     public string? SecretKey { get; set; }
+    /// <summary>Optional webhook signing secret (App Service setting Payments__WebhookSecret), used only when none is saved on Connected Systems.</summary>
+    public string? WebhookSecret { get; set; }
+    /// <summary>
+    /// The Stripe API version every request is pinned to, so a change to the account's default version cannot
+    /// change how the site's requests behave. Empty uses the account's default.
+    /// </summary>
+    public string ApiVersion { get; set; } = "2026-10-28.endive";
     /// <summary>Local development only: use <see cref="SamplePayments"/> instead of Stripe.</summary>
     public bool Sample { get; set; }
 }
@@ -63,10 +70,12 @@ public interface IPaymentProvider
 public class StripePayments : IPaymentProvider
 {
     private readonly HttpClient _http;
+    private readonly string _apiVersion;
 
     public StripePayments(HttpClient http, PaymentOptions options)
     {
         _http = http;
+        _apiVersion = options.ApiVersion?.Trim() ?? "";
         _http.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
         _http.Timeout = TimeSpan.FromSeconds(30);
     }
@@ -79,7 +88,8 @@ public class StripePayments : IPaymentProvider
     {
         try
         {
-            await SendAsync(HttpMethod.Get, "v1/balance", key, null, null, ct);
+            // Reads something the key needs anyway, so a restricted key with only the listed permissions passes.
+            await SendAsync(HttpMethod.Get, "v1/customers?limit=1", key, null, null, ct);
             return (true, IsKeyForTest(key)
                 ? "Stripe accepted the test key. Payments made with it use Stripe's test cards and bank accounts; no money moves."
                 : "Stripe accepted the live key. Payments made with it move real money into this Stripe account.");
@@ -104,8 +114,10 @@ public class StripePayments : IPaymentProvider
         {
             new("mode", "setup"),
             new("customer", customerId),
-            new("payment_method_types[0]", "us_bank_account"),
-            new("payment_method_types[1]", "card"),
+            // A filter on the payment methods switched on in the Stripe Dashboard: bills can be paid from a bank
+            // account or a card, the two kinds the site knows how to charge and what fee each carries.
+            new("allowed_payment_method_types[0]", "us_bank_account"),
+            new("allowed_payment_method_types[1]", "card"),
             // Stripe fills in the session's id, so the site can read back what was saved.
             new("success_url", returnUrl + (returnUrl.Contains('?') ? "&" : "?") + "session_id={CHECKOUT_SESSION_ID}"),
             new("cancel_url", cancelUrl)
@@ -154,7 +166,7 @@ public class StripePayments : IPaymentProvider
             new("currency", "usd"),
             new("customer", r.CustomerId),
             new("payment_method", r.MethodId),
-            new("payment_method_types[0]", r.Kind == PayKinds.Bank ? "us_bank_account" : "card"),
+            new("allowed_payment_method_types[0]", r.Kind == PayKinds.Bank ? "us_bank_account" : "card"),
             new("confirm", "true"),
             new("off_session", "true"),
             new("description", r.Description)
@@ -195,6 +207,7 @@ public class StripePayments : IPaymentProvider
     {
         using var req = new HttpRequestMessage(method, path);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        if (_apiVersion.Length > 0) req.Headers.Add("Stripe-Version", _apiVersion);
         if (form is not null) req.Content = new FormUrlEncodedContent(form);
         if (idempotencyKey is not null) req.Headers.Add("Idempotency-Key", idempotencyKey);
         HttpResponseMessage res;
@@ -214,6 +227,8 @@ public class StripePayments : IPaymentProvider
             var said = body.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.Object ? Text(e, "message") : null;
             if (res.StatusCode is HttpStatusCode.Unauthorized)
                 throw new PaymentException("Stripe did not accept the site's key. The System Administrator can check it on Connected Systems.", answered: true);
+            if (res.StatusCode is HttpStatusCode.Forbidden)
+                throw new PaymentException($"The site's Stripe key is not allowed to do this{(said is null ? "" : ": " + said)}. The System Administrator can add the permission to the restricted key in Stripe.", answered: true);
             if ((int)res.StatusCode >= 500)
                 throw new PaymentException($"The payment service had a problem ({(int)res.StatusCode}). Try again in a few minutes.", answered: false);
             throw new PaymentException($"The payment service refused this ({(int)res.StatusCode}{(said is null ? "" : ": " + said)}).", answered: true);
@@ -255,6 +270,66 @@ public class SamplePayments : IPaymentProvider
 public record PaymentAccount(string SecretKey, string Source, DateTime? SavedAt, string? SavedBy)
 {
     public bool Test => StripePayments.IsKeyForTest(SecretKey);
+    /// <summary>A restricted key (rk_) can only do what it was given permission for; a secret key (sk_) can do everything.</summary>
+    public bool Restricted => SecretKey.StartsWith("rk_", StringComparison.Ordinal);
+}
+
+/// <summary>
+/// Stripe's notifications to the site (webhooks). Each one is signed: the Stripe-Signature header carries a time
+/// and one or more "v1" signatures, each an HMAC-SHA256 of "time.body" keyed with the endpoint's signing secret.
+/// A notification is only believed when a signature matches and it is recent.
+/// </summary>
+public static class StripeWebhooks
+{
+    public static readonly TimeSpan Tolerance = TimeSpan.FromMinutes(5);
+
+    public static bool Verify(string body, string? signatureHeader, string secret, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(secret)) return false;
+        long? time = null;
+        var signatures = new List<string>();
+        foreach (var part in signatureHeader.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var at = part.IndexOf('=');
+            if (at <= 0) continue;
+            var (name, value) = (part[..at], part[(at + 1)..]);
+            if (name == "t" && long.TryParse(value, out var t)) time = t;
+            else if (name == "v1") signatures.Add(value);
+        }
+        if (time is null || signatures.Count == 0) return false;
+        if ((now - DateTimeOffset.FromUnixTimeSeconds(time.Value)).Duration() > Tolerance) return false;
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(secret));
+        var expected = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{time}.{body}"));
+        foreach (var s in signatures)
+        {
+            byte[] given;
+            try { given = Convert.FromHexString(s); } catch (FormatException) { continue; }
+            if (System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(given, expected)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The payment a notification is about, whichever of Stripe's two shapes it came in: the whole object under
+    /// data.object, or only a reference under related_object. Null for notifications about anything else.
+    /// </summary>
+    public static string? PaymentId(string body)
+    {
+        try
+        {
+            var root = JsonDocument.Parse(body).RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object && data.TryGetProperty("object", out var o) && Text(o, "object") == "payment_intent")
+                return Text(o, "id");
+            if (root.TryGetProperty("related_object", out var r) && (Text(r, "type") ?? "").EndsWith("payment_intent", StringComparison.Ordinal))
+                return Text(r, "id");
+            return null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static string? Text(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 }
 
 /// <summary>
@@ -264,12 +339,20 @@ public record PaymentAccount(string SecretKey, string Source, DateTime? SavedAt,
 public class PaymentAccountStore(IServiceScopeFactory scopes, IDataProtectionProvider protection, PaymentOptions options, ILogger<PaymentAccountStore> log)
 {
     private const string SettingKey = "stripe.account";
+    private const string WebhookSettingKey = "stripe.webhook";
     private readonly IDataProtector _protector = protection.CreateProtector("RestaurantFeedback.SiteSecret.Stripe.v1");
     private volatile PaymentAccount? _current;
+    private volatile string? _webhookSecret;
+    private long _lastNotificationTicks;
 
     private record Saved(string SecretKey);
 
     public PaymentAccount? Current => _current;
+    /// <summary>The signing secret Stripe's notifications are checked with (whsec_…), or null when none is set.</summary>
+    public string? WebhookSecret => _webhookSecret;
+    /// <summary>When the last genuine notification from Stripe arrived, since the site last started.</summary>
+    public DateTime? LastNotificationAt => Interlocked.Read(ref _lastNotificationTicks) is var t and > 0 ? new DateTime(t, DateTimeKind.Utc) : null;
+    public void NoteNotification() => Interlocked.Exchange(ref _lastNotificationTicks, DateTime.UtcNow.Ticks);
 
     public async Task LoadAsync(CancellationToken ct = default)
     {
@@ -292,6 +375,32 @@ public class PaymentAccountStore(IServiceScopeFactory scopes, IDataProtectionPro
         if (found is null && !string.IsNullOrWhiteSpace(options.SecretKey))
             found = new PaymentAccount(options.SecretKey.Trim(), "App settings", null, null);
         _current = found;
+
+        string? webhook = null;
+        try
+        {
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Data.AppDbContext>();
+            var row = await db.SiteSettings.FindAsync([WebhookSettingKey], ct);
+            if (row is not null) webhook = _protector.Unprotect(row.Value);
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            log.LogError(ex, "The saved Stripe webhook secret can no longer be read and must be entered again");
+        }
+        _webhookSecret = webhook ?? (string.IsNullOrWhiteSpace(options.WebhookSecret) ? null : options.WebhookSecret.Trim());
+    }
+
+    public async Task SaveWebhookSecretAsync(string secret, string by, CancellationToken ct = default)
+    {
+        await SiteSettingRows.SetAsync(scopes, WebhookSettingKey, _protector.Protect(secret.Trim()), by, ct);
+        await LoadAsync(ct);
+    }
+
+    public async Task RemoveWebhookSecretAsync(CancellationToken ct = default)
+    {
+        await SiteSettingRows.RemoveAsync(scopes, WebhookSettingKey, ct);
+        await LoadAsync(ct);
     }
 
     public async Task SaveAsync(string secretKey, string by, CancellationToken ct = default)

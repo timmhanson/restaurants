@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://localhost:5298', changeOrigin: true },
       '/card-art': { target: 'http://localhost:5298', changeOrigin: true },
+      '/card-fonts': { target: 'http://localhost:5298', changeOrigin: true },
     },
   },
   build: { outDir: 'dist', emptyOutDir: true },

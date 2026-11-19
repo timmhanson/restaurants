@@ -167,14 +167,62 @@ answer. PostGrid charges per lookup after its free allowance, billed to the acco
 **Card design.** The **Card design** page (group administrators and owners) sets how mailed cards look
 (`CardDesign`, `CardImage`, `CardDesignController`). The investment group has one card for every restaurant; a
 restaurant can have **its own** instead, changed by its owners or the group's administrators, and goes back to
-the group's with one button. The front is one of: **plain** (the restaurant's name on the group's colour),
-**designed here** (three layouts, a headline, a message, background and text colours, a logo and a photo), or
-**your own artwork** (a finished picture, ideally 1875 × 1275 pixels). A restaurant's own design borrows any
-picture it has not uploaded (typically the logo) from the group's. The back is the coupon, laid out to leave
-the address and postage area clear, with an optional short note from the restaurant above it. Both sides are
-drawn by the server from the same HTML the mail house receives (`PostGridCardDesign`), so the live preview on
-the page is exactly what prints. Pictures are PNG or JPEG up to 5 MB, stored in the database and served at
-`/card-art/{group}/{hash}` (public, because the mail house downloads them; the address cannot be guessed).
+the group's with one button. A restaurant's own design borrows any picture it has not uploaded (typically the
+logo) from the group's.
+
+- **The front** is one of: **plain** (the restaurant's name on the group's colour), **designed here** (three
+  layouts, a headline, a message, background and text colours, a logo and a photo), **your own artwork** (a
+  finished picture, ideally 1875 × 1275 pixels), or **laid out yourself** in the card designer.
+- **The back** is the coupon: **classic** (the default, laid out to match the restaurants' own printed coupon
+  cards: logo and the restaurant's name and address across the top, "Please enjoy", "Date Issued" and
+  "Authorized Signature" on fill-in lines, the small print, and a web address with a small picture such as social
+  media icons in the bottom corner, all in one ink colour), **simple** (a plain coupon box), or **laid out
+  yourself**, which starts as the classic card.
+
+**The card designer** (`web/src/components/CardLayoutEditor.tsx`, `Services/CardLayout.cs`). A side laid out
+yourself is a list of **items** (`CardElement`, stored as JSON in `CardDesign.BackLayoutJson` /
+`FrontLayoutJson`): words, fill-in lines (a label and what is printed on the line), rules, boxes, pictures and
+the QR code. Each has a place and size in inches on the finished 6 × 4 inch card, and words have a typeface,
+size, weight, alignment and colour. In the browser every item can be dragged, resized, nudged with the arrow
+keys, copied, re-ordered, removed and undone, and new ones added, so a new restaurant's card is set up on the
+site without any programming. Words can carry **fields** in braces, filled in for each card: `{restaurant}`,
+`{restaurantState}`, `{street}`, `{cityStateZip}`, `{website}`, `{offer}`, `{dateIssued}`, `{goodUntil}`,
+`{months}`, `{authorizedBy}`, `{guest}`, `{legal}` and `{note}`. That is how one group design prints each
+restaurant's own name and address. A line made only of fields that come out empty is left off. The classic back
+is simply the standard list of items (`CardElements.ClassicBack`), positioned from a photograph of the
+restaurants' printed card, and is drawn by the same code (`CardElements.Render`).
+
+- Three typefaces are built into the site (`src/RestaurantFeedback.Api/CardFonts`, SIL Open Font License, licences
+  beside them): Arimo, Montserrat and Roboto Condensed. The printed card carries the ones it uses inside its own
+  page, so the print matches the preview and the mail house downloads nothing; the designer loads the same files
+  from `/card-fonts/…`.
+- Everything from the designer is checked on the server (`CardElements.Clean`): at most 40 items, known kinds
+  only, sizes kept on the card, colours and typefaces from the allowed set. Every word is escaped when the card
+  is drawn, so nothing typed in the designer can become markup.
+- Pictures placed in the designer are uploaded like the others (kind `el-…`, up to 12 per card) and removed once
+  no card places them.
+- PostGrid prints the guest's address and the postage on the right 2.4 inches of the back and a barcode along
+  the bottom right. The designer and the preview shade those areas and warn when an item reaches into them or
+  sits within ⅛ inch of the edge.
+
+Both sides are drawn by the server from the same HTML the mail house receives (`PostGridCardDesign`), so the
+live preview on the page is exactly what prints. Pictures are PNG or JPEG up to 5 MB, stored in the database and
+served at `/card-art/{group}/{hash}` (public, because the mail house downloads them; the address cannot be
+guessed).
+
+**A QR code on every card.** Each card has its own random GUID (`GuestComment.PublicId`, unique across every
+investment group, shown as the Card ID on the card's record). Every printout carries a QR code for it: the cards
+printed in the restaurant (bottom left on blank stock; a positioned blank, on by default, on pre-printed stock) and
+the mailed cards (beside the date and signature lines). The code holds only `…/v/{code}`, where the code is the
+GUID followed by a signature: the first ten bytes of an HMAC-SHA256 of the GUID, keyed with a secret only the
+site holds (`CardCodes`; the secret is made once and kept in `SiteSettings`, encrypted with Data Protection). A
+code therefore cannot be made up, guessed or altered, and it shows nothing by itself. Scanning it opens **Check a
+coupon card**, which makes the person sign in first and then returns to the card. Only people who work at the
+card's restaurant see it, as the site has it (guest, offer, dates, whether it was redeemed), so a card whose
+printed words were changed is caught by comparing it with the screen, and a used card or a photocopy shows as
+already redeemed. Anyone with the mark-as-sent permission can mark it redeemed from there. Every check, and every
+rejected code, is audited (`CardCodeChecked`, `CardCodeRejected`). If the signing secret were ever lost, cards
+printed before then would stop checking as genuine.
 
 **Billing for mailed cards.** The site pays the mail house first, so every mailed card is recorded with what it
 cost the site and the site's fee at the moment it was sent (`MailEstimateCents`, `MailFeeCents`); later price
@@ -187,7 +235,8 @@ changes never rewrite history. The System Administrator's **Billing** page (`Sys
 - the **bill day** (last month's bills are created on it), days to pay, whether bills are **emailed** and whether
   a **printed statement** is also posted through the mail house (PostGrid letters, paid by the site);
 - the **credit card fee** (3% by default), the **bank account fee** (0.08% by default) and whether a **payment
-  method is required** before a group may mail;
+  method is required** before a group may mail (on by default: no card, not even a test order, is sent to the
+  mail house for a group that has not saved one);
 - who the bills are from (business name, address, how to pay).
 
 `BillingWorker` runs hourly: on or after the bill day it creates one bill per group for the finished month
@@ -204,15 +253,21 @@ month's use against the limit, each month by restaurant, their bills, where bill
 They see one price per card, never the split between cost and fee. Owners see the use of their own restaurants;
 only the group's administrators see bills, save a payment method or pay.
 
-**Paying on the site** uses the site's own **Stripe** account (`StripePayments`, secret key entered under
-**Connected Systems, Stripe**, encrypted; `Payments__SecretKey` is a fallback). A group administrator saves a
+**Paying on the site** uses the site's own **Stripe** account (`StripePayments`). Under **Connected Systems,
+Stripe** the System Administrator enters a **restricted API key** (`rk_…`, with only the permissions the page
+lists; a secret key also works but is discouraged) and the **signing secret** of a webhook, both encrypted
+(`Payments__SecretKey` and `Payments__WebhookSecret` are fallbacks). Every request is pinned to one Stripe API
+version (`Payments__ApiVersion`) and names no payment types beyond an allow-list of bank account and card, so
+which of those are offered is controlled in the Stripe Dashboard. A group administrator saves a
 bank account or a card on Stripe's own page (Checkout in setup mode), so no card or bank number ever reaches the
 site; the site keeps only Stripe's references and a label such as "Visa credit card ending 4242". A bill is
 paid with that saved method: the confirmation names the exact amount, the confirmed amount must match, and the
 payment carries an idempotency key made of the bill and its attempt number, so a bill is never charged twice.
 **Credit cards add the card fee and connected bank accounts add the bank fee (to the nearest cent); debit
 cards add nothing.** Bank payments show as "on their
-way" until Stripe reports them settled. A group can switch on **automatic payment** of each new bill. A Stripe
+way" until Stripe reports them settled: Stripe calls `/webhooks/stripe` (outside `/api`, signature checked with
+HMAC-SHA256 and a five-minute tolerance, `StripeWebhooks`), the site then asks Stripe itself how the payment
+stands before marking the bill paid, and the hourly round checks the same thing as a fallback. A group can switch on **automatic payment** of each new bill. A Stripe
 *test* key (`sk_test_…`) moves no money. Every step is audited (`MailBillCreated`, `MailBillEmailed`,
 `MailBillPosted`, `MailBillCharged`, `MailBillPaymentFailed`, `MailBillMarkedPaid`, `PaymentMethodSaved`, …).
 

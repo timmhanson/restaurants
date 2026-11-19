@@ -29,7 +29,7 @@ export default function PrintTestPage() {
       </div>
       <div className="print-sheet">
         <div className="print-scroll">
-          <PostcardFace card={sampleCard(settings)} settings={card} restaurant={restaurants[0]} validityMonths={settings.couponValidityMonths} outline />
+          <PostcardFace card={sampleCard(settings)} settings={card} restaurant={restaurants[0]} validityMonths={settings.couponValidityMonths} qr="sample" outline />
         </div>
       </div>
     </div>

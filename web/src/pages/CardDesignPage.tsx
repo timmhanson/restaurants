@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
-import type { CardDesign, CardDesignFields, CardDesignScope, CardFront, CardImage, CardImageKind, CardLayout, MailPreview } from '../api/types'
+import type { CardBack, CardDesign, CardDesignFields, CardDesignScope, CardFront, CardImage, CardImageKind, CardLayout, MailPreview } from '../api/types'
+import CardLayoutEditor from '../components/CardLayoutEditor'
 import { Alert, Badge, Confirm, Field, Spinner, fmtDateTime } from '../components/ui'
 import { Side } from './MailCardsPage'
 
@@ -11,6 +12,12 @@ const FRONTS: { value: CardFront; label: string; hint: string }[] = [
   { value: 'plain', label: 'Plain', hint: 'The restaurant’s name and a thank-you on your group’s colour. Nothing to set up.' },
   { value: 'designed', label: 'Design it here', hint: 'Pick a layout, add your logo, a photo, your own words and colours.' },
   { value: 'picture', label: 'Your own artwork', hint: 'Upload a finished picture of the whole front, made in a design program.' },
+  { value: 'custom', label: 'Lay it out yourself', hint: 'Place words, pictures, lines and boxes anywhere on the card, and move or resize each one.' },
+]
+const BACKS: { value: CardBack; label: string; hint: string }[] = [
+  { value: 'classic', label: 'Classic coupon card', hint: 'Like your printed cards: logo and address across the top, “Please enjoy”, date issued and authorized signature on lines, small print and web address at the bottom.' },
+  { value: 'simple', label: 'Simple', hint: 'A plain coupon box with the restaurant’s name, the offer, the dates and the small print.' },
+  { value: 'custom', label: 'Lay it out yourself', hint: 'Starts as the classic card. Move, resize, reword, add or remove anything on it, with your own pictures.' },
 ]
 const LAYOUTS: { value: CardLayout; label: string; hint: string }[] = [
   { value: 'centered', label: 'Words in the middle', hint: 'Logo, headline and message centred on your colour.' },
@@ -31,6 +38,7 @@ function pixels(file: File): Promise<{ w: number; h: number } | null> {
 
 const fieldsOf = (d: CardDesign): CardDesignFields => ({
   front: d.front, layout: d.layout, headline: d.headline ?? '', message: d.message ?? '', backMessage: d.backMessage ?? '', backgroundColor: d.backgroundColor, textColor: d.textColor,
+  backStyle: d.backStyle, inkColor: d.inkColor, website: d.website ?? '', legalText: d.legalText ?? '', backLayout: d.backLayout ?? null, frontLayout: d.frontLayout ?? null,
 })
 
 /**
@@ -85,6 +93,20 @@ export default function CardDesignPage() {
     setDirty(true)
     setNotice(null)
   }
+  // Choosing to lay a side out yourself starts it from the classic back (or a starter front), unless one is already laid out.
+  const chooseBack = (v: CardBack) => {
+    if (v === 'custom' && !draft?.backLayout?.length && design) set('backLayout', design.standardBack)
+    set('backStyle', v)
+  }
+  const chooseFront = (v: CardFront) => {
+    if (v === 'custom' && !draft?.frontLayout?.length && design) set('frontLayout', design.starterFront)
+    set('front', v)
+  }
+  // The designer shows the fields as they print: the web address, small print and note come from what is on screen now.
+  const mergeFields = (design?.mergeFields ?? []).map((f) =>
+    f.key === 'website' ? { ...f, sample: (draft?.website ?? '').trim() }
+      : f.key === 'legal' ? { ...f, sample: (draft?.legalText ?? '').trim() || design?.defaultLegalText || '' }
+        : f.key === 'note' ? { ...f, sample: (draft?.backMessage ?? '').trim() } : f)
   const image = (kind: CardImageKind) => design?.images.find((i) => i.kind === kind && !i.fromGroup)
   const inherited = (kind: CardImageKind) => design?.images.find((i) => i.kind === kind && i.fromGroup)
 
@@ -128,6 +150,7 @@ export default function CardDesignPage() {
     await api.put<CardDesign>(`/card-designs/${scope}`, draft)
     const d = await api.upload<CardDesign>(`/card-designs/${scope}/images/${kind}`, file)
     setDesign(d)
+    setDraft(fieldsOf(d))
     setDirty(false)
     setWarn(note)
     setNotice('Picture uploaded and the design saved.')
@@ -201,8 +224,8 @@ export default function CardDesignPage() {
             </p>
             {preview ? (
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                <Side html={preview.frontHtml} label="Front" />
-                <Side html={preview.backHtml} label="Back (the coupon)" />
+                <Side html={preview.frontHtml} label="Front" scale={0.8} />
+                <Side html={preview.backHtml} label="Back (the shaded areas are printed over when it is mailed)" scale={0.8} mailZones />
               </div>
             ) : <Spinner label="Drawing the card…" />}
           </div>
@@ -210,10 +233,10 @@ export default function CardDesignPage() {
           <fieldset disabled={!canEdit || busy !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <div className="panel">
               <h2>The front</h2>
-              <div className="source-choice" role="radiogroup" aria-label="How the front is made">
+              <div className="source-choice two" role="radiogroup" aria-label="How the front is made">
                 {FRONTS.map((f) => (
                   <label key={f.value} className={draft.front === f.value ? 'selected' : ''}>
-                    <input type="radio" name="front" checked={draft.front === f.value} onChange={() => set('front', f.value)} />
+                    <input type="radio" name="front" checked={draft.front === f.value} onChange={() => chooseFront(f.value)} />
                     <span className="source-label">{f.label}</span>
                     <span className="source-hint">{f.hint}</span>
                   </label>
@@ -241,10 +264,10 @@ export default function CardDesignPage() {
                   </div>
                   <div className="grid grid-4">
                     <Field label="Background colour">
-                      <input type="color" value={draft.backgroundColor ?? '#005daa'} onChange={(e) => set('backgroundColor', e.target.value)} aria-label="Background colour" />
+                      <input type="color" style={{ width: 72, height: 38, padding: 3 }} value={draft.backgroundColor ?? '#005daa'} onChange={(e) => set('backgroundColor', e.target.value)} aria-label="Background colour" />
                     </Field>
                     <Field label="Colour of the words">
-                      <input type="color" value={draft.textColor ?? '#ffffff'} onChange={(e) => set('textColor', e.target.value)} aria-label="Colour of the words" />
+                      <input type="color" style={{ width: 72, height: 38, padding: 3 }} value={draft.textColor ?? '#ffffff'} onChange={(e) => set('textColor', e.target.value)} aria-label="Colour of the words" />
                     </Field>
                   </div>
                   <div className="grid grid-2">
@@ -256,6 +279,22 @@ export default function CardDesignPage() {
                   {draft.layout !== 'centered' && !image('photo') && !inherited('photo') && (
                     <Alert kind="info">This layout needs a photo. Until one is uploaded, the card prints with the words in the middle.</Alert>
                   )}
+                </div>
+              )}
+
+              {draft.front === 'custom' && (
+                <div className="grid" style={{ marginTop: '1rem' }}>
+                  <div className="grid grid-4">
+                    <Field label="Background colour">
+                      <input type="color" style={{ width: 72, height: 38, padding: 3 }} value={draft.backgroundColor ?? '#005daa'} onChange={(e) => set('backgroundColor', e.target.value)} aria-label="Background colour of the front" />
+                    </Field>
+                    <Field label="Colour of the words">
+                      <input type="color" style={{ width: 72, height: 38, padding: 3 }} value={draft.textColor ?? '#ffffff'} onChange={(e) => set('textColor', e.target.value)} aria-label="Colour of the words on the front" />
+                    </Field>
+                  </div>
+                  <CardLayoutEditor side="front" elements={draft.frontLayout ?? []} onChange={(next) => set('frontLayout', next)} ink={draft.textColor ?? '#ffffff'}
+                    background={draft.backgroundColor ?? '#005daa'} images={design.images} mergeFields={mergeFields} sampleQr={design.sampleQr} canEdit={canEdit} busy={busy !== null}
+                    onUploadPicture={upload} onStartAgain={() => set('frontLayout', design.starterFront)} startAgainLabel="Start again from the starter front" />
                 </div>
               )}
 
@@ -271,10 +310,59 @@ export default function CardDesignPage() {
 
             <div className="panel">
               <h2>The back</h2>
-              <p className="muted">The back carries the coupon: the restaurant’s name, the offer, the dates and who authorized it. You can add a short note above it.</p>
-              <Field label="A note from the restaurant (optional)" hint={`Up to 160 characters, printed above the coupon. ${(draft.backMessage ?? '').length}/160`}>
-                <input value={draft.backMessage ?? ''} maxLength={160} onChange={(e) => set('backMessage', e.target.value)} placeholder="We’re sorry we missed the mark. Please give us another chance." />
-              </Field>
+              <p className="muted">
+                The back carries the coupon. The right side is kept clear: the guest’s address and the postage are printed there when the card is mailed, in place
+                of the stamp box and address lines on a hand-written card.
+              </p>
+              <div className="source-choice" role="radiogroup" aria-label="How the back is laid out">
+                {BACKS.map((b) => (
+                  <label key={b.value} className={draft.backStyle === b.value ? 'selected' : ''}>
+                    <input type="radio" name="backStyle" checked={draft.backStyle === b.value} onChange={() => chooseBack(b.value)} />
+                    <span className="source-label">{b.label}</span>
+                    <span className="source-hint">{b.hint}</span>
+                  </label>
+                ))}
+              </div>
+
+              {draft.backStyle === 'custom' && (
+                <div style={{ marginTop: '1rem' }}>
+                  <CardLayoutEditor side="back" elements={draft.backLayout ?? []} onChange={(next) => set('backLayout', next)} ink={draft.inkColor ?? '#2b4a8b'} background="#ffffff"
+                    images={design.images} mergeFields={mergeFields} sampleQr={design.sampleQr} canEdit={canEdit} busy={busy !== null}
+                    onUploadPicture={upload} onStartAgain={() => set('backLayout', design.standardBack)} startAgainLabel="Start again from the classic card" />
+                </div>
+              )}
+
+              {draft.backStyle !== 'simple' && (
+                <div className="grid" style={{ marginTop: '1rem' }}>
+                  {draft.backStyle === 'classic' && <div className="grid grid-2">
+                    <ImageSlot kind="backlogo" label="Logo for the back" hint="Printed in the top left corner, beside the restaurant’s name and address. A logo in your ink colour on a white or clear background looks best. Up to 5 MB."
+                      image={image('backlogo')} inherited={inherited('backlogo')} busy={busy} canEdit={canEdit} onUpload={upload} onRemove={removeImage} />
+                    <ImageSlot kind="footer" label="Small picture for the bottom corner" hint="For example a strip of social media icons, printed above the web address. Up to 5 MB."
+                      image={image('footer')} inherited={inherited('footer')} busy={busy} canEdit={canEdit} onUpload={upload} onRemove={removeImage} />
+                  </div>}
+                  <div className="grid grid-2">
+                    <Field label="Web address" hint={draft.backStyle === 'custom' ? 'Printed wherever the card has the “Web address” field, for example culvers.com. Leave empty to print none.' : 'Printed under the restaurant’s address and in the bottom corner, for example culvers.com. Leave empty to print none.'}>
+                      <input value={draft.website ?? ''} maxLength={60} onChange={(e) => set('website', e.target.value)} placeholder="culvers.com" />
+                    </Field>
+                    <Field label="Ink colour" hint="The colour of the words and lines.">
+                      <input type="color" style={{ width: 72, height: 38, padding: 3 }} value={draft.inkColor ?? '#2b4a8b'} onChange={(e) => set('inkColor', e.target.value)} aria-label="Ink colour" />
+                    </Field>
+                  </div>
+                  <Field label="Small print" hint={`Up to 420 characters. Leave empty to print the standard wording. ${(draft.legalText ?? '').length}/420`}>
+                    <textarea rows={3} value={draft.legalText ?? ''} maxLength={420} onChange={(e) => set('legalText', e.target.value)} placeholder={design.defaultLegalText} />
+                  </Field>
+                  <p className="muted small" style={{ margin: 0 }}>
+                    The restaurant’s name and address come from Restaurants &amp; staff, and “good for … months” from Settings. The offer, date issued and the name
+                    of whoever authorized the card are printed on the lines for each guest.
+                  </p>
+                </div>
+              )}
+
+              <div style={{ marginTop: '1rem' }}>
+                <Field label="A note from the restaurant (optional)" hint={`Up to 160 characters, printed above the coupon. ${(draft.backMessage ?? '').length}/160`}>
+                  <input value={draft.backMessage ?? ''} maxLength={160} onChange={(e) => set('backMessage', e.target.value)} placeholder="We’re sorry we missed the mark. Please give us another chance." />
+                </Field>
+              </div>
             </div>
           </fieldset>
 

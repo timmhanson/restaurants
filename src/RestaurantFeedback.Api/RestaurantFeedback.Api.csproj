@@ -16,6 +16,12 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
+    <PackageReference Include="QRCoder" Version="1.8.1" />
+  </ItemGroup>
+
+  <!-- The typefaces cards are printed in (open licences, kept beside them), built into the site so a card never depends on a download. -->
+  <ItemGroup>
+    <EmbeddedResource Include="CardFonts\*.woff2" LogicalName="CardFonts.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

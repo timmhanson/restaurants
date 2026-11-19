@@ -56,10 +56,12 @@ public class ApiTests(ApiFactory factory)
         var second = await forced.Content.ReadFromJsonAsync<CommentSummary>();
         Assert.Equal(2, second!.GuestCommentCount);
 
-        var list = await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?restaurantId={rid}&repeatOnly=true");
+        // Narrowed to this guest: other test classes share the database and add repeat guests of their own.
+        var list = await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?restaurantId={rid}&repeatOnly=true&search=8155550001");
         Assert.Equal(2, list!.Total);
 
-        var analytics = await owner.GetFromJsonAsync<AnalyticsDto>($"/api/analytics?restaurantId={rid}");
+        // Narrowed to the days of this test's visits: other test classes share the database and add repeat guests of their own.
+        var analytics = await owner.GetFromJsonAsync<AnalyticsDto>($"/api/analytics?restaurantId={rid}&from=2026-11-03&to=2026-11-06");
         Assert.Equal(1, analytics!.RepeatGuests);
         Assert.Contains(analytics.ByDayOfWeek, d => d.Label == "Tuesday" && d.Count >= 1); // other tests may add Tuesday visits
 

@@ -161,6 +161,8 @@ public record CommentSummary(
     public string? PostageLabelUrl { get; init; }
     public string? PostageTrackingCode { get; init; }
     public bool PostageTest { get; init; }
+    /// <summary>The card's own identifier, carried (signed) by the QR code printed on it.</summary>
+    public Guid CardId { get; init; }
     /// <summary>Printed and mailed for the group by the site's mail house: its status (ready, printing, processed_for_delivery, completed, cancelled).</summary>
     public string? MailStatus { get; init; }
     public DateTime? MailedAt { get; init; }
@@ -188,7 +190,7 @@ public record CommentSummary(
     {
         Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
         PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest,
-        MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
+        CardId = c.PublicId, MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
         RedeemedByName = c.RedeemedByName, FollowedUpOn = c.FollowedUpOn, FollowedUpByName = c.FollowedUpByName,
         ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
     };
@@ -379,17 +381,36 @@ public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, boo
 /// <param name="HasProof">The mail house has a proof of the printed card, fetched through comments/{id}/mail/proof.</param>
 public record MailStatusDto(int CommentId, string? Status, bool Test, bool HasProof, string? Error);
 public record MailPreview(string FrontHtml, string BackHtml);
+/// <param name="Url">The address the QR code holds: this site's verify page for the card.</param>
+/// <param name="Image">The QR code as a picture (an SVG in a data address), ready for an img tag.</param>
+public record CardQr(int CommentId, Guid CardId, string Url, string Image);
+
+// ---- Checking a scanned card -----------------------------------------------------------------------------
+
+/// <param name="Genuine">The code was issued by this site and names a card that still exists.</param>
+/// <param name="Card">The card as the site has it; null when the code is not genuine or the card is not this person's to see.</param>
+/// <param name="CanRedeem">This person may mark the coupon as redeemed, and it has not been yet.</param>
+public record CardCheck(bool Genuine, string Message, CardCheckDetails? Card, bool CanRedeem);
+/// <param name="CanOpen">This person may open the card's full record on Comments.</param>
+public record CardCheckDetails(int CommentId, Guid CardId, string Restaurant, string GuestName, string? Offer, DateOnly DateIssued, DateOnly ExpiresOn, bool Expired,
+    DateOnly? RedeemedOn, string? RedeemedByName, bool Sent, bool CanOpen);
 
 // ---- How mailed cards look: the group's design and each restaurant's own ---------------------------------
 
 /// <param name="Url">Public address of the picture (the mail house downloads it from here).</param>
 /// <param name="FromGroup">Borrowed from the group's card, because this restaurant has not uploaded its own.</param>
 public record CardImageDto(string Kind, string Url, int? WidthPx, int? HeightPx, long Bytes, DateTime UploadedAt, string UploadedBy, bool FromGroup);
-public record CardDesignFields(string? Front, string? Layout, string? Headline, string? Message, string? BackMessage, string? BackgroundColor, string? TextColor);
+public record CardDesignFields(string? Front, string? Layout, string? Headline, string? Message, string? BackMessage, string? BackgroundColor, string? TextColor,
+    string? BackStyle = null, string? InkColor = null, string? Website = null, string? LegalText = null,
+    List<CardElement>? BackLayout = null, List<CardElement>? FrontLayout = null);
+/// <summary>One of the fields a card's words can carry in braces, with what it prints on the sample card.</summary>
+public record CardMergeField(string Key, string Label, string Sample);
 /// <param name="Scope">"group" or a restaurant's id.</param>
 /// <param name="HasOwn">False when a restaurant has no design of its own and uses the group's.</param>
 public record CardDesignDto(string Scope, int? RestaurantId, string Name, bool CanEdit, bool HasOwn, string Front, string Layout, string? Headline, string? Message,
-    string? BackMessage, string BackgroundColor, string TextColor, List<CardImageDto> Images, DateTime? UpdatedAt, string? UpdatedBy);
+    string? BackMessage, string BackgroundColor, string TextColor, List<CardImageDto> Images, DateTime? UpdatedAt, string? UpdatedBy,
+    string BackStyle, string InkColor, string? Website, string? LegalText, string DefaultLegalText,
+    List<CardElement>? BackLayout, List<CardElement>? FrontLayout, List<CardElement> StandardBack, List<CardElement> StarterFront, List<CardMergeField> MergeFields, string SampleQr);
 public record CardDesignScope(string Scope, int? RestaurantId, string Name, bool CanEdit, bool HasOwn);
 
 // ---- Billing for mailed cards: what a group sees ------------------------------------------------------------
@@ -432,7 +453,12 @@ public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents);
 public record MarkPaidRequest(string? How, string? Note, DateOnly? PaidOn);
 public record IssueBillsRequest(string? Month);
 public record StripeKeyRequest(string? SecretKey);
-public record StripeAccountDto(bool Configured, string Source, string? KeyEnding, bool Test, DateTime? SavedAt, string? SavedBy, int GroupsWithMethod, bool CanEnter);
+public record StripeWebhookRequest(string? Secret);
+/// <param name="Restricted">The key is a restricted key (rk_), which can only do what it was given permission for.</param>
+/// <param name="WebhookEnding">The last four characters of the webhook signing secret; the secret is never returned.</param>
+/// <param name="LastNotificationAt">When Stripe's last genuine notification arrived, since the site last started.</param>
+public record StripeAccountDto(bool Configured, string Source, string? KeyEnding, bool Test, DateTime? SavedAt, string? SavedBy, int GroupsWithMethod, bool CanEnter,
+    bool Restricted, bool WebhookConfigured, string? WebhookEnding, DateTime? LastNotificationAt, string ApiVersion);
 public record CardIdsRequest(int[] CommentIds);
 public record PostageOutcome(int CommentId, bool Ok, int? Cents, string? LabelUrl, bool Test, bool AlreadyBought, string? Error);
 /// <param name="Postage">"bought" (postage printed on the card) or "stamp" (a stamp goes on by hand).</param>

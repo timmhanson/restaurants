@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { CommentSummary, PagedResult, PostageOutcome, PrintConfig } from '../api/types'
+import type { CardQr, CommentSummary, PagedResult, PostageOutcome, PrintConfig } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { AddressBadge } from '../components/AddressCheckNote'
 import PostcardFace, { PostageLabel, hasMailingAddress } from '../components/PostcardFace'
@@ -31,6 +31,14 @@ export default function PrintCardsPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const printing = useRef(false)
+  // Each card's QR code, which leads staff back to the card's record after signing in.
+  const [qrs, setQrs] = useState<Record<number, string>>({})
+  useEffect(() => {
+    if (!ids.length) return
+    api.post<CardQr[]>('/comments/qr', { commentIds: ids })
+      .then((list) => setQrs(Object.fromEntries(list.map((q) => [q.commentId, q.image]))))
+      .catch((e) => setError((e as Error).message))
+  }, [ids])
 
   useEffect(() => {
     if (!ids.length) return setCards([])
@@ -202,7 +210,7 @@ export default function PrintCardsPage() {
                 {label && <Badge kind={c.postageTest || outcomes[c.id]?.test ? 'warn' : 'accent'}>{c.postageTest || outcomes[c.id]?.test ? 'test postage' : 'postage bought'}</Badge>}
               </div>
               <div className="print-scroll">
-                <PostcardFace card={c} settings={card} restaurant={restaurants.find((r) => r.id === c.restaurantId)} validityMonths={settings.couponValidityMonths} withAddress={!label} outline />
+                <PostcardFace card={c} settings={card} restaurant={restaurants.find((r) => r.id === c.restaurantId)} validityMonths={settings.couponValidityMonths} withAddress={!label} outline qr={qrs[c.id]} />
               </div>
               {label && (
                 <div className="print-scroll">

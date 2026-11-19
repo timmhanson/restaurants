@@ -31,12 +31,37 @@ export function MailStatusBadge({ status, test }: { status?: MailStatus | null; 
   )
 }
 
-/** One side of the card, drawn from the same HTML the printer receives, scaled to fit. */
-export function Side({ html, label }: { html: string; label: string }) {
-  const scale = 0.56 // 6.25in (600px) shown 336px wide
+/** A part of the back that is printed over when the card is mailed, drawn on top of the preview (never sent to the printer). */
+function MailZone({ left, top, width, height, scale, children }: { left: number; top: number; width: number; height: number; scale: number; children: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'absolute', zIndex: 1, left: left * scale, top: top * scale, width: width * scale, height: height * scale, boxSizing: 'border-box',
+        border: '1px dashed #9aa3b2', background: 'repeating-linear-gradient(135deg, rgba(120,130,150,.10) 0 6px, rgba(120,130,150,.03) 6px 12px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 4, color: '#5b6474', fontSize: Math.max(9, 12 * scale), lineHeight: 1.25,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/**
+ * One side of the card, drawn from the same HTML the printer receives, scaled to fit. With mailZones (the back), the
+ * areas the mail house prints over are shaded: the guest's address and postage on the right, and a barcode strip.
+ */
+export function Side({ html, label, scale = 0.56, mailZones = false }: { html: string; label: string; scale?: number; mailZones?: boolean }) {
+  // The card is 6.25 x 4.25 inches, 600 x 408 pixels at full size.
   return (
     <figure style={{ margin: 0 }}>
-      <div style={{ width: 600 * scale, height: 408 * scale, overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 4, background: '#fff' }}>
+      <div style={{ position: 'relative', width: 600 * scale, height: 408 * scale, overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 4, background: '#fff' }}>
+        {mailZones && (
+          <>
+            <MailZone left={362} top={0} width={238} height={408} scale={scale}>The guest’s address and the postage are printed here</MailZone>
+            <MailZone left={144} top={338} width={218} height={70} scale={scale}>Barcode</MailZone>
+          </>
+        )}
         <iframe
           title={label}
           srcDoc={html}
@@ -209,7 +234,7 @@ export default function MailCardsPage() {
             {preview ? (
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                 <Side html={preview.frontHtml} label="Front" />
-                <Side html={preview.backHtml} label="Back (address and postage are added on the right)" />
+                <Side html={preview.backHtml} label="Back (the shaded areas are printed over when it is mailed)" mailZones />
               </div>
             ) : (
               <Spinner label="Drawing the card…" />

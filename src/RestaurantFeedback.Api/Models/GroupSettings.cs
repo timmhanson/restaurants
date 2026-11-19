@@ -61,7 +61,10 @@ public class PostcardSettings
 {
     public const string Preprinted = "Preprinted";
     public const string Blank = "Blank";
-    public static readonly string[] FieldKeys = ["offer", "dateIssued", "goodUntil", "authorizedBy", "guestName", "street", "cityStateZip"];
+    /// <summary>The QR code is a blank like the others: a square printed with its top-left corner at its position.</summary>
+    public const string QrField = "qr";
+    public const double QrSizeIn = 0.75;
+    public static readonly string[] FieldKeys = ["offer", "dateIssued", "goodUntil", "authorizedBy", "guestName", "street", "cityStateZip", QrField];
 
     public string Stock { get; set; } = Blank;
     public double WidthIn { get; set; } = 6;
@@ -84,7 +87,9 @@ public class PostcardSettings
         ["authorizedBy"] = new(1.60, 2.75),
         ["guestName"] = new(3.45, 1.70),
         ["street"] = new(3.45, 2.10),
-        ["cityStateZip"] = new(3.45, 2.50)
+        ["cityStateZip"] = new(3.45, 2.50),
+        // In the clear space to the right of "Date Issued", under the "Please enjoy" line.
+        [QrField] = new(4.90, 1.75)
     };
 
     /// <summary>Keeps saved values within what a printer can do and makes sure every blank has a position.</summary>

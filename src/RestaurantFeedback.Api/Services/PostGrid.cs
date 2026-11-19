@@ -408,6 +408,16 @@ public static class SiteSettingRows
 public record CardLook(string Front, string Layout, string? Headline, string? Message, string? BackMessage, string Background, string Text,
     string? PictureUrl, string? LogoUrl, string? PhotoUrl)
 {
+    public string BackStyle { get; init; } = CardBacks.Classic;
+    public string Ink { get; init; } = CardBacks.DefaultInk;
+    public string? Website { get; init; }
+    public string? LegalText { get; init; }
+    /// <summary>The items of a back or front laid out in the card designer.</summary>
+    public List<CardElement>? BackLayout { get; init; }
+    public List<CardElement>? FrontLayout { get; init; }
+    /// <summary>The address of every uploaded picture, by kind, for the pictures a layout places.</summary>
+    public IReadOnlyDictionary<string, string> Pictures { get; init; } = new Dictionary<string, string>();
+
     public static CardLook Plain(string? accent) =>
         new(CardFronts.Plain, CardLayouts.Centered, null, null, null, PostGridCardDesign.SafeColor(accent), "#ffffff", null, null, null);
 }
@@ -431,8 +441,12 @@ public static class PostGridCardDesign
     /// The picture side: finished artwork edge to edge, a designed layout (words, logo and photo), or a plain card in
     /// the group's colour. Words stay 3/8 inch inside the page, clear of the 1/8 inch that is trimmed off.
     /// </summary>
-    public static string Front(CardLook look, string restaurantName, string? offer)
+    public static string Front(CardLook look, GuestComment c, Restaurant r, int validityMonths)
     {
+        var restaurantName = r.Name;
+        var offer = c.CouponOffer;
+        if (look.Front == CardFronts.Custom && look.FrontLayout is { Count: > 0 } layout)
+            return CardElements.Render(layout, CardMerge.For(c, r, validityMonths, look), SafeColor(look.Text, "#ffffff"), SafeColor(look.Background), look.Pictures, null);
         if (look.Front == CardFronts.Picture && !string.IsNullOrWhiteSpace(look.PictureUrl))
             return Doc("img{position:absolute;left:0;top:0;width:6.25in;height:4.25in;object-fit:cover}", $"<img src=\"{H(look.PictureUrl)}\" alt=\"\">");
 
@@ -477,18 +491,39 @@ public static class PostGridCardDesign
             $"<div class=\"mid\">{logo}{words}{name}</div>");
     }
 
-    /// <summary>The coupon side. PostGrid adds the guest's address, the return address and the postage on the right.</summary>
-    public static string Back(GuestComment c, Restaurant r, int validityMonths, string? accent, string? backMessage = null)
+    /// <summary>
+    /// The coupon side. PostGrid prints the guest's address and the postage on the right 2.4 inches and a barcode
+    /// along the bottom right, so everything here stays in the left 3.4 inches (only the bottom-left corner, left of
+    /// the barcode, reaches the bottom edge). A classic back is the standard layout; a custom one is the group's own
+    /// arrangement from the card designer. Both are drawn by the same code (CardElements.Render).
+    /// </summary>
+    /// <param name="qr">The card's QR code as a picture address (see CardCodes), printed so staff can scan the card back to its record.</param>
+    public static string Back(GuestComment c, Restaurant r, int validityMonths, string? accent, CardLook look, string? qr = null)
+    {
+        if (look.BackStyle == CardBacks.Simple) return SimpleBack(c, r, validityMonths, accent, look.BackMessage, qr);
+        var layout = look.BackStyle == CardBacks.Custom && look.BackLayout is { Count: > 0 } own ? own : CardElements.ClassicBack();
+        return CardElements.Render(layout, CardMerge.For(c, r, validityMonths, look), SafeColor(look.Ink, CardBacks.DefaultInk), "#ffffff", look.Pictures, qr);
+    }
+
+    private static string Day(DateOnly d) => d.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+    private static string Months(int n) => $"{n} month{(n == 1 ? "" : "s")}";
+
+    /// <summary>A plain coupon box: the restaurant's name, the offer, the dates and the small print.</summary>
+    private static string SimpleBack(GuestComment c, Restaurant r, int validityMonths, string? accent, string? backMessage, string? qr)
     {
         var color = SafeColor(accent);
-        string Day(DateOnly d) => d.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
-        var months = $"{validityMonths} month{(validityMonths == 1 ? "" : "s")}";
+        var months = Months(validityMonths);
         var sb = new StringBuilder();
         sb.Append($"<!doctype html><html><head><meta charset=\"utf-8\"><style>{Page}");
-        sb.Append(".coupon{position:absolute;left:.3in;top:.3in;width:3.4in;height:3.15in;font-size:9.5pt;line-height:1.3;overflow:hidden}");
+        sb.Append(".coupon{position:absolute;left:.3in;top:.3in;width:3.4in;height:2.85in;font-size:9.5pt;line-height:1.3;overflow:hidden}");
         sb.Append($"h2{{font-size:13pt;margin:0 0 .06in;color:{color}}}.enjoy{{margin:0 0 .1in;font-size:10.5pt}}.note{{margin:0 0 .08in;font-size:9pt;font-style:italic;color:#333}}");
         sb.Append(".line{display:flex;gap:.08in;margin:.03in 0}.line span:first-child{width:1in;color:#555}.line span:last-child{flex:1;border-bottom:1px solid #999;font-weight:bold}");
-        sb.Append(".legal{font-size:6.5pt;line-height:1.25;color:#444;margin:.1in 0 0}</style></head><body><div class=\"coupon\">");
+        sb.Append(".legal{font-size:6.5pt;line-height:1.25;color:#444;margin:.1in 0 0}");
+        sb.Append(".qr{position:absolute;left:.3in;top:3.2in;width:1.1in;display:flex;align-items:center;gap:.05in;font-size:5pt;line-height:1.1;color:#444}.qr img{width:.72in;height:.72in;flex:none}");
+        sb.Append("</style></head><body>");
+        // Bottom-left corner, which stays clear of the barcode along the bottom right.
+        if (!string.IsNullOrWhiteSpace(qr)) sb.Append($"<div class=\"qr\"><img src=\"{H(qr)}\" alt=\"\"><span>Staff: scan to check</span></div>");
+        sb.Append("<div class=\"coupon\">");
         sb.Append($"<h2>{H(r.Name)}</h2>");
         if (!string.IsNullOrWhiteSpace(backMessage)) sb.Append($"<p class=\"note\">{H(backMessage.Trim())}</p>");
         sb.Append($"<p class=\"enjoy\">Please enjoy <strong>{H(string.IsNullOrWhiteSpace(c.CouponOffer) ? "a treat on us" : c.CouponOffer)}</strong> the next time you visit us.</p>");
@@ -543,7 +578,16 @@ public class CardDesigns(AppDbContext db, PostGridOptions options, IHttpContextA
         string? Url(string kind) => l.Images.FirstOrDefault(i => i.Kind == kind) is { } i ? ImageUrl(groupId, i.Hash, i.ContentType, absolute: true) : null;
         return new CardLook(d.Front, d.Layout, d.Headline, d.Message, d.BackMessage,
             PostGridCardDesign.SafeColor(d.BackgroundColor, PostGridCardDesign.SafeColor(accent)), PostGridCardDesign.SafeColor(d.TextColor, "#ffffff"),
-            Url(CardImageKinds.Picture), Url(CardImageKinds.Logo), Url(CardImageKinds.Photo));
+            Url(CardImageKinds.Picture), Url(CardImageKinds.Logo), Url(CardImageKinds.Photo))
+        {
+            BackStyle = CardBacks.All.Contains(d.BackStyle) ? d.BackStyle : CardBacks.Classic,
+            Ink = PostGridCardDesign.SafeColor(d.InkColor, CardBacks.DefaultInk),
+            Website = d.Website,
+            LegalText = d.LegalText,
+            BackLayout = CardElements.Parse(d.BackLayoutJson),
+            FrontLayout = CardElements.Parse(d.FrontLayoutJson),
+            Pictures = l.Images.GroupBy(i => i.Kind).ToDictionary(g => g.Key, g => ImageUrl(groupId, g.First().Hash, g.First().ContentType, absolute: true))
+        };
     }
 
     /// <summary>A picture's address: on this site for the browser, or in full for the mail house, which downloads it when it prints.</summary>

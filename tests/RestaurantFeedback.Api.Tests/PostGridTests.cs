@@ -46,6 +46,9 @@ public class PostGridTests(ApiFactory factory)
         var admin = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword, groupId);
         var site = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
         Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/postgrid/mail", new PostGridMailKeyRequest(key))).StatusCode);
+        // A payment method is required before mailing unless the System Administrator switches that off; the tests
+        // that are not about payment switch it off.
+        await SaveSettings(site, s => s.RequirePaymentMethod = false);
         return (owner, admin, site, r.Id, groupId);
     }
 
@@ -103,8 +106,16 @@ public class PostGridTests(ApiFactory factory)
         Assert.DoesNotContain(TestKey, stored);
         Assert.False(audited);
 
+        // Out of the box a group cannot send anything to the mail house, test orders included, until it has saved a
+        // payment method; the System Administrator can switch that requirement off.
+        Assert.True(new BillingSettings().RequirePaymentMethod);
+        await SaveSettings(site, s => s.RequirePaymentMethod = true);
+        var blocked = (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
+        Assert.True(blocked.MailAvailable && blocked.MailTest && blocked.MailNeedsPayMethod && !blocked.CanMail);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync("/api/comments/mail", new MailRequest([1], 1, blocked.MailCentsPerCard))).StatusCode);
+        await SaveSettings(site, s => s.RequirePaymentMethod = false);
         var config = (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
-        Assert.True(config.MailAvailable && config.CanMail && config.MailTest);
+        Assert.True(config.MailAvailable && config.CanMail && config.MailTest && !config.MailNeedsPayMethod);
     }
 
     [Fact]
@@ -272,8 +283,11 @@ public class PostGridTests(ApiFactory factory)
         var (owner, admin, site, rid, groupId) = await SetUpAsync(LiveKey);
         await SaveSettings(site, s => { s.CostCents = 90; s.FeeCents = 6; s.DueDays = 15; s.EmailBills = true; s.PrintBills = false; s.CardFeePercent = 3m; s.BankFeePercent = 1m; s.RequirePaymentMethod = false; s.BusinessName = "Hanson Mailing"; });
         Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, 1_000_000))).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/stripe", new StripeKeyRequest("sk_test_fake-key-for-unit-tests-STRP"))).StatusCode);
-        Assert.Equal("STRP", (await site.GetFromJsonAsync<StripeAccountDto>("/api/system/stripe"))!.KeyEnding);
+        // The publishable key is refused; a restricted key is what the site asks for.
+        Assert.Equal(HttpStatusCode.BadRequest, (await site.PutAsJsonAsync("/api/system/stripe", new StripeKeyRequest("pk_test_fake-key-for-unit-tests-NOPE"))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/stripe", new StripeKeyRequest("rk_test_fake-key-for-unit-tests-STRP"))).StatusCode);
+        var stripeAccount = (await site.GetFromJsonAsync<StripeAccountDto>("/api/system/stripe"))!;
+        Assert.Equal(("STRP", true, true), (stripeAccount.KeyEnding, stripeAccount.Restricted, stripeAccount.Test));
 
         // Three cards in each of three finished months.
         var now = DateTime.UtcNow;
@@ -386,6 +400,46 @@ public class PostGridTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.BadRequest, (await site.PostAsJsonAsync($"/api/system/billing/invoices/{second.Id}/paid", new MarkPaidRequest("check", null, null))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.DeleteAsync("/api/billing/payment-method")).StatusCode);
 
+        // Stripe's notification settles the bank payment at once, but only when it is genuinely from Stripe. It comes
+        // from outside the site (no session id) and nothing in it is believed until its signature has been checked.
+        const string hookSecret = "whsec_fake-secret-for-unit-tests-HOOK";
+        var stripe = factory.CreateClient();
+        stripe.DefaultRequestHeaders.Remove("X-Session-Id");
+        var payRef = (await Billing(site)).Invoices.Single(i => i.Id == second.Id).PaymentRef!;
+        var notice = "{\"id\":\"evt_1\",\"type\":\"payment_intent.succeeded\",\"data\":{\"object\":{\"id\":\"" + payRef + "\",\"object\":\"payment_intent\",\"status\":\"succeeded\"}}}";
+        HttpRequestMessage Notify(string secret, DateTimeOffset at)
+        {
+            var t = at.ToUnixTimeSeconds();
+            using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(secret));
+            var signature = Convert.ToHexString(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{t}.{notice}"))).ToLowerInvariant();
+            var message = new HttpRequestMessage(HttpMethod.Post, "/webhooks/stripe") { Content = new StringContent(notice, System.Text.Encoding.UTF8, "application/json") };
+            message.Headers.Add("Stripe-Signature", $"t={t},v1={signature}");
+            return message;
+        }
+        async Task<string> StatusOfSecond() => (await Billing(site)).Invoices.Single(i => i.Id == second.Id).Status;
+        // Until the signing secret is entered, every notification is refused.
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await stripe.SendAsync(Notify(hookSecret, DateTimeOffset.UtcNow))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync("/api/system/stripe/webhook", new StripeWebhookRequest(hookSecret))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await site.PutAsJsonAsync("/api/system/stripe/webhook", new StripeWebhookRequest("not-a-signing-secret-000000"))).StatusCode);
+        var hooked = await site.PutAsJsonAsync("/api/system/stripe/webhook", new StripeWebhookRequest(hookSecret));
+        Assert.Equal(HttpStatusCode.OK, hooked.StatusCode);
+        Assert.DoesNotContain(hookSecret, await hooked.Content.ReadAsStringAsync());
+        var withHook = (await site.GetFromJsonAsync<StripeAccountDto>("/api/system/stripe"))!;
+        Assert.Equal((true, "HOOK"), (withHook.WebhookConfigured, withHook.WebhookEnding));
+        factory.Payments.Settle(payRef);
+        // Signed with the wrong secret, or too long ago: refused, and the bill stays as it was.
+        Assert.Equal(HttpStatusCode.BadRequest, (await stripe.SendAsync(Notify("whsec_someone-elses-secret-000000", DateTimeOffset.UtcNow))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await stripe.SendAsync(Notify(hookSecret, DateTimeOffset.UtcNow.AddMinutes(-20)))).StatusCode);
+        Assert.Equal("processing", await StatusOfSecond());
+        Assert.Null((await site.GetFromJsonAsync<StripeAccountDto>("/api/system/stripe"))!.LastNotificationAt);
+        // Genuine: the bill is paid, and a repeat of the same notification changes nothing.
+        Assert.Equal(HttpStatusCode.OK, (await stripe.SendAsync(Notify(hookSecret, DateTimeOffset.UtcNow))).StatusCode);
+        Assert.Equal("paid", await StatusOfSecond());
+        Assert.Equal(HttpStatusCode.OK, (await stripe.SendAsync(Notify(hookSecret, DateTimeOffset.UtcNow))).StatusCode);
+        Assert.NotNull((await site.GetFromJsonAsync<StripeAccountDto>("/api/system/stripe"))!.LastNotificationAt);
+        Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Count(a => a.Action == "MailBillPaymentArrived" && a.GroupId == groupId) == 1)));
+        Assert.False(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => (a.Details ?? "").Contains(hookSecret)))));
+
         // Automatic payment: the hourly round charges the last open bill once, and sees the bank payment arrive.
         Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/billing/auto-pay", new AutoPayRequest(true))).StatusCode);
         factory.Payments.Settle((await Billing(site)).Invoices.Single(i => i.Id == second.Id).PaymentRef!);
@@ -494,7 +548,51 @@ public class PostGridTests(ApiFactory factory)
         Assert.Contains("#112233", own.FrontHtml);
         Assert.DoesNotContain(art.Url, own.FrontHtml);
         Assert.Contains("From all of us at the restaurant", own.BackHtml);
-        Assert.Contains("Good until", own.BackHtml);
+
+        // The back is the classic coupon card unless another style is chosen: the restaurant's name with its state, its
+        // address, the fill-in lines, the standard small print, all in the usual dark blue, and no web address until one is set.
+        Assert.Contains(", IL\n1 Test St\nJoliet, IL 60431</div>", own.BackHtml);
+        Assert.Contains("Please enjoy:", own.BackHtml);
+        Assert.Contains("Free &lt;Concrete&gt; Mixer", own.BackHtml);
+        Assert.Contains("the next time you visit us at ", own.BackHtml);
+        Assert.Contains("Date Issued:", own.BackHtml);
+        Assert.Contains("from date of issue.", own.BackHtml);
+        Assert.Contains("Authorized Signature:", own.BackHtml);
+        Assert.Contains("M. Smith", own.BackHtml);
+        Assert.Contains("with authorized signature.", own.BackHtml);
+        Assert.Contains(CardBacks.DefaultInk, own.BackHtml);
+        Assert.DoesNotContain("culvers.com", own.BackHtml);
+        // The typefaces travel inside the card itself, so the print matches the preview.
+        Assert.Contains("@font-face{font-family:'Montserrat'", own.BackHtml);
+        Assert.Contains("src:url(data:font/woff2;base64,", own.BackHtml);
+        Assert.DoesNotContain("Good until", own.BackHtml);
+
+        // Its own logo, corner picture, web address, ink and small print.
+        var backLogo = (await (await owner.PutAsync($"/api/card-designs/{rid}/images/backlogo", Upload(png, "logo.png"))).Content.ReadFromJsonAsync<CardDesignDto>())!.Images.Single(i => i.Kind == "backlogo");
+        byte[] icons = [.. png, 9];
+        var footer = (await (await owner.PutAsync($"/api/card-designs/{rid}/images/footer", Upload(icons, "icons.png"))).Content.ReadFromJsonAsync<CardDesignDto>())!.Images.Single(i => i.Kind == "footer");
+        var classic = mine with { BackStyle = "classic", InkColor = "#123456", Website = "culvers.com", LegalText = "One per guest. <No> cash value." };
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", classic)).StatusCode);
+        var saved = (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!;
+        Assert.Equal(("classic", "#123456", "culvers.com", "One per guest. <No> cash value."), (saved.BackStyle, saved.InkColor, saved.Website, saved.LegalText));
+        Assert.Contains("with authorized signature.", saved.DefaultLegalText);
+        var styled = (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.BackHtml;
+        Assert.Contains(backLogo.Url, styled);
+        Assert.Contains(footer.Url, styled);
+        Assert.Contains("#123456", styled);
+        Assert.DoesNotContain(CardBacks.DefaultInk, styled);
+        Assert.Equal(2, styled.Split("culvers.com").Length - 1);
+        Assert.Contains("One per guest. &lt;No&gt; cash value.", styled);
+        Assert.DoesNotContain("with authorized signature.", styled);
+
+        // The simple style is the plain coupon box, with the date it is good until.
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", classic with { BackStyle = "simple" })).StatusCode);
+        var simple = (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.BackHtml;
+        Assert.Contains("Good until", simple);
+        Assert.DoesNotContain("Authorized Signature:", simple);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", classic with { BackStyle = "fancy" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", classic with { InkColor = "blue" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", classic with { LegalText = new string('x', 421) })).StatusCode);
 
         // What cannot fit or is not a picture is refused.
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", mine with { Headline = new string('x', 61) })).StatusCode);
@@ -507,6 +605,121 @@ public class PostGridTests(ApiFactory factory)
         Assert.Contains(art.Url, (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.FrontHtml);
         Assert.Equal(HttpStatusCode.OK, (await admin.DeleteAsync("/api/card-designs/group")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync(art.Url)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_card_can_be_laid_out_item_by_item_in_the_card_designer()
+    {
+        var (owner, _, _, rid, _) = await SetUpAsync();
+        static MultipartFormDataContent Upload(byte[] bytes)
+        {
+            var form = new MultipartFormDataContent();
+            var file = new ByteArrayContent(bytes);
+            file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            form.Add(file, "file", "art.png");
+            return form;
+        }
+        byte[] png = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0x01, 0x00, 0, 0, 0x00, 0x80, 8, 2, 0, 0, 0, 5, 6, 7, 8];
+        async Task<CardDesignDto> Get() => (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!;
+        async Task<HttpStatusCode> Put(CardDesignFields f) => (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", f)).StatusCode;
+
+        // The designer starts from the classic card as a list of items, and knows the fields words can carry.
+        var start = await Get();
+        Assert.Contains(start.StandardBack, e => e is { Type: "fill", Value: "{offer}" });
+        Assert.Contains(start.StandardBack, e => e is { Type: "image", Image: "backlogo" });
+        Assert.Contains(start.StandardBack, e => e.Type == "qr");
+        Assert.All(start.StandardBack, e => Assert.True(e.X + e.W <= CardElements.AddressFromX, $"{e.Id} reaches into the address area"));
+        Assert.NotEmpty(start.StarterFront);
+        Assert.Equal("1 Test St", start.MergeFields.Single(f => f.Key == "street").Sample);
+        Assert.NotEqual("", start.MergeFields.Single(f => f.Key == "offer").Sample);
+        Assert.StartsWith("data:image/svg+xml;base64,", start.SampleQr);
+
+        // A back of its own: words with fields, a fill-in line, a rule, a box, a picture of its own and the QR code.
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsync($"/api/card-designs/{rid}/images/el-abc123", Upload(png))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await owner.PutAsync($"/api/card-designs/{rid}/images/el-NOPE!", Upload(png))).StatusCode);
+        var art = (await Get()).Images.Single(i => i.Kind == "el-abc123");
+        List<CardElement> back =
+        [
+            new() { Id = "a", Type = "text", X = 1, Y = 0.5, W = 2, Font = "geometric", Size = 12, Bold = true, Text = "<b>{restaurant}</b> & friends\n{website}\n{street}" },
+            new() { Id = "b", Type = "fill", X = 0.3, Y = 1.2, W = 3, Text = "Enjoy:", Value = "{offer}", LineUnderLabel = true },
+            new() { Id = "c", Type = "line", X = 0.3, Y = 2, W = 3, Thickness = 2, Color = "#aa0000" },
+            new() { Id = "d", Type = "box", X = 0.3, Y = 2.2, W = 1, H = 0.5 },
+            new() { Id = "e", Type = "image", X = 0.3, Y = 3, W = 1, H = 0.4, Image = "el-abc123" },
+            new() { Id = "f", Type = "qr", X = 2.9, Y = 2.2, W = 0.6 },
+            // Tidied on the way in: kept on the card, an unknown typeface and colour put back to safe ones, a repeated id replaced.
+            new() { Id = "a", Type = "text", X = 99, Y = -4, W = 50, Font = "comic", Size = 900, Color = "red;}</style>", Text = "</div><script>alert(1)</script>" }
+        ];
+        var custom = new CardDesignFields("plain", "centered", null, null, null, null, null, BackStyle: "custom", InkColor: "#123456", BackLayout: back);
+        Assert.Equal(HttpStatusCode.OK, await Put(custom));
+        var saved = await Get();
+        Assert.Equal("custom", saved.BackStyle);
+        Assert.Equal(7, saved.BackLayout!.Count);
+        var tidied = saved.BackLayout[6];
+        Assert.Equal((5.95, 0d, 6d, "sans", 60d, "ink"), (tidied.X, tidied.Y, tidied.W, tidied.Font, tidied.Size, tidied.Color));
+        Assert.NotEqual("a", tidied.Id);
+        Assert.Equal(7, saved.BackLayout.Select(e => e.Id).Distinct().Count());
+
+        // The mailed card is drawn from those items: each at its place (an eighth of an inch in, for the bleed), fields
+        // filled in for this card, every word escaped, an empty field's line left out, the picture and this card's QR code.
+        var card = await Create(owner, Card(rid, "Layout"));
+        var html = (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.BackHtml;
+        Assert.Contains("left:1.125in;top:0.625in;width:2in", html);
+        Assert.Contains("&lt;b&gt;", html);
+        Assert.Contains("&lt;/b&gt; &amp; friends\n1 Test St</div>", html);
+        Assert.Contains("Enjoy:", html);
+        Assert.Contains("Free &lt;Concrete&gt; Mixer", html);
+        Assert.Contains("border-top:2pt solid #aa0000", html);
+        Assert.Contains("#123456", html);
+        Assert.Contains(art.Url, html);
+        Assert.Contains("data:image/svg+xml;base64,", html);
+        Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", html);
+        Assert.DoesNotContain("<script", html);
+        Assert.DoesNotContain("red;}", html);
+        Assert.DoesNotContain("Authorized Signature:", html);
+        Assert.Contains("@font-face{font-family:'Montserrat'", html);
+
+        // The preview draws a layout that has not been saved, and refuses one that could not be.
+        var draft = custom with { BackLayout = [new() { Id = "z", Type = "text", X = 0.5, Y = 0.5, W = 2, Text = "Only a draft for {guest}" }] };
+        var preview = (await (await owner.PostAsJsonAsync($"/api/card-designs/{rid}/preview", draft)).Content.ReadFromJsonAsync<MailPreview>())!;
+        Assert.Contains("Only a draft for Pat Sample", preview.BackHtml);
+        Assert.Equal(7, (await Get()).BackLayout!.Count);
+
+        // A front laid out the same way, on its own colours.
+        var front = custom with { Front = "custom", BackgroundColor = "#101820", TextColor = "#fedcba", FrontLayout = [new() { Id = "h", Type = "text", X = 0.5, Y = 1.5, W = 5, Size = 28, Align = "center", Text = "Thank you, {guest}!" }] };
+        Assert.Equal(HttpStatusCode.OK, await Put(front));
+        var printed = (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.FrontHtml;
+        Assert.Contains("Thank you, Grid Layout!", printed);
+        Assert.Contains("background:#101820", printed);
+        Assert.Contains("color:#fedcba", printed);
+
+        // What cannot be printed is refused: a kind of item the site does not know, too many items, a side with nothing on it, a picture with none chosen.
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(custom with { BackLayout = [new() { Id = "x", Type = "video", W = 1 }] }));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(custom with { BackLayout = Enumerable.Range(0, CardElements.Max + 1).Select(i => new CardElement { Id = $"n{i}", Type = "line", W = 1 }).ToList() }));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(custom with { BackLayout = [] }));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(custom with { BackLayout = [new() { Id = "p", Type = "image", W = 1, H = 1, Image = "../secret" }] }));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(custom with { BackLayout = [new() { Id = "t", Type = "text", W = 1, Text = new string('x', 601) }] }));
+        Assert.Equal(HttpStatusCode.BadRequest, await Put(custom with { Front = "custom", FrontLayout = null }));
+
+        // A picture no item uses any more is removed, and stops being served.
+        var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync(art.Url)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, await Put(custom with { BackLayout = back.Where(e => e.Type != "image").ToList() }));
+        Assert.DoesNotContain((await Get()).Images, i => i.Kind == "el-abc123");
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync(art.Url)).StatusCode);
+
+        // The designer in the browser gets the same typeface files, and only those.
+        var font = await anonymous.GetAsync("/card-fonts/arimo-latin-400-normal.woff2");
+        Assert.Equal(HttpStatusCode.OK, font.StatusCode);
+        Assert.Equal("font/woff2", font.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("wOF2"u8.ToArray(), (await font.Content.ReadAsByteArrayAsync())[..4]);
+        Assert.Equal(HttpStatusCode.NotFound, (await anonymous.GetAsync("/card-fonts/appsettings.json")).StatusCode);
+
+        // Saving is in the audit log, without the words themselves.
+        var row = await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.Action == "CardDesignSaved").OrderByDescending(a => a.Id).First()));
+        Assert.Contains("backItems", row.Details ?? "");
+        Assert.DoesNotContain("alert(1)", row.Details ?? "");
+
+        Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
     }
 
     private static AddressCheck Read(string json, string street = "123 Main St", string city = "Joliet", string zip = "60431") =>
@@ -564,6 +777,28 @@ public class PostGridTests(ApiFactory factory)
         var declined = StripePayments.State(J("""{"error":{"message":"Your card was declined.","payment_intent":{"id":"pi_3","status":"requires_payment_method"}}}"""));
         Assert.Equal((PayStates.Failed, "pi_3", "Your card was declined."), (declined.Status, declined.Id, declined.Error));
         Assert.Equal(PayStates.Failed, StripePayments.State(J("""{"id":"pi_4","status":"requires_action"}""")).Status);
+
+        // A notification is believed only with a matching signature made within five minutes; either shape names its payment.
+        const string secret = "whsec_fake-secret-for-unit-tests";
+        const string body = "{\"type\":\"payment_intent.succeeded\",\"data\":{\"object\":{\"id\":\"pi_9\",\"object\":\"payment_intent\"}}}";
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        string Sign(string key, long t)
+        {
+            using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));
+            return Convert.ToHexString(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{t}.{body}"))).ToLowerInvariant();
+        }
+        var t0 = now.ToUnixTimeSeconds();
+        Assert.True(StripeWebhooks.Verify(body, $"t={t0},v1={Sign(secret, t0)}", secret, now));
+        Assert.True(StripeWebhooks.Verify(body, $"t={t0},v1={Sign("whsec_an-old-secret", t0)},v1={Sign(secret, t0)}", secret, now));
+        Assert.False(StripeWebhooks.Verify(body + " ", $"t={t0},v1={Sign(secret, t0)}", secret, now));
+        Assert.False(StripeWebhooks.Verify(body, $"t={t0},v1={Sign("whsec_someone-else", t0)}", secret, now));
+        Assert.False(StripeWebhooks.Verify(body, $"t={t0},v1={Sign(secret, t0)}", secret, now.AddMinutes(6)));
+        Assert.False(StripeWebhooks.Verify(body, $"t={t0},v0={Sign(secret, t0)}", secret, now));
+        Assert.False(StripeWebhooks.Verify(body, "", secret, now));
+        Assert.Equal("pi_9", StripeWebhooks.PaymentId(body));
+        Assert.Equal("pi_7", StripeWebhooks.PaymentId("{\"type\":\"v1.payment_intent.succeeded\",\"related_object\":{\"id\":\"pi_7\",\"type\":\"payment_intent\"}}"));
+        Assert.Null(StripeWebhooks.PaymentId("{\"type\":\"customer.created\",\"data\":{\"object\":{\"id\":\"cus_1\",\"object\":\"customer\"}}}"));
+        Assert.Null(StripeWebhooks.PaymentId("not json"));
 
         // The bank account fee is 0.08% unless the System Administrator changes it, and survives being saved.
         Assert.Equal(0.08m, new BillingSettings().BankFeePercent);

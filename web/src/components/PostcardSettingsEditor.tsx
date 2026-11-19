@@ -88,7 +88,7 @@ export default function PostcardSettingsEditor({ settings, onChange, dirty }: { 
 
       <h3 style={{ marginTop: '1rem' }}>Preview (real size)</h3>
       <div className="print-scroll" style={{ padding: '0.25rem' }}>
-        <PostcardFace card={sampleCard(settings)} settings={p} validityMonths={settings.couponValidityMonths} outline />
+        <PostcardFace card={sampleCard(settings)} settings={p} validityMonths={settings.couponValidityMonths} outline qr="sample" />
       </div>
       <p className="legend-note">
         {dirty ? 'Save the settings, then print a test card.' : <Link to="/print-test">Print a test card</Link>}

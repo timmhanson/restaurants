@@ -85,6 +85,8 @@ var postGrid = config.GetSection("PostGrid").Get<PostGridOptions>() ?? new PostG
 builder.Services.AddSingleton(postGrid);
 builder.Services.AddSingleton<PostGridAddressAccountStore>();
 builder.Services.AddSingleton<SiteMailing>();
+builder.Services.AddSingleton<CardCodes>();
+builder.Services.AddScoped<SiteAddress>();
 builder.Services.AddScoped<MailLedger>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddHostedService<BillingWorker>();
@@ -183,6 +185,44 @@ app.MapGet("/card-art/{groupId:int}/{file}", async (int groupId, string file, Ap
     CachePolicy.NoStore(http.Response.Headers);
     return Results.File(art.Data, art.ContentType);
 });
+// The typefaces cards are printed in, for the card designer in the browser (the printed card carries them inside
+// its own page). Only the handful of files built into the site are served.
+app.MapGet("/card-fonts/{file}", (string file, HttpContext http) =>
+{
+    var font = CardElements.FontFile(file);
+    if (font is null) return Results.NotFound();
+    CachePolicy.NoStore(http.Response.Headers);
+    return Results.File(font, "font/woff2");
+});
+// Stripe's notifications about payments (webhooks). Outside /api because Stripe is not a copy of the site and
+// sends no session id. Nothing in a notification is trusted until its signature has been checked, and even then
+// the site asks Stripe itself how the payment stands before a bill is marked paid.
+app.MapPost("/webhooks/stripe", async (HttpContext http, PaymentAccountStore account, BillingService billing, ILogger<StripePayments> log) =>
+{
+    CachePolicy.NoStore(http.Response.Headers);
+    if (account.WebhookSecret is not { } secret) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    if (http.Request.ContentLength is > 512_000) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    using var reader = new StreamReader(http.Request.Body, System.Text.Encoding.UTF8);
+    var body = await reader.ReadToEndAsync(http.RequestAborted);
+    if (body.Length > 512_000) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    if (!StripeWebhooks.Verify(body, http.Request.Headers["Stripe-Signature"].ToString(), secret, DateTimeOffset.UtcNow))
+    {
+        log.LogWarning("A Stripe notification was refused: its signature did not match or it was too old");
+        return Results.BadRequest(new { message = "The signature did not match." });
+    }
+    account.NoteNotification();
+    try
+    {
+        if (StripeWebhooks.PaymentId(body) is { } paymentId) await billing.PaymentNotifiedAsync(paymentId, http.RequestAborted);
+    }
+    catch (PaymentException ex)
+    {
+        // Stripe sends it again later; the hourly round also checks payments that are on their way.
+        log.LogWarning("A Stripe notification could not be acted on yet: {Message}", ex.Message);
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+    return Results.Ok(new { received = true });
+});
 // An unknown API address is "not found", never the web page (which would look like a successful answer).
 app.MapFallback("/api/{**path}", () => Results.NotFound(new { message = "Not found." }));
 // Serve the React app for any non-API route (client-side routing).
@@ -192,6 +232,7 @@ await DbSeeder.SeedAsync(app.Services);
 await app.Services.GetRequiredService<UspsAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<PostGridAddressAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<SiteMailing>().LoadAsync();
+await app.Services.GetRequiredService<CardCodes>().LoadAsync();
 await app.Services.GetRequiredService<PaymentAccountStore>().LoadAsync();
 app.Run();
 

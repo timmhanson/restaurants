@@ -20,6 +20,7 @@ import PeoplePage from './pages/PeoplePage'
 import BillingPage from './pages/BillingPage'
 import CardDesignPage from './pages/CardDesignPage'
 import MailCardsPage from './pages/MailCardsPage'
+import VerifyCardPage from './pages/VerifyCardPage'
 import SystemBillingPage from './pages/SystemBillingPage'
 import PrintCardsPage from './pages/PrintCardsPage'
 import PrintCenterPage from './pages/PrintCenterPage'
@@ -53,6 +54,41 @@ function Tracking({ signedIn }: { signedIn: boolean }) {
   return null
 }
 
+/** Where to go once signed in: the scanned card someone was sent to sign in for. Kept for this browser tab only. */
+export const RETURN_TO = 'gf.returnTo'
+
+/** A scanned card's address, opened by someone not signed in: remember it, sign in, then come straight back. */
+function SignInFirst() {
+  const location = useLocation()
+  try {
+    sessionStorage.setItem(RETURN_TO, location.pathname)
+  } catch {
+    // Without storage the person lands on their home page after signing in and can scan the card again.
+  }
+  return <Navigate to="/login" replace />
+}
+
+/**
+ * Home after signing in, unless a scanned card is waiting: then straight to that card. Only ever a card's own
+ * address on this site, so nothing else can be slipped in.
+ */
+function AfterSignIn({ home }: { home: string }) {
+  let back: string | null = null
+  try {
+    back = sessionStorage.getItem(RETURN_TO)
+  } catch {
+    back = null
+  }
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(RETURN_TO)
+    } catch {
+      // Nothing to clear.
+    }
+  }, [])
+  return <Navigate to={back && /^\/v\/[\w-]{1,64}$/.test(back) ? back : home} replace />
+}
+
 export default function App() {
   const { user, loading, mustChangePassword, has, isAdmin, isGroupWide, overseeing } = useAuth()
   if (loading) return <Spinner label="Starting…" />
@@ -62,6 +98,7 @@ export default function App() {
         <Tracking signedIn={false} />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/v/:code" element={<SignInFirst />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </>
@@ -91,10 +128,11 @@ export default function App() {
       <Route path="/print-cards" element={<Guard home={home} allow={inGroup && perm('MarkResponded')}><PrintCardsPage /></Guard>} />
       <Route path="/print-test" element={<Guard home={home} allow={inGroup && isGroupWide}><PrintTestPage /></Guard>} />
       <Route element={<Layout />}>
-        <Route index element={<Navigate to={home} replace />} />
-        <Route path="/login" element={<Navigate to={home} replace />} />
+        <Route index element={<AfterSignIn home={home} />} />
+        <Route path="/login" element={<AfterSignIn home={home} />} />
         <Route path="/enter" element={<Guard home={home} allow={inGroup}><EnterCardPage /></Guard>} />
         <Route path="/password" element={<ChangePasswordPage />} />
+        <Route path="/v/:code" element={<VerifyCardPage />} />
         <Route path="/print" element={<Guard home={home} allow={inGroup && perm('MarkResponded') && perm('ViewComments')}><PrintCenterPage /></Guard>} />
         <Route path="/mail-cards" element={<Guard home={home} allow={inGroup && perm('MarkResponded') && perm('ViewComments')}><MailCardsPage /></Guard>} />
         <Route path="/comments" element={<Guard home={home} allow={inGroup && perm('ViewComments')}><CommentsPage /></Guard>} />

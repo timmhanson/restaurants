@@ -139,8 +139,16 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("BackLayoutJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BackMessage")
                         .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BackStyle")
+                        .IsRequired()
+                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("BackgroundColor")
@@ -152,6 +160,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FrontLayoutJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("GroupId")
                         .HasColumnType("INTEGER");
 
@@ -159,9 +170,17 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("InkColor")
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Layout")
                         .IsRequired()
                         .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LegalText")
+                        .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Message")
@@ -180,6 +199,10 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<string>("UpdatedBy")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Website")
+                        .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -487,6 +510,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<string>("PrintedByName")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -552,6 +578,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.HasIndex("MailId");
 
                     b.HasIndex("PhoneNormalized");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique();
 
                     b.HasIndex("RestaurantId", "VisitDate");
 

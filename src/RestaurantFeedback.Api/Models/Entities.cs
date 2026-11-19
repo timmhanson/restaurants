@@ -203,6 +203,12 @@ public class GuestComment
     /// <summary>Bought with the provider's test key: a sample label that is not valid postage.</summary>
     public bool PostageTest { get; set; }
 
+    /// <summary>
+    /// The card's own random identifier, unique across every investment group. The QR code printed on the card
+    /// carries it (signed, see CardCodes), so a scanned card leads back to exactly this record.
+    /// </summary>
+    public Guid PublicId { get; set; } = Guid.NewGuid();
+
     // Printed and mailed for us by a mail house (PostGrid), instead of printed at the restaurant
     public string? MailProvider { get; set; }
     public string? MailId { get; set; }
@@ -369,6 +375,18 @@ public class CardDesign
     public string? Message { get; set; }
     /// <summary>A short personal line printed above the coupon on the back.</summary>
     public string? BackMessage { get; set; }
+    /// <summary>How the back is laid out: classic (the restaurant's own coupon card: logo, address, fill-in lines, legal text) or simple (a plain coupon box).</summary>
+    public string BackStyle { get; set; } = CardBacks.Classic;
+    /// <summary>The colour of the words and lines on a classic back. Empty prints the usual dark blue.</summary>
+    public string? InkColor { get; set; }
+    /// <summary>The web address printed under the restaurant's address and in the bottom corner of a classic back, such as culvers.com.</summary>
+    public string? Website { get; set; }
+    /// <summary>The small print on a classic back. Empty prints the standard wording.</summary>
+    public string? LegalText { get; set; }
+    /// <summary>For a back laid out in the card designer (BackStyle "custom"): its items as JSON (see CardElement).</summary>
+    public string? BackLayoutJson { get; set; }
+    /// <summary>For a front laid out in the card designer (Front "custom"): its items as JSON.</summary>
+    public string? FrontLayoutJson { get; set; }
     public string? BackgroundColor { get; set; }
     public string? TextColor { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -378,8 +396,19 @@ public class CardDesign
 
 public static class CardFronts
 {
-    public const string Plain = "plain", Designed = "designed", Picture = "picture";
-    public static readonly string[] All = [Plain, Designed, Picture];
+    /// <summary>custom is a front laid out item by item in the card designer.</summary>
+    public const string Plain = "plain", Designed = "designed", Picture = "picture", Custom = "custom";
+    public static readonly string[] All = [Plain, Designed, Picture, Custom];
+}
+
+public static class CardBacks
+{
+    /// <summary>custom is a back laid out item by item in the card designer; classic is the standard layout it starts from.</summary>
+    public const string Classic = "classic", Simple = "simple", Custom = "custom";
+    public static readonly string[] All = [Classic, Simple, Custom];
+    public const string DefaultInk = "#2b4a8b";
+    /// <summary>The standard small print, with its lines broken where the restaurants' printed cards break them.</summary>
+    public const string DefaultLegal = "Please present this card prior to ordering. One order\nper card. Cannot be exchanged for gift certificates\nor cash in whole or part and has no cash value. Not\nvalid with other promotion or discounts. Valid only\nwith authorized signature.";
 }
 
 public static class CardLayouts
@@ -394,7 +423,11 @@ public static class CardImageKinds
     public const string Picture = "picture";
     public const string Logo = "logo";
     public const string Photo = "photo";
-    public static readonly string[] All = [Picture, Logo, Photo];
+    /// <summary>The logo printed in the top corner of a classic back (usually in the ink colour, on white).</summary>
+    public const string BackLogo = "backlogo";
+    /// <summary>A small picture for the bottom corner of a classic back, such as a strip of social media icons.</summary>
+    public const string Footer = "footer";
+    public static readonly string[] All = [Picture, Logo, Photo, BackLogo, Footer];
 }
 
 /// <summary>A picture belonging to a card design. Kept in its own table so loading a design never loads the image.</summary>

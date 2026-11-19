@@ -56,6 +56,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         design.Property(d => d.BackMessage).HasMaxLength(200);
         design.Property(d => d.BackgroundColor).HasMaxLength(9);
         design.Property(d => d.TextColor).HasMaxLength(9);
+        design.Property(d => d.BackStyle).HasMaxLength(20);
+        design.Property(d => d.InkColor).HasMaxLength(9);
+        design.Property(d => d.Website).HasMaxLength(80);
+        design.Property(d => d.LegalText).HasMaxLength(500);
         var image = b.Entity<CardImage>();
         image.HasOne(i => i.Design).WithMany(d => d.Images).HasForeignKey(i => i.DesignId).OnDelete(DeleteBehavior.Cascade);
         image.HasIndex(i => new { i.GroupId, i.Hash });
@@ -63,6 +67,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         image.Property(i => i.ContentType).HasMaxLength(40);
         image.Property(i => i.Hash).HasMaxLength(40);
         b.Entity<GuestComment>().HasIndex(c => c.MailId);
+        b.Entity<GuestComment>().HasIndex(c => c.PublicId).IsUnique();
 
         var billing = b.Entity<GroupBilling>();
         billing.HasKey(g => g.GroupId);
