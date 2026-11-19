@@ -107,6 +107,25 @@ public class RestaurantsController(AppDbContext db, AuditService audit, CurrentU
     }
 
     /// <summary>Everyone in the group who could work at this restaurant, flagged by whether they are assigned to it.</summary>
+    /// <summary>
+    /// Sets the name that signs cards entered with this restaurant's shared team login. Its owners, the group's
+    /// administrators and the managers who work there may; a team login may not.
+    /// </summary>
+    [HttpPut("{id:int}/signature")]
+    public async Task<ActionResult<RestaurantDto>> SetSignature(int id, SignatureNameRequest req)
+    {
+        var me = await users.GetAsync();
+        var r = await db.Restaurants.FirstOrDefaultAsync(x => x.Id == id && x.GroupId == me.GroupId);
+        if (r is null || !me.CanAccessRestaurant(id)) return NotFound();
+        if (!(me.CanManageRestaurant(id) || me.Role == UserRole.Manager))
+            return StatusCode(403, new { message = "Only this restaurant's managers, its owners and the group's administrators can change the name that signs its cards." });
+        var before = r.SignatureName;
+        r.SignatureName = string.IsNullOrWhiteSpace(req.Name) ? null : req.Name.Trim();
+        await db.SaveChangesAsync();
+        await audit.LogAsync(me, "RestaurantSignatureChanged", "Restaurant", r.Id, new { r.Name, before, after = r.SignatureName }, r.Id);
+        return RestaurantDto.From(r);
+    }
+
     [HttpGet("{id:int}/staff")]
     [Authorize(Roles = "Owner,GroupAdmin,SuperAdmin")]
     public async Task<ActionResult<StaffResponse>> Staff(int id)

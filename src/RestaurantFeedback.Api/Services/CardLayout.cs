@@ -49,12 +49,20 @@ public class CardElement
 }
 
 /// <summary>
-/// The name on a mailed card's signature line: the one set for the restaurant (Restaurants &amp; staff), or, when the
-/// restaurant has none, whoever authorized that card.
+/// Who signs a coupon card. A manager, owner or group administrator who enters a card signs it with their own name
+/// unless they type another. A card entered with the shared team login takes the name its restaurant's owners and
+/// managers have set for that. The mailed card prints the name on the card, or the restaurant's name for cards
+/// that carry none (older cards).
 /// </summary>
 public static class CardSignature
 {
-    public static string For(GuestComment c, Restaurant r) => string.IsNullOrWhiteSpace(r.SignatureName) ? (c.AuthorizedBy ?? "").Trim() : r.SignatureName.Trim();
+    /// <summary>The name a new card gets when none is typed.</summary>
+    public static string? Default(UserRole role, string displayName, Restaurant? r) =>
+        role is UserRole.Manager or UserRole.Owner or UserRole.GroupAdmin && !string.IsNullOrWhiteSpace(displayName) ? displayName.Trim()
+        : string.IsNullOrWhiteSpace(r?.SignatureName) ? null : r.SignatureName.Trim();
+
+    /// <summary>The name printed on a mailed card's signature line.</summary>
+    public static string For(GuestComment c, Restaurant r) => !string.IsNullOrWhiteSpace(c.AuthorizedBy) ? c.AuthorizedBy.Trim() : (r.SignatureName ?? "").Trim();
 }
 
 /// <summary>What is filled in on each card, by the name used in braces in the designer.</summary>

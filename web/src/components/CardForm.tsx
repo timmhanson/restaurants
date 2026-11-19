@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client'
 import { COMMENT_SOURCES, PHONE_SOURCE, type CommentRequest, type CommentSummary, type DuplicateCheckResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import AddressCheckNote from './AddressCheckNote'
-import { Alert, Field, addMonths, fmtDate, today } from './ui'
+import { Alert, Field, Modal, addMonths, fmtDate, today } from './ui'
 
 export type CardFormValues = Omit<CommentRequest, 'force'>
 
@@ -83,6 +83,9 @@ export function DuplicateAlert({ check, showDetails, onDismiss }: { check: Dupli
   )
 }
 
+/** The team login's signature for a restaurant, as changed from this form since the page loaded. */
+const savedSigners = new Map<number, string>()
+
 interface Props {
   initial: CardFormValues
   editingId?: number
@@ -96,8 +99,18 @@ interface Props {
  * Runs /comments/check as the guest fields are filled in, and again on submit.
  */
 export default function CardForm({ initial, editingId, onSaved, onCancel, submitLabel }: Props) {
-  const { restaurants, settings, has, isTeamMember } = useAuth()
+  const { restaurants, settings, has, isTeamMember, user } = useAuth()
   const [v, setV] = useState<CardFormValues>(initial)
+  // Who signs a new card unless another name is typed: a manager, owner or administrator signs with their own
+  // name; a card entered with the shared team login takes the name set for its restaurant.
+  const signsOwn = user?.role === 'Manager' || user?.role === 'Owner' || user?.role === 'GroupAdmin'
+  const signerRestaurant = restaurants.find((r) => r.id === v.restaurantId)
+  const [, signerSaved] = useState(0)
+  const restaurantSigner = (signerRestaurant && savedSigners.has(signerRestaurant.id) ? savedSigners.get(signerRestaurant.id) : signerRestaurant?.signatureName) ?? ''
+  const defaultSigner = signsOwn ? user?.displayName ?? '' : restaurantSigner
+  const signerTyped = useRef(false)
+  const [changingSigner, setChangingSigner] = useState<string | null>(null)
+  const [signerBusy, setSignerBusy] = useState(false)
   const [check, setCheck] = useState<DuplicateCheckResult | null>(null)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,6 +125,29 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   const canSeeDetails = has('ViewComments')
 
   useEffect(() => setV(initial), [initial])
+  // A new card starts with its signer filled in, and follows the restaurant chosen until someone types a name.
+  useEffect(() => { signerTyped.current = false }, [initial])
+  useEffect(() => {
+    if (editingId || signerTyped.current) return
+    setV((s) => (s.authorizedBy === defaultSigner ? s : { ...s, authorizedBy: defaultSigner }))
+  }, [editingId, defaultSigner, initial])
+
+  const saveSigner = async () => {
+    if (!signerRestaurant || changingSigner === null) return
+    setSignerBusy(true)
+    setError(null)
+    try {
+      const saved = await api.put<{ signatureName?: string | null }>(`/restaurants/${signerRestaurant.id}/signature`, { name: changingSigner.trim() })
+      // Kept here rather than reloading the restaurants, which would clear a card that is half filled in.
+      savedSigners.set(signerRestaurant.id, saved.signatureName ?? '')
+      signerSaved((n) => n + 1)
+      setChangingSigner(null)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSignerBusy(false)
+    }
+  }
 
   const set = <K extends keyof CardFormValues>(k: K, val: CardFormValues[K]) => {
     setV((s) => ({ ...s, [k]: val }))
@@ -260,9 +296,37 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
               <input value={expires ? fmtDate(expires) : ''} readOnly tabIndex={-1} />
             </Field>
           </div>
-          <Field label="Authorized signature (who signed the card)">
-            <input value={v.authorizedBy ?? ''} onChange={(e) => set('authorizedBy', e.target.value)} placeholder="Manager name" />
+          <Field
+            label="Authorized signature (who signed the card)"
+            hint={editingId ? undefined : isTeamMember
+              ? restaurantSigner ? 'Filled in with the name your manager chose. Change it only if someone else signed this card.' : 'Type the name of the manager who authorized this card.'
+              : signsOwn ? 'Filled in with your name. Change it if someone else signed this card.' : undefined}
+          >
+            <input value={v.authorizedBy ?? ''} maxLength={100} onChange={(e) => { signerTyped.current = true; set('authorizedBy', e.target.value) }} placeholder="Manager name" />
           </Field>
+          {!editingId && !isTeamMember && signerRestaurant && (
+            <p className="muted small" style={{ margin: '0.35rem 0 0.6rem' }}>
+              {restaurantSigner
+                ? <>Cards entered with the team login at {signerRestaurant.name} are signed “{restaurantSigner}”. </>
+                : <>Cards entered with the team login at {signerRestaurant.name} have no name to sign with yet. </>}
+              <button type="button" className="btn btn-sm" onClick={() => setChangingSigner(restaurantSigner)}>{restaurantSigner ? 'Change the team login’s signature' : 'Choose the team login’s signature'}</button>
+            </p>
+          )}
+          {changingSigner !== null && signerRestaurant && (
+            <Modal title={`Signature for the team login at ${signerRestaurant.name}`} onClose={() => setChangingSigner(null)}>
+              <div className="grid">
+                <Field label="Name that signs the card" hint="Used when the shared team login enters a card, unless another name is typed on that card. Managers, owners and administrators sign with their own name. Leave empty for no name.">
+                  <input value={changingSigner} maxLength={60} autoFocus placeholder="For example: Michael Smith"
+                    onChange={(e) => setChangingSigner(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void saveSigner() } }} />
+                </Field>
+                <div className="actions">
+                  <button type="button" className="btn" onClick={() => setChangingSigner(null)} disabled={signerBusy}>Cancel</button>
+                  <button type="button" className="btn btn-primary" onClick={() => void saveSigner()} disabled={signerBusy}>{signerBusy ? 'Saving…' : 'Save the signature'}</button>
+                </div>
+              </div>
+            </Modal>
+          )}
           <div className="postcard-legal">
             Please present this card prior to ordering. One order per card. Cannot be exchanged for gift certificates or cash in whole or part and has no
             cash value. Not valid with other promotion or discounts. Valid only with authorized signature.

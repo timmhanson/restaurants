@@ -231,6 +231,10 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
 
         var c = new GuestComment { RestaurantId = req.RestaurantId, CreatedByUserId = me.Id, CreatedByName = me.DisplayName };
         Apply(c, req, settings);
+        // A card with no name on its signature line is signed by the manager, owner or administrator who entered it,
+        // or, when the shared team login entered it, by the name set for its restaurant.
+        if (string.IsNullOrWhiteSpace(c.AuthorizedBy))
+            c.AuthorizedBy = CardSignature.Default(me.Role, me.DisplayName, await db.Restaurants.AsNoTracking().FirstOrDefaultAsync(r => r.Id == req.RestaurantId, ct));
         var verdict = await CheckAddress(c, null, ct);
         db.Comments.Add(c);
         await db.SaveChangesAsync();

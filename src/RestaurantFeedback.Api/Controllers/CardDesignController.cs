@@ -189,7 +189,7 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         Fill(draft, req);
         var look = designs.Look(new CardDesigns.Loaded(draft, pictures), t.GroupId, settings.AccentColor);
         var restaurant = await SampleRestaurant(t, ct);
-        var sample = SampleCard(settings);
+        var sample = SampleCard(settings, restaurant);
         return new MailPreview(PostGridCardDesign.Front(look, sample, restaurant, settings.CouponValidityMonths),
             PostGridCardDesign.Back(sample, restaurant, settings.CouponValidityMonths, settings.AccentColor, look,
                 SampleQr));
@@ -205,13 +205,15 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         t.Restaurant ?? await db.Restaurants.AsNoTracking().Where(r => r.GroupId == t.GroupId && r.IsActive).OrderBy(r => r.Name).FirstOrDefaultAsync(ct)
         ?? new Restaurant { Name = "Your restaurant" };
 
-    private static GuestComment SampleCard(GroupSettings settings)
+    private static GuestComment SampleCard(GroupSettings settings, Restaurant? restaurant = null)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return new GuestComment
         {
             GuestFirstName = "Pat", GuestLastName = "Sample", CouponOffer = settings.CouponOffers.FirstOrDefault() ?? "Free Value Basket", DateIssued = today,
-            ExpiresOn = today.AddMonths(settings.CouponValidityMonths), AuthorizedBy = "A. Manager"
+            ExpiresOn = today.AddMonths(settings.CouponValidityMonths),
+            // The sample is signed as a card entered with the team login would be, when the restaurant has a name set for that.
+            AuthorizedBy = string.IsNullOrWhiteSpace(restaurant?.SignatureName) ? "A. Manager" : restaurant.SignatureName.Trim()
         };
     }
 
@@ -305,7 +307,8 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
     private async Task<List<CardMergeField>> MergeFields(Target t, GroupSettings settings, CardDesign? d, CancellationToken ct)
     {
         var look = CardLook.Plain(settings.AccentColor) with { Website = d?.Website, LegalText = d?.LegalText, BackMessage = d?.BackMessage };
-        var merge = CardMerge.For(SampleCard(settings), await SampleRestaurant(t, ct), settings.CouponValidityMonths, look);
+        var sampleRestaurant = await SampleRestaurant(t, ct);
+        var merge = CardMerge.For(SampleCard(settings, sampleRestaurant), sampleRestaurant, settings.CouponValidityMonths, look);
         return CardMerge.Fields.Select(f => new CardMergeField(f.Key, f.Label, merge.Values.GetValueOrDefault(f.Key, ""))).ToList();
     }
 }

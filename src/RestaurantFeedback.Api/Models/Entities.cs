@@ -89,8 +89,8 @@ public class Restaurant
     public string? Zip { get; set; }
     public string? Phone { get; set; }
     /// <summary>
-    /// The name printed on the Authorized Signature line of cards mailed for this restaurant (its manager or owner).
-    /// Empty prints the name of whoever authorized each card.
+    /// The name that signs cards entered with this restaurant's shared team login (its manager or owner, usually).
+    /// Managers, owners and administrators sign the cards they enter with their own name instead. See CardSignature.
     /// </summary>
     public string? SignatureName { get; set; }
     public bool IsActive { get; set; } = true;

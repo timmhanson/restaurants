@@ -723,42 +723,88 @@ public class PostGridTests(ApiFactory factory)
     }
 
     [Fact]
-    public async Task A_restaurant_can_have_its_own_name_on_the_signature_line_printed_in_a_signature_hand()
+    public async Task A_card_is_signed_by_the_manager_who_enters_it_or_by_the_name_set_for_the_team_login()
     {
         var (owner, _, _, rid, _) = await SetUpAsync();
         var r = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid);
+        var ownerName = (await owner.GetFromJsonAsync<UserDto>("/api/auth/me"))!.DisplayName;
+        async Task<string> Back(int id) => (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{id}/mail/preview"))!.BackHtml;
+        CommentRequest Unsigned(string last) { var c = Card(rid, last); c.AuthorizedBy = null; return c; }
+
+        // A manager and the shared team login for the restaurant, and a manager who works somewhere else.
+        var n = Interlocked.Increment(ref _n);
+        var other = (await (await owner.PostAsJsonAsync("/api/restaurants", new RestaurantRequest { Name = $"Elsewhere {n}" })).Content.ReadFromJsonAsync<RestaurantDto>())!;
+        foreach (var u in new[]
+                 {
+                     new UserRequest { Username = $"sig-mgr-{n}", DisplayName = "Morgan Manager", Password = "Manager!123", Role = "Manager", Permissions = ["ViewComments"], RestaurantIds = [rid] },
+                     new UserRequest { Username = $"sig-away-{n}", DisplayName = "Avery Away", Password = "Manager!123", Role = "Manager", RestaurantIds = [other.Id] },
+                     new UserRequest { Username = $"sig-team-{n}", DisplayName = "Front Counter", Password = "TeamPass!123", Role = "TeamMember", RestaurantIds = [rid] }
+                 })
+            Assert.Equal(HttpStatusCode.Created, (await owner.PostAsJsonAsync("/api/users", u)).StatusCode);
+        await Db(async db =>
+        {
+            foreach (var u in db.Users.Where(u => u.Username.StartsWith("sig-") && u.Username.EndsWith($"-{n}"))) u.MustChangePassword = false;
+            return await db.SaveChangesAsync();
+        });
+        var manager = await factory.LoginAsync($"sig-mgr-{n}", "Manager!123");
+        var away = await factory.LoginAsync($"sig-away-{n}", "Manager!123");
+        var team = await factory.LoginAsync($"sig-team-{n}", "TeamPass!123");
+
+        // With no name typed: a manager's or owner's card is signed with their own name, and it prints in the signature hand.
+        var byManager = await Create(manager, Unsigned("ByManager"));
+        Assert.Equal("Morgan Manager", byManager.AuthorizedBy);
+        var byOwner = await Create(owner, Unsigned("ByOwner"));
+        Assert.Equal(ownerName, byOwner.AuthorizedBy);
+        var printed = await Back(byManager.Id);
+        Assert.Contains("Morgan Manager", printed);
+        Assert.Contains("@font-face{font-family:'Great Vibes'", printed);
+        Assert.Contains("font-family:'Great Vibes'", printed[printed.IndexOf("Authorized Signature:", StringComparison.Ordinal)..]);
+
+        // The team login is shared, so its cards are not signed with its name. Until a name is set for the restaurant they carry none.
+        var unsigned = await Create(team, Unsigned("NoNameYet"));
+        Assert.True(string.IsNullOrEmpty(unsigned.AuthorizedBy));
+
+        // A manager who works at the restaurant sets that name; a team login, or a manager from another restaurant, cannot.
+        Assert.Equal(HttpStatusCode.Forbidden, (await team.PutAsJsonAsync($"/api/restaurants/{rid}/signature", new SignatureNameRequest("Team Try"))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await away.PutAsJsonAsync($"/api/restaurants/{rid}/signature", new SignatureNameRequest("Away Try"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await manager.PutAsJsonAsync($"/api/restaurants/{rid}/signature", new SignatureNameRequest(new string('x', 61)))).StatusCode);
+        var set = (await (await manager.PutAsJsonAsync($"/api/restaurants/{rid}/signature", new SignatureNameRequest("  Michael <Smith>  "))).Content.ReadFromJsonAsync<RestaurantDto>())!;
+        Assert.Equal("Michael <Smith>", set.SignatureName);
+        // Everyone who enters cards there is told the name, so the card form can show it.
+        Assert.Equal("Michael <Smith>", (await team.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid).SignatureName);
+
+        // From then on the team login's cards are signed with it, unless another name is typed on the card.
+        var byTeam = await Create(team, Unsigned("ByTeam"));
+        Assert.Equal("Michael <Smith>", byTeam.AuthorizedBy);
+        Assert.Contains("Michael &lt;Smith&gt;", await Back(byTeam.Id));
+        var typed = await Create(team, Card(rid, "Typed"));
+        Assert.Equal("M. Smith", typed.AuthorizedBy);
+        Assert.Contains("M. Smith", await Back(typed.Id));
+        // A manager's own cards still carry the manager's name, and a card that had none prints the restaurant's.
+        Assert.Equal("Morgan Manager", (await Create(manager, Unsigned("StillManager"))).AuthorizedBy);
+        Assert.Contains("Michael &lt;Smith&gt;", await Back(unsigned.Id));
+        // The card designer's sample is signed the same way, and so is the simple back.
+        Assert.Equal("Michael <Smith>", (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!.MergeFields.Single(f => f.Key == "authorizedBy").Sample);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", new CardDesignFields("plain", "centered", null, null, null, null, null, BackStyle: "simple"))).StatusCode);
+        Assert.Contains("Michael &lt;Smith&gt;", await Back(byTeam.Id));
+        Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
+
+        // An owner can set it from the restaurant's own form too, and clear it. Both ways are in the audit log.
         RestaurantRequest With(string? signature) => new()
         {
             Name = r.Name, StreetAddress = r.StreetAddress, City = r.City, State = r.State, Zip = r.Zip, Phone = r.Phone, SignatureName = signature
         };
-        var card = await Create(owner, Card(rid, "Signed"));
-        async Task<string> Back() => (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.BackHtml;
-
-        // With no name set for the restaurant, the line carries whoever authorized the card, in the signature hand.
-        var before = await Back();
-        Assert.Contains("M. Smith", before);
-        Assert.Contains("@font-face{font-family:'Great Vibes'", before);
-        Assert.Contains("font-family:'Great Vibes'", before[before.IndexOf("Authorized Signature:", StringComparison.Ordinal)..]);
-
-        // The restaurant's own name replaces it on every card mailed for that restaurant, and is escaped like any other word.
-        var saved = (await (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With("  Michael <Smith>  "))).Content.ReadFromJsonAsync<RestaurantDto>())!;
-        Assert.Equal("Michael <Smith>", saved.SignatureName);
-        Assert.Equal("Michael <Smith>", (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid).SignatureName);
-        var signed = await Back();
-        Assert.Contains("Michael &lt;Smith&gt;", signed);
-        Assert.DoesNotContain("M. Smith", signed);
-        // The card designer's sample shows it too, and so does the simple back.
-        Assert.Equal("Michael <Smith>", (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!.MergeFields.Single(f => f.Key == "authorizedBy").Sample);
-        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", new CardDesignFields("plain", "centered", null, null, null, null, null, BackStyle: "simple"))).StatusCode);
-        Assert.Contains("Michael &lt;Smith&gt;", await Back());
-        Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
-
-        // Too long a name is refused; clearing it goes back to whoever authorized each card. The change is in the audit log.
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(new string('x', 61)))).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(" "))).StatusCode);
-        Assert.Contains("M. Smith", await Back());
-        var rows = await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.Action == "RestaurantUpdated" && a.RestaurantId == rid).OrderByDescending(a => a.Id).Take(3).Select(a => a.Details ?? "").ToList()));
-        Assert.Contains(rows, d => d.Contains("signatureName") && d.Contains("Michael"));
+        Assert.Equal("Pat Owner", (await (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With("Pat Owner"))).Content.ReadFromJsonAsync<RestaurantDto>())!.SignatureName);
+        Assert.Null((await (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(" "))).Content.ReadFromJsonAsync<RestaurantDto>())!.SignatureName);
+        Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "RestaurantSignatureChanged" && a.RestaurantId == rid && a.Details!.Contains("Michael")))));
+        Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "RestaurantUpdated" && a.RestaurantId == rid && a.Details!.Contains("Pat Owner")))));
+        // Other tests expect the owner to have a single restaurant, so the one made for the manager from elsewhere is taken away again.
+        await Db(async db =>
+        {
+            db.Restaurants.Remove((await db.Restaurants.FindAsync(other.Id))!);
+            return await db.SaveChangesAsync();
+        });
 
         // In the designer, what is filled in on a line can have its own typeface and size; anything unknown is put back to the label's.
         List<CardElement> layout =
@@ -772,7 +818,7 @@ public class PostGridTests(ApiFactory factory)
         Assert.Equal(("script", 18d), (kept[0].ValueFont, kept[0].ValueSize));
         Assert.Equal((null, 60d), (kept[1].ValueFont, kept[1].ValueSize));
         Assert.Equal((null, 0d), (kept[2].ValueFont, kept[2].ValueSize));
-        Assert.Contains("font-family:'Great Vibes','Snell Roundhand', 'Brush Script MT', cursive;font-size:18pt", await Back());
+        Assert.Contains("font-family:'Great Vibes','Snell Roundhand', 'Brush Script MT', cursive;font-size:18pt", await Back(byTeam.Id));
         Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
     }
 

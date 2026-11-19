@@ -196,9 +196,13 @@ restaurants' printed card, and is drawn by the same code (`CardElements.Render`)
   beside them): Arimo, Montserrat, Roboto Condensed and Great Vibes (a flowing signature hand). What is filled in
   on a fill-in line can have a typeface and size of its own, which is how the classic card prints the Authorized
   Signature in the signature hand.
-- **The name on the signature line** is set per restaurant (Restaurants & staff, "Signature on mailed cards",
-  `Restaurant.SignatureName`), for example its manager. A restaurant with none prints whoever authorized each
-  card (`CardSignature.For`). The printed card carries the ones it uses inside its own
+- **Who signs a card** (`CardSignature`). A manager, owner or group administrator who enters a card signs it with
+  their own name: the "Authorized signature" box on Enter card starts with it and can be changed. The team login
+  is shared by the crew, so its cards take the name set for the restaurant (`Restaurant.SignatureName`). Owners
+  and administrators set that on Restaurants & staff; the restaurant's managers set it from Enter card
+  (`PUT /api/restaurants/{id}/signature`, audited as `RestaurantSignatureChanged`); a team login cannot. A card
+  saved with no name gets the same default on the server. The mailed card prints the name on the card, or the
+  restaurant's name for older cards that carry none. The printed card carries the ones it uses inside its own
   page, so the print matches the preview and the mail house downloads nothing; the designer loads the same files
   from `/card-fonts/…`.
 - Everything from the designer is checked on the server (`CardElements.Clean`): at most 40 items, known kinds

@@ -55,7 +55,7 @@ export interface RestaurantDto {
   state?: string | null
   zip?: string | null
   phone?: string | null
-  /** The name printed on the signature line of cards mailed for this restaurant. Empty prints whoever authorized each card. */
+  /** The name that signs cards entered with this restaurant's shared team login. Managers, owners and administrators sign with their own. */
   signatureName?: string | null
   isActive: boolean
   /** Filled in on the admin listing (GET /restaurants?all=true) only. */

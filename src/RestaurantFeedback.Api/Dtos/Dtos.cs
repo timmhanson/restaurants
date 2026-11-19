@@ -86,7 +86,7 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
     /// <summary>An owner may mark this restaurant as theirs (no owner yet, and no investment group administrator to decide).</summary>
     public bool? CanClaim { get; init; }
 
-    /// <summary>The name printed on the signature line of cards mailed for this restaurant. Empty prints whoever authorized each card.</summary>
+    /// <summary>The name that signs cards entered with this restaurant's shared team login.</summary>
     public string? SignatureName { get; init; }
 
     public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive) { SignatureName = r.SignatureName };
@@ -101,6 +101,7 @@ public record StaffResponse(RestaurantDto Restaurant, bool CanManage, List<Staff
     public bool OwnerRequired { get; init; } = true;
 }
 public record StaffRequest(int[] UserIds);
+public record SignatureNameRequest([MaxLength(60)] string? Name);
 public record OwnershipRequest(bool Owned);
 
 public class RestaurantRequest

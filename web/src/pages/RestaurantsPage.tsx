@@ -443,7 +443,7 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
             </select>
           </Field>
         </div>
-        <Field label="Signature on mailed cards" hint="The name printed on the Authorized Signature line of cards mailed for this restaurant, such as its manager or owner. Leave empty to print the name of whoever authorized each card.">
+        <Field label="Signature when the team login enters a card" hint="Managers, owners and administrators sign the cards they enter with their own name. Cards entered with this restaurant’s shared team login are signed with this name, such as its manager’s. Its managers can change it from Enter card.">
           <input value={v.signatureName ?? ''} maxLength={60} onChange={(e) => set('signatureName', e.target.value)} placeholder="For example: Michael Smith" />
         </Field>
         <div className="actions">
