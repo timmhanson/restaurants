@@ -36,6 +36,8 @@ public static class DbSeeder
         var settings = scope.ServiceProvider.GetRequiredService<IGroupSettingsStore>();
 
         await db.Database.MigrateAsync();
+        // Indexes left out of step by two copies of the site writing at once are rebuilt before anything reads them.
+        await DatabaseCare.RunAsync(db, scope.ServiceProvider.GetRequiredService<DatabaseHealth>(), log);
 
         // Super admin: always ensured, so a fresh deployment can be administered.
         if (!string.IsNullOrWhiteSpace(seed.SuperAdminUsername) && !string.IsNullOrWhiteSpace(seed.SuperAdminPassword))

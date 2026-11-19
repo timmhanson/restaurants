@@ -12,6 +12,7 @@ permissions:
 
 env:
   AZURE_WEBAPP_NAME: restaurant-feedback-45200
+  AZURE_RESOURCE_GROUP: rg-restaurant-feedback
   DOTNET_VERSION: 10.0.x
   NODE_VERSION: 22
 
@@ -53,8 +54,32 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # The site is stopped while its files are replaced. Replacing them under a running copy left it half-loaded
+      # and answering with errors (2026-11-19), and two copies writing the SQLite file at once can damage it.
+      - name: Stop the site
+        id: stop
+        run: |
+          az webapp stop --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
+          sleep 20
+
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           package: publish
+
+      # Always started again, even if the deploy step failed, so a failed deploy never leaves the site off.
+      - name: Start the site
+        if: always() && steps.stop.conclusion != 'skipped'
+        run: az webapp start --name "$AZURE_WEBAPP_NAME" --resource-group "$AZURE_RESOURCE_GROUP"
+
+      - name: Check the site answers
+        run: |
+          for i in $(seq 1 36); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$AZURE_WEBAPP_NAME.azurewebsites.net/api/health" || true)
+            echo "attempt $i: $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "The site did not answer as healthy within six minutes of the deploy."
+          exit 1

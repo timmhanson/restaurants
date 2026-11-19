@@ -19,7 +19,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
-    IAddressVerifier addressVerifier, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
+    IAddressVerifier addressVerifier, DatabaseHealth databaseHealth, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
     MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments, PaymentOptions paymentOptions) : ControllerBase
 {
     private const string SignIn = "Login";
@@ -82,6 +82,8 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
                 attention.Add(new("info", $"{g.Name} has used {BillingService.Dollars(usedThisMonth[g.Id])} of its {BillingService.Dollars(limit)} mailing limit this month",
                     "Once it reaches the limit it cannot mail more cards until next month, unless you raise the limit on Billing.", "/system-billing"));
         }
+        if (databaseHealth.Problem is { } damage)
+            attention.Add(new("high", "The database reports damage", $"The check at the last start found: {damage}. Restore the latest backup or have the database repaired before more is written to it.", "/system"));
         if (errors24h > 0)
             attention.Add(new("high", $"{errors24h} server error{(errors24h == 1 ? "" : "s")} in the last 24 hours", "Something failed for someone. System status lists what and when.", "/system"));
         var failed24h = signIns.Where(s => s.Action == SignInFailed && s.At >= dayAgo).ToList();

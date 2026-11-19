@@ -376,6 +376,16 @@ Tests: `dotnet test` (unit tests for guest matching plus end-to-end API tests on
   OpenID Connect (no stored passwords) as the `gh-restaurants-deploy` app registration, which trusts only
   this repo's `main` branch and holds Website Contributor on the web app alone. Repository secrets:
   `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+- **The site is stopped while its files are replaced** (both the workflow and `deploy.sh`): stop, deploy, start,
+  then wait for `/api/health` to answer, failing the run if it does not within six minutes. The start step runs
+  even when the deploy step fails, so the site is never left off. Replacing the files under a running copy once
+  left it half-loaded and answering every request with an error although the run was green (2026-11-19). Expect
+  about a minute of downtime per deploy.
+- **The database is checked at every start** (`Data/DatabaseCare.cs`, after migrations): SQLite's own integrity
+  check runs, and if the only damage is an index out of step with its table, the indexes are rebuilt (an index is
+  made from its table, so nothing is lost) and an audit row `DatabaseIndexesRebuilt` records what was found. Two
+  copies of the site writing the file at once can cause that, because it lives on a network share. Damage to the
+  tables themselves is never touched: it is logged and shown at the top of the System Administrator's Overview.
 
 Configuration keys (App Service settings use `__` as the separator): `ConnectionStrings__Default`,
 `Jwt__Key`, `Storage__AccountUrl` (managed identity) or `Storage__ConnectionString`,

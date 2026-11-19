@@ -85,6 +85,7 @@ var postGrid = config.GetSection("PostGrid").Get<PostGridOptions>() ?? new PostG
 builder.Services.AddSingleton(postGrid);
 builder.Services.AddSingleton<PostGridAddressAccountStore>();
 builder.Services.AddSingleton<SiteMailing>();
+builder.Services.AddSingleton<DatabaseHealth>();
 builder.Services.AddSingleton<CardCodes>();
 builder.Services.AddScoped<SiteAddress>();
 builder.Services.AddScoped<MailLedger>();
