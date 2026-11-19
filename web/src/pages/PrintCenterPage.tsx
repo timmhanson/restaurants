@@ -195,7 +195,7 @@ export default function PrintCenterPage() {
               <span className="source-label">Mailed for you</span>
               <span className="source-hint">
                 {config?.canMail
-                  ? `Both sides are printed and each card is mailed for you${config.mailTest ? ' (test mode: nothing is mailed or charged)' : `, $${(config.mailCentsPerCard / 100).toFixed(2)} a card on your group’s monthly bill`}. Nothing to print here. You confirm on the next screen.`
+                  ? `Both sides are printed and each card is mailed for you${config.mailTest ? ' (test mode: nothing is mailed or charged)' : `, $${(config.mailCentsPerCard / 100).toFixed(2)} a card on your group’s monthly bill`}. Nothing to print here. You confirm on the next screen.${config.mailOnCredit && !config.mailTest ? ` Paid from your group’s credit: $${(config.mailCreditCents / 100).toFixed(2)} is left, enough for ${Math.floor(config.mailCreditCents / config.mailCentsPerCard)} card${Math.floor(config.mailCreditCents / config.mailCentsPerCard) === 1 ? '' : 's'}.` : ''}`
                   : !config
                     ? 'Checking whether this can be used…'
                     : config.mailBlockedBy === 'site'
@@ -206,7 +206,7 @@ export default function PrintCenterPage() {
                           ? 'Switched off for your investment group at the moment (its monthly limit is $0). Ask the people who run this site.'
                           : config.mailBlockedBy === 'payment' || config.mailNeedsPayMethod
                             ? isGroupWide
-                              ? 'Switched on for your group. Save a payment method on Billing to start using it. Until then, print the cards here.'
+                              ? `Switched on for your group. ${config.mailCreditCents > 0 ? `Your credit ($${(config.mailCreditCents / 100).toFixed(2)}) does not cover a card, so save` : 'Save'} a payment method on Billing to ${config.mailCreditCents > 0 ? 'keep' : 'start'} using it. Until then, print the cards here.`
                               : 'Switched on for your group, but your Investment Group Administrator needs to save a payment method on Billing first.'
                             : 'You need the "buy postage" permission to use this. Ask an owner or administrator.'}
               </span>

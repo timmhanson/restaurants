@@ -85,7 +85,13 @@ export default function BillingPage() {
       {notice && <Alert kind={notice.ok ? 'success' : 'warn'} onClose={() => setNotice(null)}>{notice.message}</Alert>}
       {!d.mailAvailable && <Alert kind="info">Having cards mailed for you is not switched on for this investment group at the moment. You can still print your own.</Alert>}
       {d.mailAvailable && d.test && <Alert kind="info">Mailing is in test mode: nothing is printed, mailed or billed yet.</Alert>}
-      {d.mailAvailable && d.payRequired && !d.method && d.canManage && (
+      {d.mailAvailable && d.payRequired && !d.method && d.canManage && d.creditCents > 0 && (
+        <Alert kind="info">
+          You have {money(d.creditCents)} of credit, so cards can be mailed for you now and are paid from it. Save a payment method below to keep mailing once the
+          credit is used.
+        </Alert>
+      )}
+      {d.mailAvailable && d.payRequired && !d.method && d.canManage && d.creditCents <= 0 && (
         <Alert kind="warn">
           {d.payAvailable
             ? 'Save a payment method below before cards can be mailed for you. Until then, print the cards from Print cards.'

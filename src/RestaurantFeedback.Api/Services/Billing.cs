@@ -79,6 +79,20 @@ public record GroupTerms(int CostCents, int FeeCents, int LimitCents, bool HasPa
     public int PriceCents => CostCents + FeeCents;
     /// <summary>The System Administrator has switched mailing on for this group.</summary>
     public bool Enabled { get; init; }
+    /// <summary>
+    /// The group's credit that is free to spend on more cards: what it has, less the cards already mailed that are
+    /// not on a bill yet (the credit will be used on those when their bill is made).
+    /// </summary>
+    public int CreditCents { get; init; }
+    /// <summary>
+    /// A payment method is required and the group has none, so it mails on its credit: only as many cards as the
+    /// credit covers.
+    /// </summary>
+    public bool OnCredit => PayRequired && !HasPayMethod;
+    /// <summary>The group cannot mail until it saves a payment method: one is required, it has none, and its credit does not cover even one card.</summary>
+    public bool NeedsPayMethod => OnCredit && CreditCents < PriceCents;
+    /// <summary>How many cards the credit covers, when the group mails on its credit.</summary>
+    public int CardsOnCredit => PriceCents > 0 ? CreditCents / PriceCents : 0;
 }
 
 public record InvoiceLine(int RestaurantId, string Restaurant, int Cards, int Cents);
@@ -115,7 +129,26 @@ public class MailLedger(AppDbContext db, SiteMailing site)
     {
         var s = site.Billing;
         var b = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
-        return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, b?.RequirePayMethod ?? s.RequirePaymentMethod) { Enabled = b?.MailEnabled ?? false };
+        return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, b?.RequirePayMethod ?? s.RequirePaymentMethod)
+        {
+            Enabled = b?.MailEnabled ?? false, CreditCents = await SpendableCreditAsync(groupId, ct)
+        };
+    }
+
+    /// <summary>
+    /// A group's credit that is not already spoken for. Credit comes off a bill when the bill is made, at the end of
+    /// the month; until then the cards mailed since the last bill are counted against it here, so the same credit
+    /// cannot be spent twice.
+    /// </summary>
+    public async Task<int> SpendableCreditAsync(int groupId, CancellationToken ct = default)
+    {
+        var balance = await db.GroupCredits.Where(c => c.GroupId == groupId).SumAsync(c => (int?)c.AmountCents, ct) ?? 0;
+        if (balance <= 0) return 0;
+        var billedMonths = await db.MailInvoices.AsNoTracking().Where(i => i.GroupId == groupId).Select(i => i.Month).ToListAsync(ct);
+        var cards = await Billed().Where(c => c.Restaurant.GroupId == groupId)
+            .Select(c => new { At = c.MailedAt!.Value, Cents = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0) }).ToListAsync(ct);
+        var notBilledYet = cards.Where(c => !billedMonths.Contains(MonthKey(c.At))).Sum(c => c.Cents);
+        return Math.Max(0, balance - notBilledYet);
     }
 
     /// <summary>

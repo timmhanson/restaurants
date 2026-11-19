@@ -375,6 +375,13 @@ public record PrintConfig(bool PostageAvailable, string PostageProvider, bool Ca
     /// "payment" (the group must save a payment method first) or "permission" (this person may not spend money).
     /// </summary>
     public string? MailBlockedBy { get; init; }
+    /// <summary>
+    /// The group has no payment method saved where one is required, and mails on its credit instead: only as many
+    /// cards as MailCreditCents covers.
+    /// </summary>
+    public bool MailOnCredit { get; init; }
+    /// <summary>The group's credit that is free to spend on more cards, in cents.</summary>
+    public int MailCreditCents { get; init; }
     /// <summary>MailAvailable, and this person may spend money (the BuyPostage permission).</summary>
     public bool CanMail { get; init; }
     /// <summary>Mailing is on, but the group must first save a payment method on Billing.</summary>

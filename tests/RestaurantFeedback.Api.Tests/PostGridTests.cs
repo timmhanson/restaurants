@@ -862,6 +862,102 @@ public class PostGridTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task A_group_with_credit_but_no_payment_method_can_mail_as_far_as_its_credit_covers()
+    {
+        var (owner, _, site, rid, groupId) = await SetUpAsync(LiveKey);
+        await SaveSettings(site, s => { s.CostCents = 90; s.FeeCents = 10; s.EmailBills = false; s.PrintBills = false; s.RequirePaymentMethod = true; });
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, 1_000_000, null, "site"))).StatusCode);
+        string? hadMethod = null;
+        await Db(async db =>
+        {
+            var b = db.GroupBilling.Single(x => x.GroupId == groupId);
+            hadMethod = b.PayMethodId;
+            b.PayMethodId = null;
+            foreach (var i in db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open)) i.Status = InvoiceStatuses.Void;
+            db.GroupCredits.RemoveRange(db.GroupCredits.Where(c => c.GroupId == groupId));
+            return await db.SaveChangesAsync();
+        });
+        // Cards mailed by earlier tests this month that are not on a bill yet would count against the credit; they are moved out of the way.
+        var now = DateTime.UtcNow;
+        var parked = await Db(async db =>
+        {
+            var ids = db.Comments.Where(c => c.Restaurant.GroupId == groupId && c.MailId != null && !c.MailTest && c.MailedAt != null).Select(c => c.Id).ToList();
+            foreach (var c in db.Comments.Where(c => ids.Contains(c.Id))) c.MailTest = true;
+            await db.SaveChangesAsync();
+            return ids;
+        });
+        var month = MailLedger.MonthKey(MailLedger.MonthStart(now).AddMonths(-7));
+        var mine = new List<int>();
+        async Task<PrintConfig> Config() => (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
+        async Task<int[]> Cards(int n)
+        {
+            var ids = new List<int>();
+            for (var i = 0; i < n; i++) ids.Add((await Create(owner, Card(rid, $"OnCredit {mine.Count + i}"))).Id);
+            mine.AddRange(ids);
+            return ids.ToArray();
+        }
+        Task<HttpResponseMessage> Send(int[] ids) => owner.PostAsJsonAsync("/api/comments/mail", new MailRequest(ids, ids.Length, 100));
+        try
+        {
+            // No payment method and no credit: mailing waits for a payment method.
+            var none = await Config();
+            Assert.Equal(("payment", false, false, 0), (none.MailBlockedBy, none.CanMail, none.MailOnCredit, none.MailCreditCents));
+            Assert.Equal(HttpStatusCode.BadRequest, (await Send(await Cards(1))).StatusCode);
+
+            // A credit of $2.50 at $1.00 a card: mailing opens, paid from the credit, for two cards and no more.
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync($"/api/system/billing/groups/{groupId}/credits",
+                new AddCreditRequest(250, "bonus", "Welcome bonus so the group can try mailing", 250, $"oncredit-{Guid.NewGuid():N}"))).StatusCode);
+            var open = await Config();
+            Assert.Equal(((string?)null, true, true, 250, false), (open.MailBlockedBy, open.CanMail, open.MailOnCredit, open.MailCreditCents, open.MailNeedsPayMethod));
+            var three = await Send(await Cards(3));
+            Assert.Equal(HttpStatusCode.BadRequest, three.StatusCode);
+            Assert.Contains("covers 2 cards", await three.Content.ReadAsStringAsync());
+            var two = await Send(await Cards(2));
+            Assert.Equal(HttpStatusCode.OK, two.StatusCode);
+            Assert.All((await two.Content.ReadFromJsonAsync<List<MailOutcome>>())!, o => Assert.True(o.Ok));
+
+            // Those two cards are not on a bill yet, but the credit they will use is already spoken for: 50 cents is left, which does not cover a card.
+            var spent = await Config();
+            Assert.Equal(("payment", false, 50), (spent.MailBlockedBy, spent.CanMail, spent.MailCreditCents));
+            var refused = await Send(await Cards(1));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains("does not cover a card", await refused.Content.ReadAsStringAsync());
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "CardMailOverCredit" && a.GroupId == groupId))));
+
+            // When the month's bill is made the credit pays it, and the same 50 cents is what is left.
+            await Db(async db =>
+            {
+                foreach (var c in db.Comments.Where(c => mine.Contains(c.Id) && c.MailId != null)) c.MailedAt = MailLedger.MonthStart(now).AddMonths(-7).AddDays(2);
+                return await db.SaveChangesAsync();
+            });
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync("/api/system/billing/issue", new IssueBillsRequest(month))).StatusCode);
+            var bill = (await Billing(site)).Invoices.Single(i => i.GroupId == groupId && i.Month == month);
+            Assert.Equal((200, 200, "paid", "credit"), (bill.TotalCents, bill.CreditCents, bill.Status, bill.PaidHow));
+            Assert.Equal(50, (await Config()).MailCreditCents);
+            Assert.Equal(50, (await Billing(site)).Groups.Single(g => g.GroupId == groupId).CreditCents);
+
+            // Once a payment method is saved the credit no longer limits how many cards can go: what it does not cover is billed.
+            await Db(async db => { db.GroupBilling.Single(x => x.GroupId == groupId).PayMethodId = "pm_saved_for_test"; return await db.SaveChangesAsync(); });
+            var saved = await Config();
+            Assert.Equal(((string?)null, true, false), (saved.MailBlockedBy, saved.CanMail, saved.MailOnCredit));
+            Assert.Equal(HttpStatusCode.OK, (await Send(await Cards(3))).StatusCode);
+        }
+        finally
+        {
+            await Db(async db =>
+            {
+                db.MailInvoices.RemoveRange(db.MailInvoices.Where(i => i.GroupId == groupId && i.Month == month));
+                db.GroupCredits.RemoveRange(db.GroupCredits.Where(c => c.GroupId == groupId));
+                db.Comments.RemoveRange(db.Comments.Where(c => mine.Contains(c.Id)));
+                foreach (var c in db.Comments.Where(c => parked.Contains(c.Id))) c.MailTest = false;
+                db.GroupBilling.Single(x => x.GroupId == groupId).PayMethodId = hadMethod;
+                return await db.SaveChangesAsync();
+            });
+            await SaveSettings(site, s => s.RequirePaymentMethod = false);
+        }
+    }
+
+    [Fact]
     public async Task Whether_a_payment_method_is_needed_before_mailing_can_be_set_for_one_group()
     {
         var (owner, _, site, _, groupId) = await SetUpAsync();

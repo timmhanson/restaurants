@@ -258,7 +258,11 @@ changes never rewrite history. The System Administrator's **Billing** page (`Sys
   credit can be taken back with a reason. The **credit log** on Billing lists every line (given, used,
   returned, taken back) with who and why, filters by investment group, and nothing in it can be edited or
   removed. The group's administrators see their credit and where it went on their own Billing page, without
-  the System Administrator's details;
+  the System Administrator's details. **Credit also stands in for a payment method:** a group that needs one
+  and has none can still have cards mailed, paid from its credit, but only as many as the credit covers
+  (`GroupTerms.OnCredit`, `MailLedger.SpendableCreditAsync`). Cards mailed since the last bill count against
+  the credit straight away, so it cannot be spent twice; a request for more cards than it covers is refused
+  (`CardMailOverCredit`) and Print cards says how many it covers;
 - a **monthly limit** per group (site default and per group; $0 switches mailing off), which caps what any
   group can owe;
 - the **bill day** (last month's bills are created on it), days to pay, whether bills are **emailed** and whether

@@ -133,6 +133,9 @@ export default function MailCardsPage() {
   const tooMany = toSend.length > config.mailMaxCards
   const total = toSend.length * config.mailCentsPerCard
   const overLimit = !config.mailTest && toSend.length > 0 && config.mailUsedCents + total > config.mailLimitCents
+  // With no payment method saved, the group mails on its credit, and only as far as the credit goes.
+  const creditCovers = config.mailCentsPerCard > 0 ? Math.floor(config.mailCreditCents / config.mailCentsPerCard) : 0
+  const overCredit = !config.mailTest && config.mailOnCredit && toSend.length > 0 && total > config.mailCreditCents
 
   const send = async () => {
     setBusy('send')
@@ -251,7 +254,7 @@ export default function MailCardsPage() {
                 <button type="button" className="btn" onClick={() => void refresh()} disabled={busy !== null}>{busy === 'status' ? 'Checking…' : 'Check where they are'}</button>
               )}
               {toSend.length > 0 && (
-                <button type="button" className="btn btn-primary" onClick={() => setConfirm(true)} disabled={busy !== null || !config.canMail || tooMany || overLimit}>
+                <button type="button" className="btn btn-primary" onClick={() => setConfirm(true)} disabled={busy !== null || !config.canMail || tooMany || overLimit || overCredit}>
                   Mail {toSend.length} card{toSend.length === 1 ? '' : 's'}
                 </button>
               )}
@@ -260,6 +263,17 @@ export default function MailCardsPage() {
               <Alert kind="warn">A payment method must be saved before cards can be mailed for this investment group. An Investment Group Administrator can add it on <Link to="/billing">Billing</Link>. Until then, print the cards from Print cards.</Alert>
             )}
             {!config.canMail && !config.mailNeedsPayMethod && toSend.length > 0 && <Alert kind="info">Having cards mailed spends money, so it needs the “buy postage” permission. Ask an owner or administrator.</Alert>}
+            {config.mailOnCredit && !config.mailTest && toSend.length > 0 && !overCredit && (
+              <Alert kind="info">
+                These are paid from your investment group’s credit: {money(config.mailCreditCents)} is left, and {money(total)} of it will be used.
+              </Alert>
+            )}
+            {overCredit && (
+              <Alert kind="warn">
+                Your investment group’s credit ({money(config.mailCreditCents)}) covers {creditCovers} card{creditCovers === 1 ? '' : 's'} at {money(config.mailCentsPerCard)} each, and {toSend.length} are
+                chosen. Go back and choose fewer, or save a payment method on <Link to="/billing">Billing</Link> to mail them all.
+              </Alert>
+            )}
             {overLimit && (
               <Alert kind="warn">
                 Mailing these {toSend.length} cards ({money(total)}) would pass this month’s limit for mailed cards: {money(config.mailUsedCents)} of {money(config.mailLimitCents)} is used.

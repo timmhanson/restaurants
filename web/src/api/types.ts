@@ -161,6 +161,10 @@ export interface PrintConfig {
    * or this person may not spend money.
    */
   mailBlockedBy?: 'site' | 'group' | 'limit' | 'payment' | 'permission' | null
+  /** No payment method is saved where one is required, so the group mails on its credit: only as many cards as mailCreditCents covers. */
+  mailOnCredit: boolean
+  /** The group's credit that is free to spend on more cards, in cents. */
+  mailCreditCents: number
   /** The site is in test mode for mailing: nothing is printed, mailed or charged. */
   mailTest: boolean
   /** What the group is billed for each mailed card, in cents. */

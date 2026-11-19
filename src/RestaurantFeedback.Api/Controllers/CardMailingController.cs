@@ -37,7 +37,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var terms = await ledger.TermsAsync(me.GroupId ?? 0, ct);
         var used = me.GroupId is int g2 ? (await ledger.ThisMonthAsync(g2, ct)).Cents : 0;
         var test = account?.Test ?? false;
-        var needsPayMethod = terms.PayRequired && !terms.HasPayMethod;
+        var needsPayMethod = terms.NeedsPayMethod;
         var mailOn = account is not null && me.GroupId is not null && terms.Enabled && terms.LimitCents > 0;
         // The first thing in the way, in the order someone would have to deal with them.
         var blockedBy = account is null || me.GroupId is null ? "site" : !terms.Enabled ? "group" : terms.LimitCents <= 0 ? "limit"
@@ -48,6 +48,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             CanMail = mailOn && !needsPayMethod && me.Has(ManagerPermission.BuyPostage),
             MailNeedsPayMethod = mailOn && needsPayMethod,
             MailBlockedBy = blockedBy,
+            MailOnCredit = mailOn && terms.OnCredit && !needsPayMethod,
+            MailCreditCents = terms.CreditCents,
             MailTest = test,
             MailCentsPerCard = terms.PriceCents,
             MailMaxCards = mailOptions.MaxCardsPerMailing,
@@ -102,8 +104,13 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var test = account.Test;
         if (!pricing.Enabled)
             return BadRequest(new { message = "Having cards mailed is not switched on for this investment group yet. Ask the site's administrator to switch it on. Until then, print the cards here." });
-        if (pricing.PayRequired && !pricing.HasPayMethod)
-            return BadRequest(new { message = "Add a payment method on Billing before cards can be mailed for this investment group. Until then, print the cards here." });
+        if (pricing.NeedsPayMethod)
+            return BadRequest(new
+            {
+                message = pricing.CreditCents > 0
+                    ? $"This investment group's credit ({Dollars(pricing.CreditCents)}) does not cover a card at {Dollars(pricing.PriceCents)}. Add a payment method on Billing to keep mailing. Until then, print the cards here."
+                    : "Add a payment method on Billing before cards can be mailed for this investment group. Until then, print the cards here."
+            });
         if (!test && req.ConfirmCentsPerCard != pricing.PriceCents)
             return BadRequest(new { message = $"The price is now {Dollars(pricing.PriceCents)} a card. Nothing was sent; review the cards and confirm again." });
         var cards = await Cards(me, ids, ct);
@@ -116,6 +123,16 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             if (limit <= 0) return BadRequest(new { message = "Mailing cards is switched off for this investment group. Ask the site's administrator." });
             var used = (await ledger.ThisMonthAsync(groupId, ct)).Cents;
             var toSend = cards.Count(c => !AlreadyWithMailHouse(c) && !c.Responded && MissingAddress(c) is null);
+            // With no payment method saved, the group mails on its credit, and only as far as the credit goes.
+            if (pricing.OnCredit && toSend * pricing.PriceCents > pricing.CreditCents)
+            {
+                await audit.LogAsync(me, "CardMailOverCredit", "Group", groupId, new { Cards = toSend, WouldBillCents = toSend * pricing.PriceCents, pricing.CreditCents });
+                return BadRequest(new
+                {
+                    message = $"This investment group's credit ({Dollars(pricing.CreditCents)}) covers {pricing.CardsOnCredit} card{(pricing.CardsOnCredit == 1 ? "" : "s")} at {Dollars(pricing.PriceCents)} each, "
+                              + $"and {toSend} were chosen. Nothing was sent. Mail fewer cards, or add a payment method on Billing."
+                });
+            }
             if (used + toSend * pricing.PriceCents > limit)
             {
                 await audit.LogAsync(me, "CardMailOverLimit", "Group", groupId, new { Cards = toSend, WouldBillCents = toSend * pricing.PriceCents, UsedCents = used, LimitCents = limit });
