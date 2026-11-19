@@ -529,7 +529,7 @@ public static class PostGridCardDesign
         sb.Append($"<p class=\"enjoy\">Please enjoy <strong>{H(string.IsNullOrWhiteSpace(c.CouponOffer) ? "a treat on us" : c.CouponOffer)}</strong> the next time you visit us.</p>");
         sb.Append($"<div class=\"line\"><span>Date issued</span><span>{Day(c.DateIssued)}</span></div>");
         sb.Append($"<div class=\"line\"><span>Good until</span><span>{Day(c.ExpiresOn)}</span></div>");
-        sb.Append($"<div class=\"line\"><span>Authorized by</span><span>{H(c.AuthorizedBy ?? "")}</span></div>");
+        sb.Append($"<div class=\"line\"><span>Authorized by</span><span>{H(CardSignature.For(c, r))}</span></div>");
         sb.Append($"<p class=\"legal\">This coupon is good for {months} from the date of issue. Please present this card prior to ordering. One order per card. ");
         sb.Append("Cannot be exchanged for gift certificates or cash in whole or part and has no cash value. Not valid with other promotion or discounts. Valid only with authorized signature.</p>");
         sb.Append("</div></body></html>");

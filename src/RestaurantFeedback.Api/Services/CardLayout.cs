@@ -25,8 +25,12 @@ public class CardElement
     public string? Text { get; set; }
     /// <summary>For a fill-in line: what is printed on the line, usually one field such as {offer}.</summary>
     public string? Value { get; set; }
-    /// <summary>sans, geometric or narrow.</summary>
+    /// <summary>sans, geometric, narrow or script (a signature-style hand).</summary>
     public string Font { get; set; } = "sans";
+    /// <summary>For a fill-in line: the typeface of what is filled in, when it differs from the label's (script for a signature). Null uses the label's.</summary>
+    public string? ValueFont { get; set; }
+    /// <summary>For a fill-in line: the size in points of what is filled in. 0 prints it a little larger than the label.</summary>
+    public double ValueSize { get; set; }
     /// <summary>Points.</summary>
     public double Size { get; set; } = 9.5;
     public bool Bold { get; set; }
@@ -42,6 +46,15 @@ public class CardElement
     public double Thickness { get; set; } = 0.75;
     /// <summary>For a picture: which uploaded picture it shows (backlogo, footer, logo, photo, picture, or one of its own such as el-ab12cd).</summary>
     public string? Image { get; set; }
+}
+
+/// <summary>
+/// The name on a mailed card's signature line: the one set for the restaurant (Restaurants &amp; staff), or, when the
+/// restaurant has none, whoever authorized that card.
+/// </summary>
+public static class CardSignature
+{
+    public static string For(GuestComment c, Restaurant r) => string.IsNullOrWhiteSpace(r.SignatureName) ? (c.AuthorizedBy ?? "").Trim() : r.SignatureName.Trim();
 }
 
 /// <summary>What is filled in on each card, by the name used in braces in the designer.</summary>
@@ -72,7 +85,7 @@ public record CardMerge(Dictionary<string, string> Values)
             ["dateIssued"] = Day(c.DateIssued),
             ["goodUntil"] = Day(c.ExpiresOn),
             ["months"] = $"{validityMonths} month{(validityMonths == 1 ? "" : "s")}",
-            ["authorizedBy"] = (c.AuthorizedBy ?? "").Trim(),
+            ["authorizedBy"] = CardSignature.For(c, r),
             ["guest"] = $"{c.GuestFirstName} {c.GuestLastName}".Trim(),
             ["legal"] = string.IsNullOrWhiteSpace(look.LegalText) ? CardBacks.DefaultLegal : look.LegalText.Trim(),
             ["note"] = (look.BackMessage ?? "").Trim()
@@ -119,8 +132,11 @@ public static class CardElements
     {
         ["sans"] = ("Arimo", "Arial, Helvetica, sans-serif"),
         ["geometric"] = ("Montserrat", "'Helvetica Neue', Arial, sans-serif"),
-        ["narrow"] = ("Roboto Condensed", "'Arial Narrow', Arial, sans-serif")
+        ["narrow"] = ("Roboto Condensed", "'Arial Narrow', Arial, sans-serif"),
+        // A flowing hand for signatures. It has one weight and no italic of its own.
+        ["script"] = ("Great Vibes", "'Snell Roundhand', 'Brush Script MT', cursive")
     };
+    public const string Script = "script";
 
     private static readonly (string Family, string File, int Weight, bool Italic)[] FontFiles =
     [
@@ -128,7 +144,8 @@ public static class CardElements
         ("Arimo", "arimo-latin-400-italic", 400, true), ("Arimo", "arimo-latin-700-italic", 700, true),
         ("Montserrat", "montserrat-latin-500-normal", 400, false), ("Montserrat", "montserrat-latin-700-normal", 700, false),
         ("Montserrat", "montserrat-latin-500-italic", 400, true),
-        ("Roboto Condensed", "roboto-condensed-latin-400-normal", 400, false), ("Roboto Condensed", "roboto-condensed-latin-700-normal", 700, false)
+        ("Roboto Condensed", "roboto-condensed-latin-400-normal", 400, false), ("Roboto Condensed", "roboto-condensed-latin-700-normal", 700, false),
+        ("Great Vibes", "great-vibes-latin-400-normal", 400, false)
     ];
 
     public static readonly string[] FontFileNames = FontFiles.Select(f => f.File + ".woff2").ToArray();
@@ -156,13 +173,16 @@ public static class CardElements
         {
             var family = Fonts.TryGetValue(e.Font, out var f) ? f.Family : Fonts["sans"].Family;
             need.Add((family, e.Bold ? 700 : 400, e.Type == Text && e.Italic));
-            if (e.Type == FillIn) need.Add((family, e.Italic ? 400 : 700, e.Italic));
+            if (e.Type != FillIn) continue;
+            var valueFamily = e.ValueFont is not null && Fonts.TryGetValue(e.ValueFont, out var vf) ? vf.Family : family;
+            need.Add((valueFamily, e.Italic ? 400 : 700, e.Italic));
         }
         var files = new HashSet<string>();
         foreach (var (family, weight, italic) in need)
         {
             // The nearest file the family has: the upright one stands in where it has no italic.
-            var pick = FontFiles.Where(f => f.Family == family && f.Weight == weight).OrderBy(f => f.Italic == italic ? 0 : 1).Select(f => f.File).FirstOrDefault();
+            // A family with a single weight (the signature hand) lends that one to everything.
+            var pick = FontFiles.Where(f => f.Family == family).OrderBy(f => f.Weight == weight ? 0 : 1).ThenBy(f => f.Italic == italic ? 0 : 1).Select(f => f.File).FirstOrDefault();
             if (pick is not null) files.Add(pick);
         }
         var sb = new StringBuilder();
@@ -209,6 +229,9 @@ public static class CardElements
             e.LineHeight = Math.Round(Math.Clamp(e.LineHeight, 0.9, 2.5), 2);
             e.Thickness = Math.Round(Math.Clamp(e.Thickness, 0.25, 6), 2);
             if (!Fonts.ContainsKey(e.Font)) e.Font = "sans";
+            if (e.Type != FillIn || e.ValueFont is null || !Fonts.ContainsKey(e.ValueFont) || e.ValueFont == e.Font) e.ValueFont = null;
+            if (double.IsNaN(e.ValueSize) || double.IsInfinity(e.ValueSize)) return "One of the sizes or positions is not a number.";
+            e.ValueSize = e.Type == FillIn && e.ValueSize > 0 ? Math.Round(Math.Clamp(e.ValueSize, 4, 60), 1) : 0;
             if (e.Align is not ("left" or "center" or "right")) e.Align = "left";
             if (e.Color != Ink && !Regex.IsMatch(e.Color ?? "", "^#[0-9a-fA-F]{6}$")) e.Color = Ink;
             if (e.Type == Image && !IsImageKind(e.Image)) return "One of the pictures on the card has no picture chosen. Upload one for it or remove it.";
@@ -245,7 +268,7 @@ public static class CardElements
         // On the printed card these two lines run under their labels. The date's line stops short to leave room for the QR code.
         new() { Id = "issued", Type = FillIn, X = 0.28, Y = 1.801, W = 2.62, Size = 8.3, Thickness = 0.5, LineUnderLabel = true, Text = "Date Issued:", Value = "{dateIssued}" },
         new() { Id = "issued2", Type = Text, X = 0.28, Y = 1.964, W = 2.72, Size = 8.3, Text = "This coupon is good for {months} from date of issue." },
-        new() { Id = "sign", Type = FillIn, X = 0.275, Y = 2.314, W = 2.975, Size = 8.3, Thickness = 0.5, LineUnderLabel = true, Italic = true, Text = "Authorized Signature:", Value = "{authorizedBy}" },
+        new() { Id = "sign", Type = FillIn, X = 0.275, Y = 2.292, W = 2.975, Size = 8.3, Thickness = 0.5, LineUnderLabel = true, ValueFont = Script, ValueSize = 15, Text = "Authorized Signature:", Value = "{authorizedBy}" },
         new() { Id = "qr", Type = Qr, X = 2.99, Y = 1.7, W = 0.6, H = 0.6 },
         new() { Id = "qrnote", Type = Text, X = 2.94, Y = 2.31, W = 0.7, Size = 4.5, Align = "center", Text = QrCaption },
         new() { Id = "legal", Type = Text, X = 1.24, Y = 2.752, W = 2.3, Font = "narrow", Size = 7, Bold = true, LineHeight = 1.12, Text = "{legal}" },
@@ -289,6 +312,8 @@ public static class CardElements
         sb.Append($"@page{{size:6.25in 4.25in;margin:0}}html,body{{margin:0;padding:0;width:6.25in;height:4.25in;overflow:hidden;position:relative;background:{background}}}");
         sb.Append(".e{position:absolute;box-sizing:border-box;margin:0}.t{white-space:pre-wrap;overflow-wrap:break-word}");
         sb.Append(".f{display:flex;align-items:flex-end}.f .l{flex:none;padding-right:.05in}.f .v{flex:1;min-width:0;padding:0 .04in;white-space:nowrap;overflow:hidden;color:#1d1d1f;font-size:1.1em}");
+        // A signature hand has long strokes above and below the line; they are let through, and it sits a little lower so it rests on the line.
+        sb.Append(".f .v.s{overflow:visible;line-height:1;margin-bottom:-.03in}");
         sb.Append("img.e{object-fit:contain}");
         sb.Append("</style></head><body>");
         foreach (var e in list)
@@ -304,7 +329,10 @@ public static class CardElements
                     // The label is plain; what is filled in stands out in bold, or in italics for a signature.
                     var rule = $"border-bottom:{Pt(e.Thickness)} solid {Colour(e)}";
                     sb.Append($"<div class=\"e f\" style=\"{Place(e)};{Type(e)}{(e.LineUnderLabel ? $";padding-bottom:.01in;{rule}" : "")}\"><span class=\"l\" style=\"font-weight:{(e.Bold ? 700 : 400)}\">{H(merge.Fill(e.Text))}</span>");
-                    sb.Append($"<span class=\"v\" style=\"{(e.LineUnderLabel ? "" : rule + ";")}font-weight:{(e.Italic ? 400 : 700)};font-style:{(e.Italic ? "italic" : "normal")}\">{H(merge.Fill(e.Value))}&nbsp;</span></div>");
+                    var script = e.ValueFont == Script || (e.ValueFont is null && e.Font == Script);
+                    var valueType = (e.ValueFont is not null && Fonts.TryGetValue(e.ValueFont, out var vf) ? $"font-family:'{vf.Family}',{vf.Fallback};" : "")
+                                    + (e.ValueSize > 0 ? $"font-size:{Pt(e.ValueSize)};" : "");
+                    sb.Append($"<span class=\"v{(script ? " s" : "")}\" style=\"{(e.LineUnderLabel ? "" : rule + ";")}{valueType}font-weight:{(e.Italic || script ? 400 : 700)};font-style:{(e.Italic && !script ? "italic" : "normal")}\">{H(merge.Fill(e.Value))}&nbsp;</span></div>");
                     break;
                 case Line:
                     sb.Append($"<div class=\"e\" style=\"{Place(e)};border-top:{Pt(e.Thickness)} solid {Colour(e)}\"></div>");

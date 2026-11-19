@@ -192,8 +192,13 @@ restaurant's own name and address. A line made only of fields that come out empt
 is simply the standard list of items (`CardElements.ClassicBack`), positioned from a photograph of the
 restaurants' printed card, and is drawn by the same code (`CardElements.Render`).
 
-- Three typefaces are built into the site (`src/RestaurantFeedback.Api/CardFonts`, SIL Open Font License, licences
-  beside them): Arimo, Montserrat and Roboto Condensed. The printed card carries the ones it uses inside its own
+- Four typefaces are built into the site (`src/RestaurantFeedback.Api/CardFonts`, SIL Open Font License, licences
+  beside them): Arimo, Montserrat, Roboto Condensed and Great Vibes (a flowing signature hand). What is filled in
+  on a fill-in line can have a typeface and size of its own, which is how the classic card prints the Authorized
+  Signature in the signature hand.
+- **The name on the signature line** is set per restaurant (Restaurants & staff, "Signature on mailed cards",
+  `Restaurant.SignatureName`), for example its manager. A restaurant with none prints whoever authorized each
+  card (`CardSignature.For`). The printed card carries the ones it uses inside its own
   page, so the print matches the preview and the mail house downloads nothing; the designer loads the same files
   from `/card-fonts/…`.
 - Everything from the designer is checked on the server (`CardElements.Clean`): at most 40 items, known kinds

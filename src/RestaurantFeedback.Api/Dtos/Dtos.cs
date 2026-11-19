@@ -86,7 +86,10 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
     /// <summary>An owner may mark this restaurant as theirs (no owner yet, and no investment group administrator to decide).</summary>
     public bool? CanClaim { get; init; }
 
-    public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive);
+    /// <summary>The name printed on the signature line of cards mailed for this restaurant. Empty prints whoever authorized each card.</summary>
+    public string? SignatureName { get; init; }
+
+    public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive) { SignatureName = r.SignatureName };
 }
 
 public record StaffMember(int Id, string DisplayName, string Username, string? Email, string Role, string[] PermissionNames, bool Assigned, bool IsActive, string[] OtherRestaurants);
@@ -108,6 +111,7 @@ public class RestaurantRequest
     public string? State { get; set; }
     public string? Zip { get; set; }
     public string? Phone { get; set; }
+    [MaxLength(60)] public string? SignatureName { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>Group creation only: usernames of the new owners who own this restaurant. Null means all of them.</summary>
     public string[]? OwnerUsernames { get; set; }

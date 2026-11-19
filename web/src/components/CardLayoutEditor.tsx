@@ -18,6 +18,7 @@ const FONTS: Record<CardFont, { label: string; css: string }> = {
   sans: { label: 'Plain (like Arial)', css: "'Arimo',Arial,Helvetica,sans-serif" },
   geometric: { label: 'Round and wide (good for names and headings)', css: "'Montserrat','Helvetica Neue',Arial,sans-serif" },
   narrow: { label: 'Narrow (good for small print)', css: "'Roboto Condensed','Arial Narrow',Arial,sans-serif" },
+  script: { label: 'Signature (a flowing hand)', css: "'Great Vibes','Snell Roundhand','Brush Script MT',cursive" },
 }
 
 /** The same typeface files the printed card carries, so the designer and the print match. */
@@ -28,6 +29,7 @@ const FONT_FACES = (
     ['Montserrat', 'montserrat-latin-500-normal', 400, 'normal'], ['Montserrat', 'montserrat-latin-700-normal', 700, 'normal'],
     ['Montserrat', 'montserrat-latin-500-italic', 400, 'italic'],
     ['Roboto Condensed', 'roboto-condensed-latin-400-normal', 400, 'normal'], ['Roboto Condensed', 'roboto-condensed-latin-700-normal', 700, 'normal'],
+    ['Great Vibes', 'great-vibes-latin-400-normal', 400, 'normal'],
   ] as const
 ).map(([family, file, weight, style]) => `@font-face{font-family:'${family}';font-style:${style};font-weight:${weight};src:url('/card-fonts/${file}.woff2') format('woff2')}`).join('')
 
@@ -245,10 +247,19 @@ export default function CardLayoutEditor({
     }
     if (el.type === 'fill') {
       const rule = `${el.thickness}pt solid ${colour(el)}`
+      // What is filled in can have a typeface and size of its own: a signature in the signature hand, say.
+      const script = el.valueFont === 'script' || (!el.valueFont && el.font === 'script')
+      const valueType: CSSProperties = {
+        ...(el.valueFont && FONTS[el.valueFont] ? { fontFamily: FONTS[el.valueFont].css } : {}),
+        fontSize: el.valueSize ? `${el.valueSize}pt` : '1.1em',
+        fontWeight: el.italic || script ? 400 : 700,
+        fontStyle: el.italic && !script ? 'italic' : 'normal',
+        ...(script ? { overflow: 'visible', lineHeight: 1, marginBottom: '-0.03in' } : {}),
+      }
       return (
         <div style={{ ...type, display: 'flex', alignItems: 'flex-end', ...(el.lineUnderLabel ? { paddingBottom: '0.01in', borderBottom: rule } : {}) }}>
           <span style={{ flex: 'none', paddingRight: '0.05in', fontWeight: el.bold ? 700 : 400 }}>{fillFields(el.text, values)}</span>
-          <span style={{ flex: 1, minWidth: 0, padding: '0 0.04in', whiteSpace: 'nowrap', overflow: 'hidden', color: '#1d1d1f', fontSize: '1.1em', borderBottom: el.lineUnderLabel ? undefined : rule, fontWeight: el.italic ? 400 : 700, fontStyle: el.italic ? 'italic' : 'normal' }}>
+          <span style={{ flex: 1, minWidth: 0, padding: '0 0.04in', whiteSpace: 'nowrap', overflow: 'hidden', color: '#1d1d1f', borderBottom: el.lineUnderLabel ? undefined : rule, ...valueType }}>
             {fillFields(el.value, values)}&nbsp;
           </span>
         </div>
@@ -438,6 +449,20 @@ export default function CardLayoutEditor({
                 <label className="check"><input type="checkbox" checked={selected.italic} onChange={(e) => edit({ italic: e.target.checked })} /> {selected.type === 'fill' ? 'Italic on the line (like a signature)' : 'Italic'}</label>
                 {selected.type === 'fill' && <label className="check"><input type="checkbox" checked={selected.lineUnderLabel} onChange={(e) => edit({ lineUnderLabel: e.target.checked })} /> The line runs under the label too</label>}
               </div>
+            </div>
+          )}
+          {selected.type === 'fill' && (
+            <div className="grid grid-4" style={{ marginTop: 8 }}>
+              <Field label="Typeface on the line" hint="For what is filled in. The signature hand suits a signature.">
+                <select value={selected.valueFont ?? ''} onChange={(e) => edit({ valueFont: (e.target.value || null) as CardFont | null })}>
+                  <option value="">The same as the label</option>
+                  {(Object.keys(FONTS) as CardFont[]).filter((f) => f !== selected.font).map((f) => <option key={f} value={f}>{FONTS[f].label}</option>)}
+                </select>
+              </Field>
+              <Field label="Size on the line (points)" hint="0 prints it a little larger than the label. A signature reads well at about 15.">
+                <input type="number" step={0.5} min={0} max={60} value={selected.valueSize ?? 0}
+                  onChange={(e) => { const v = Number(e.target.value); if (e.target.value !== '' && Number.isFinite(v)) edit({ valueSize: v }) }} />
+              </Field>
             </div>
           )}
 

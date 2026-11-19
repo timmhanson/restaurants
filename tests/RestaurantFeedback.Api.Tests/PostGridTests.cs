@@ -722,6 +722,60 @@ public class PostGridTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
     }
 
+    [Fact]
+    public async Task A_restaurant_can_have_its_own_name_on_the_signature_line_printed_in_a_signature_hand()
+    {
+        var (owner, _, _, rid, _) = await SetUpAsync();
+        var r = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid);
+        RestaurantRequest With(string? signature) => new()
+        {
+            Name = r.Name, StreetAddress = r.StreetAddress, City = r.City, State = r.State, Zip = r.Zip, Phone = r.Phone, SignatureName = signature
+        };
+        var card = await Create(owner, Card(rid, "Signed"));
+        async Task<string> Back() => (await owner.GetFromJsonAsync<MailPreview>($"/api/comments/{card.Id}/mail/preview"))!.BackHtml;
+
+        // With no name set for the restaurant, the line carries whoever authorized the card, in the signature hand.
+        var before = await Back();
+        Assert.Contains("M. Smith", before);
+        Assert.Contains("@font-face{font-family:'Great Vibes'", before);
+        Assert.Contains("font-family:'Great Vibes'", before[before.IndexOf("Authorized Signature:", StringComparison.Ordinal)..]);
+
+        // The restaurant's own name replaces it on every card mailed for that restaurant, and is escaped like any other word.
+        var saved = (await (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With("  Michael <Smith>  "))).Content.ReadFromJsonAsync<RestaurantDto>())!;
+        Assert.Equal("Michael <Smith>", saved.SignatureName);
+        Assert.Equal("Michael <Smith>", (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid).SignatureName);
+        var signed = await Back();
+        Assert.Contains("Michael &lt;Smith&gt;", signed);
+        Assert.DoesNotContain("M. Smith", signed);
+        // The card designer's sample shows it too, and so does the simple back.
+        Assert.Equal("Michael <Smith>", (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!.MergeFields.Single(f => f.Key == "authorizedBy").Sample);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", new CardDesignFields("plain", "centered", null, null, null, null, null, BackStyle: "simple"))).StatusCode);
+        Assert.Contains("Michael &lt;Smith&gt;", await Back());
+        Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
+
+        // Too long a name is refused; clearing it goes back to whoever authorized each card. The change is in the audit log.
+        Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(new string('x', 61)))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(" "))).StatusCode);
+        Assert.Contains("M. Smith", await Back());
+        var rows = await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.Action == "RestaurantUpdated" && a.RestaurantId == rid).OrderByDescending(a => a.Id).Take(3).Select(a => a.Details ?? "").ToList()));
+        Assert.Contains(rows, d => d.Contains("signatureName") && d.Contains("Michael"));
+
+        // In the designer, what is filled in on a line can have its own typeface and size; anything unknown is put back to the label's.
+        List<CardElement> layout =
+        [
+            new() { Id = "s", Type = "fill", X = 0.3, Y = 2, W = 3, Text = "Signed:", Value = "{authorizedBy}", ValueFont = "script", ValueSize = 18 },
+            new() { Id = "t", Type = "fill", X = 0.3, Y = 2.5, W = 3, Text = "Date:", Value = "{dateIssued}", ValueFont = "wingdings", ValueSize = 900 },
+            new() { Id = "u", Type = "text", X = 0.3, Y = 3, W = 3, Text = "words", ValueFont = "script", ValueSize = 20 }
+        ];
+        Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/card-designs/{rid}", new CardDesignFields("plain", "centered", null, null, null, null, null, BackStyle: "custom", BackLayout: layout))).StatusCode);
+        var kept = (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!.BackLayout!;
+        Assert.Equal(("script", 18d), (kept[0].ValueFont, kept[0].ValueSize));
+        Assert.Equal((null, 60d), (kept[1].ValueFont, kept[1].ValueSize));
+        Assert.Equal((null, 0d), (kept[2].ValueFont, kept[2].ValueSize));
+        Assert.Contains("font-family:'Great Vibes','Snell Roundhand', 'Brush Script MT', cursive;font-size:18pt", await Back());
+        Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
+    }
+
     private static AddressCheck Read(string json, string street = "123 Main St", string city = "Joliet", string zip = "60431") =>
         PostGridAddressVerifier.Read(JsonDocument.Parse(json).RootElement, new AddressInput(street, city, "IL", zip));
 

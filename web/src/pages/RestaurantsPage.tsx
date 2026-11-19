@@ -400,6 +400,7 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
     state: restaurant?.state ?? '',
     zip: restaurant?.zip ?? '',
     phone: restaurant?.phone ?? '',
+    signatureName: restaurant?.signatureName ?? '',
     isActive: restaurant?.isActive ?? true,
   })
   const [error, setError] = useState<string | null>(null)
@@ -442,6 +443,9 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
             </select>
           </Field>
         </div>
+        <Field label="Signature on mailed cards" hint="The name printed on the Authorized Signature line of cards mailed for this restaurant, such as its manager or owner. Leave empty to print the name of whoever authorized each card.">
+          <input value={v.signatureName ?? ''} maxLength={60} onChange={(e) => set('signatureName', e.target.value)} placeholder="For example: Michael Smith" />
+        </Field>
         <div className="actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : restaurant ? 'Save' : 'Add restaurant'}</button>

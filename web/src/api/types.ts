@@ -55,6 +55,8 @@ export interface RestaurantDto {
   state?: string | null
   zip?: string | null
   phone?: string | null
+  /** The name printed on the signature line of cards mailed for this restaurant. Empty prints whoever authorized each card. */
+  signatureName?: string | null
   isActive: boolean
   /** Filled in on the admin listing (GET /restaurants?all=true) only. */
   owners?: PersonRef[]
@@ -97,6 +99,7 @@ export interface RestaurantRequest {
   state?: string | null
   zip?: string | null
   phone?: string | null
+  signatureName?: string | null
   isActive: boolean
   /** Group creation only: usernames of the new owners who own this restaurant. */
   ownerUsernames?: string[] | null
@@ -185,7 +188,7 @@ export type CardBack = 'classic' | 'simple' | 'custom'
  */
 export type CardImageKind = 'picture' | 'logo' | 'photo' | 'backlogo' | 'footer' | (string & {})
 export type CardElementType = 'text' | 'fill' | 'line' | 'box' | 'image' | 'qr'
-export type CardFont = 'sans' | 'geometric' | 'narrow'
+export type CardFont = 'sans' | 'geometric' | 'narrow' | 'script'
 /**
  * One thing placed on a card in the card designer. x, y, w and h are inches from the top-left corner of the finished
  * 6 x 4 inch card; size and thickness are points; color is a colour such as #2b4a8b or "ink" for the card's ink colour.
@@ -193,7 +196,7 @@ export type CardFont = 'sans' | 'geometric' | 'narrow'
  */
 export interface CardElement {
   id: string; type: CardElementType; x: number; y: number; w: number; h: number; text?: string | null; value?: string | null
-  font: CardFont; size: number; bold: boolean; italic: boolean; lineUnderLabel: boolean; align: 'left' | 'center' | 'right'; color: string; lineHeight: number; thickness: number; image?: string | null
+  font: CardFont; valueFont?: CardFont | null; valueSize?: number; size: number; bold: boolean; italic: boolean; lineUnderLabel: boolean; align: 'left' | 'center' | 'right'; color: string; lineHeight: number; thickness: number; image?: string | null
 }
 /** A field a card's words can carry, with what it prints on the sample card. */
 export interface CardMergeField { key: string; label: string; sample: string }

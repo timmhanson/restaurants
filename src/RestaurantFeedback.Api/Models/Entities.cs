@@ -88,6 +88,11 @@ public class Restaurant
     public string? State { get; set; }
     public string? Zip { get; set; }
     public string? Phone { get; set; }
+    /// <summary>
+    /// The name printed on the Authorized Signature line of cards mailed for this restaurant (its manager or owner).
+    /// Empty prints the name of whoever authorized each card.
+    /// </summary>
+    public string? SignatureName { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>
     /// Days after a coupon card is sent before the guest should be called to check it arrived.
