@@ -236,7 +236,8 @@ public static class CardElements
     /// </summary>
     public static List<CardElement> ClassicBack() =>
     [
-        new() { Id = "logo", Type = Image, X = 0.29, Y = 0.28, W = 1.44, H = 0.62, Image = CardImageKinds.BackLogo },
+        // As wide as the logo on the printed card, and tall enough for the script logo's own shape (about 2.14 to 1).
+        new() { Id = "logo", Type = Image, X = 0.29, Y = 0.253, W = 1.44, H = 0.674, Image = CardImageKinds.BackLogo },
         new() { Id = "address", Type = Text, X = 1.915, Y = 0.305, W = 1.7, Font = "geometric", Size = 11.1, Bold = true, LineHeight = 0.94, Text = "{restaurantState}\n{street}\n{cityStateZip}\n{website}" },
         new() { Id = "note", Type = Text, X = 0.285, Y = 1.04, W = 3.3, Size = 8, Italic = true, Text = "{note}" },
         new() { Id = "enjoy", Type = FillIn, X = 0.285, Y = 1.32, W = 3.3, Size = 8.3, Thickness = 0.5, Text = "Please enjoy:", Value = "{offer}" },
