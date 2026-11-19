@@ -332,6 +332,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int?>("FeeCents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("MailEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("MonthlyLimitCents")
                         .HasColumnType("INTEGER");
 
@@ -823,6 +826,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MailByDefault")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Name")

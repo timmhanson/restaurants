@@ -65,7 +65,8 @@ public class RestaurantsController(AppDbContext db, AuditService audit, CurrentU
         var r = new Restaurant
         {
             GroupId = me.GroupId.Value, Name = req.Name.Trim(), StreetAddress = req.StreetAddress, City = req.City, State = req.State,
-            Zip = req.Zip, Phone = req.Phone, IsActive = req.IsActive, SignatureName = string.IsNullOrWhiteSpace(req.SignatureName) ? null : req.SignatureName.Trim()
+            Zip = req.Zip, Phone = req.Phone, IsActive = req.IsActive, SignatureName = string.IsNullOrWhiteSpace(req.SignatureName) ? null : req.SignatureName.Trim(),
+            MailByDefault = req.MailByDefault
         };
         // An owner who adds a restaurant owns it. A super admin assigns owners from the staffing screen.
         if (me.IsOwner) r.UserRestaurants.Add(new UserRestaurant { UserId = me.Id });
@@ -87,6 +88,7 @@ public class RestaurantsController(AppDbContext db, AuditService audit, CurrentU
         r.Name = req.Name.Trim(); r.StreetAddress = req.StreetAddress; r.City = req.City; r.State = req.State;
         r.Zip = req.Zip; r.Phone = req.Phone; r.IsActive = req.IsActive;
         r.SignatureName = string.IsNullOrWhiteSpace(req.SignatureName) ? null : req.SignatureName.Trim();
+        r.MailByDefault = req.MailByDefault;
         await db.SaveChangesAsync();
         await audit.LogAsync(me, "RestaurantUpdated", "Restaurant", r.Id, new { before, after = RestaurantDto.From(r) }, r.Id);
         return RestaurantDto.From(r);

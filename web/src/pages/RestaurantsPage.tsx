@@ -401,6 +401,7 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
     zip: restaurant?.zip ?? '',
     phone: restaurant?.phone ?? '',
     signatureName: restaurant?.signatureName ?? '',
+    mailByDefault: restaurant?.mailByDefault ?? false,
     isActive: restaurant?.isActive ?? true,
   })
   const [error, setError] = useState<string | null>(null)
@@ -446,6 +447,16 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
         <Field label="Signature when the team login enters a card" hint="Managers, owners and administrators sign the cards they enter with their own name. Cards entered with this restaurant’s shared team login are signed with this name, such as its manager’s. Its managers can change it from Enter card.">
           <input value={v.signatureName ?? ''} maxLength={60} onChange={(e) => set('signatureName', e.target.value)} placeholder="For example: Michael Smith" />
         </Field>
+        <label className="check">
+          <input type="checkbox" checked={v.mailByDefault ?? false} onChange={(e) => set('mailByDefault', e.target.checked)} />
+          <span>
+            Have this restaurant’s cards mailed for us, unless we choose otherwise
+            <span className="muted small" style={{ display: 'block' }}>
+              On Print cards, “Mailed for you” is chosen to begin with for this restaurant’s cards. Whoever is printing can still pick another way. It only
+              takes effect once mailing is switched on for your investment group.
+            </span>
+          </span>
+        </label>
         <div className="actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : restaurant ? 'Save' : 'Add restaurant'}</button>

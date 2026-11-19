@@ -57,6 +57,8 @@ export interface RestaurantDto {
   phone?: string | null
   /** The name that signs cards entered with this restaurant's shared team login. Managers, owners and administrators sign with their own. */
   signatureName?: string | null
+  /** On Print cards, "Mailed for you" is chosen to begin with for this restaurant's cards. */
+  mailByDefault?: boolean
   isActive: boolean
   /** Filled in on the admin listing (GET /restaurants?all=true) only. */
   owners?: PersonRef[]
@@ -100,6 +102,7 @@ export interface RestaurantRequest {
   zip?: string | null
   phone?: string | null
   signatureName?: string | null
+  mailByDefault?: boolean
   isActive: boolean
   /** Group creation only: usernames of the new owners who own this restaurant. */
   ownerUsernames?: string[] | null
@@ -152,6 +155,12 @@ export interface PrintConfig {
   canMail: boolean
   /** Mailing is on, but the group must first save a payment method on Billing. */
   mailNeedsPayMethod: boolean
+  /**
+   * Why this person cannot have cards mailed right now, or null when they can: the site has no mailing account yet,
+   * it is not switched on for the group, the group's monthly limit is zero, a payment method must be saved first,
+   * or this person may not spend money.
+   */
+  mailBlockedBy?: 'site' | 'group' | 'limit' | 'payment' | 'permission' | null
   /** The site is in test mode for mailing: nothing is printed, mailed or charged. */
   mailTest: boolean
   /** What the group is billed for each mailed card, in cents. */
@@ -260,6 +269,8 @@ export interface SystemInvoice extends Omit<Invoice, 'payFeeCents'> {
 export interface GroupBillingRow {
   groupId: number; group: string; active: boolean; feeCents?: number | null; effectiveFeeCents: number; limitCents?: number | null; effectiveLimitCents: number
   cardsThisMonth: number; billedThisMonthCents: number; owedCents: number; payLabel?: string | null; autoPay: boolean; billingEmail?: string | null
+  /** Having cards printed and mailed is switched on for this group. */
+  mailEnabled: boolean
 }
 export interface SystemBilling {
   settings: BillingSettings; mailReady: boolean; mailTest: boolean; payReady: boolean; payTest: boolean; emailReady: boolean

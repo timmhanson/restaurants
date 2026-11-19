@@ -215,7 +215,7 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
             ? new PayMethodDto(b.PayKind ?? PayKinds.Card, b.PayFunding, b.PayLabel ?? "Saved payment method", b.PaySetAt is { } set ? DateTime.SpecifyKind(set, DateTimeKind.Utc) : null, b.PaySetBy)
             : null;
         var account = site.Account;
-        return new GroupBillingDto(manage, account is not null && terms.LimitCents > 0, account?.Test ?? false, terms.PriceCents, terms.LimitCents,
+        return new GroupBillingDto(manage, account is not null && terms.Enabled && terms.LimitCents > 0, account?.Test ?? false, terms.PriceCents, terms.LimitCents,
             current?.TotalCents ?? 0, current?.Cards ?? 0, payAccount.Current is not null, terms.PayRequired, payAccount.Current?.Test ?? false, s.CardFeePercent, s.BankFeePercent, method, b?.AutoPay ?? false,
             manage ? new BillingContact(b?.BillingName, b?.BillingEmail, b?.Street, b?.City, b?.State, b?.Zip) : new BillingContact(null, null, null, null, null, null),
             s.BusinessName, s.BusinessEmail, s.PayInstructions, s.BillDay, s.DueDays, months, invoices,

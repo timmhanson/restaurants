@@ -77,6 +77,8 @@ public record GroupTerms(int CostCents, int FeeCents, int LimitCents, bool HasPa
 {
     /// <summary>What the group is billed for one card.</summary>
     public int PriceCents => CostCents + FeeCents;
+    /// <summary>The System Administrator has switched mailing on for this group.</summary>
+    public bool Enabled { get; init; }
 }
 
 public record InvoiceLine(int RestaurantId, string Restaurant, int Cards, int Cents);
@@ -113,7 +115,7 @@ public class MailLedger(AppDbContext db, SiteMailing site)
     {
         var s = site.Billing;
         var b = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
-        return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, s.RequirePaymentMethod);
+        return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, s.RequirePaymentMethod) { Enabled = b?.MailEnabled ?? false };
     }
 
     /// <summary>

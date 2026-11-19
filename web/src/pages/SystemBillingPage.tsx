@@ -165,18 +165,26 @@ export default function SystemBillingPage() {
       <div className="panel">
         <h2>Investment groups</h2>
         <p className="muted">
-          Each group pays the cost of a card ({money(data.settings.costCents)}) plus your fee. Give a group its own fee or its own monthly limit here; otherwise
-          it uses the ones under Settings below. A limit of $0 switches mailing off for that group.
+          Having cards printed and mailed is off for a group until you switch it on here. Until then the group sees the choice on Print cards greyed out, with
+          a note that it has to be switched on first. Each group pays the cost of a card ({money(data.settings.costCents)}) plus your fee. Give a group its
+          own fee or its own monthly limit here; otherwise it uses the ones under Settings below.
         </p>
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Group</th><th>Your fee per card</th><th>Price per card</th><th>Monthly limit</th><th>This month</th><th>Unpaid bills</th><th>Pays with</th><th /></tr>
+              <tr><th>Group</th><th>Mailing</th><th>Your fee per card</th><th>Price per card</th><th>Monthly limit</th><th>This month</th><th>Unpaid bills</th><th>Pays with</th><th /></tr>
             </thead>
             <tbody>
               {data.groups.map((g) => (
                 <tr key={g.groupId}>
                   <td><strong>{g.group}</strong>{!g.active && <> <Badge kind="neutral">inactive</Badge></>}</td>
+                  <td>
+                    {g.mailEnabled ? <Badge kind="ok">switched on</Badge> : <Badge kind="neutral">not switched on</Badge>}{' '}
+                    <button type="button" className="btn btn-sm" disabled={busy} aria-label={`${g.mailEnabled ? 'Switch off' : 'Switch on'} mailing for ${g.group}`}
+                      onClick={() => void act(() => api.put(`/system/billing/groups/${g.groupId}`, { feeCents: g.feeCents ?? null, limitCents: g.limitCents ?? null, mailEnabled: !g.mailEnabled }))}>
+                      {g.mailEnabled ? 'Switch off' : 'Switch on'}
+                    </button>
+                  </td>
                   <td>{money(g.effectiveFeeCents)} {g.feeCents == null ? <span className="muted small">(site default)</span> : <Badge kind="accent">own fee</Badge>}</td>
                   <td>{money(data.settings.costCents + g.effectiveFeeCents)}</td>
                   <td>

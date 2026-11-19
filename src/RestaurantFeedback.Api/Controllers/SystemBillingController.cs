@@ -56,11 +56,14 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         if (req.LimitCents is < 0 or > 10_000_000) return BadRequest(new { message = "The monthly limit is between $0 (mailing off) and $100,000." });
         var b = await db.GroupBilling.FirstOrDefaultAsync(x => x.GroupId == id, ct);
         if (b is null) db.GroupBilling.Add(b = new GroupBilling { GroupId = id });
-        var before = new { b.FeeCents, b.MonthlyLimitCents };
+        var before = new { b.FeeCents, b.MonthlyLimitCents, b.MailEnabled };
         b.FeeCents = req.FeeCents;
         b.MonthlyLimitCents = req.LimitCents;
+        if (req.MailEnabled is bool on) b.MailEnabled = on;
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync(me, "GroupBillingTermsChanged", "Group", id, new { Group = group.Name, before, after = new { b.FeeCents, b.MonthlyLimitCents } }, groupId: id);
+        await audit.LogAsync(me, "GroupBillingTermsChanged", "Group", id, new { Group = group.Name, before, after = new { b.FeeCents, b.MonthlyLimitCents, b.MailEnabled } }, groupId: id);
+        if (before.MailEnabled != b.MailEnabled)
+            await audit.LogAsync(me, b.MailEnabled ? "GroupMailingSwitchedOn" : "GroupMailingSwitchedOff", "Group", id, new { Group = group.Name }, groupId: id);
         return await Dto(null, null, null, ct);
     }
 
@@ -193,7 +196,7 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
             var b = rows.FirstOrDefault(x => x.GroupId == g.Id);
             var now = billed.Where(c => c.GroupId == g.Id && c.At >= monthStart).ToList();
             return new GroupBillingRow(g.Id, g.Name, g.IsActive, b?.FeeCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, now.Count, now.Sum(c => c.Cents),
-                allInvoices.Where(i => i.GroupId == g.Id && i.Status == InvoiceStatuses.Open).Sum(i => i.TotalCents), b?.PayLabel, b?.AutoPay ?? false, b?.BillingEmail);
+                allInvoices.Where(i => i.GroupId == g.Id && i.Status == InvoiceStatuses.Open).Sum(i => i.TotalCents), b?.PayLabel, b?.AutoPay ?? false, b?.BillingEmail) { MailEnabled = b?.MailEnabled ?? false };
         }).ToList();
 
         var shown = allInvoices.Where(i => (groupId is null || i.GroupId == groupId) && (MailLedger.Range(month) is null || i.Month == month) && status switch

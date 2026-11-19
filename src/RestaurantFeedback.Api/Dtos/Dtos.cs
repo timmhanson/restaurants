@@ -88,8 +88,11 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
 
     /// <summary>The name that signs cards entered with this restaurant's shared team login.</summary>
     public string? SignatureName { get; init; }
+    /// <summary>On Print cards, "Mailed for you" is chosen to begin with for this restaurant's cards.</summary>
+    public bool MailByDefault { get; init; }
 
-    public static RestaurantDto From(Restaurant r) => new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive) { SignatureName = r.SignatureName };
+    public static RestaurantDto From(Restaurant r) =>
+        new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive) { SignatureName = r.SignatureName, MailByDefault = r.MailByDefault };
 }
 
 public record StaffMember(int Id, string DisplayName, string Username, string? Email, string Role, string[] PermissionNames, bool Assigned, bool IsActive, string[] OtherRestaurants);
@@ -113,6 +116,7 @@ public class RestaurantRequest
     public string? Zip { get; set; }
     public string? Phone { get; set; }
     [MaxLength(60)] public string? SignatureName { get; set; }
+    public bool MailByDefault { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>Group creation only: usernames of the new owners who own this restaurant. Null means all of them.</summary>
     public string[]? OwnerUsernames { get; set; }
@@ -363,8 +367,14 @@ public record SystemPerson(UserDto User, string[] Restaurants, DateTime? LastSee
 
 public record PrintConfig(bool PostageAvailable, string PostageProvider, bool CanBuyPostage, int MaxCentsPerCard, string MailedMethod)
 {
-    /// <summary>The site has a mailing account and this group's monthly limit is above zero, so cards can be printed and mailed for it.</summary>
+    /// <summary>The site has a mailing account, mailing is switched on for this group and its monthly limit is above zero, so cards can be printed and mailed for it.</summary>
     public bool MailAvailable { get; init; }
+    /// <summary>
+    /// Why this person cannot have cards mailed right now, or null when they can: "site" (the site has no mailing
+    /// account yet), "group" (not switched on for this investment group), "limit" (the group's monthly limit is zero),
+    /// "payment" (the group must save a payment method first) or "permission" (this person may not spend money).
+    /// </summary>
+    public string? MailBlockedBy { get; init; }
     /// <summary>MailAvailable, and this person may spend money (the BuyPostage permission).</summary>
     public bool CanMail { get; init; }
     /// <summary>Mailing is on, but the group must first save a payment method on Billing.</summary>
@@ -449,11 +459,16 @@ public record SystemInvoiceDto(int Id, int GroupId, string Group, string Number,
 /// <param name="FeeCents">The group's own fee per card, or null when it uses the site's.</param>
 /// <param name="LimitCents">The group's own monthly limit, or null when it uses the site's.</param>
 public record GroupBillingRow(int GroupId, string Group, bool Active, int? FeeCents, int EffectiveFeeCents, int? LimitCents, int EffectiveLimitCents, int CardsThisMonth,
-    int BilledThisMonthCents, int OwedCents, string? PayLabel, bool AutoPay, string? BillingEmail);
+    int BilledThisMonthCents, int OwedCents, string? PayLabel, bool AutoPay, string? BillingEmail)
+{
+    /// <summary>Mailing is switched on for this group.</summary>
+    public bool MailEnabled { get; init; }
+}
 /// <param name="UnbilledMonths">Finished months that have mailed cards with no bill yet.</param>
 public record SystemBillingDto(Services.BillingSettings Settings, bool MailReady, bool MailTest, bool PayReady, bool PayTest, bool EmailReady, List<GroupBillingRow> Groups,
     List<SystemInvoiceDto> Invoices, List<string> UnbilledMonths, int OwedCents, int OverdueCents);
-public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents);
+/// <param name="MailEnabled">Switches mailing on or off for the group. Left out, it stays as it is.</param>
+public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents, bool? MailEnabled = null);
 /// <param name="How">check, bank, card, cash or other.</param>
 public record MarkPaidRequest(string? How, string? Note, DateOnly? PaidOn);
 public record IssueBillsRequest(string? Month);

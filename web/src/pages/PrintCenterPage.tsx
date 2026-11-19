@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, qs } from '../api/client'
 import type { CommentSummary, PagedResult, PrintConfig } from '../api/types'
@@ -68,6 +68,17 @@ export default function PrintCenterPage() {
     [data, mailableOnly, skipPrinted, offerSkipPrinted],
   )
   const chosen = shown.filter((c) => !left.includes(c.id))
+
+  // A restaurant can have "Mailed for you" as its usual way. When every card chosen is from such a restaurant, and
+  // mailing can be used, it is picked to begin with. Once someone picks a way themselves, their choice stays.
+  const pickedPostage = useRef(false)
+  const mailIsUsual = chosen.length > 0 && chosen.every((c) => restaurants.find((r) => r.id === c.restaurantId)?.mailByDefault)
+  const canMail = config?.canMail ?? false
+  useEffect(() => {
+    if (pickedPostage.current) return
+    setPostage(canMail && mailIsUsual ? 'mail' : 'stamp')
+  }, [canMail, mailIsUsual])
+  const pick = (p: 'stamp' | 'bought' | 'mail') => { pickedPostage.current = true; setPostage(p) }
   const hiddenNoAddress = (data?.items ?? []).filter((c) => !hasMailingAddress(c)).length
   const card = settings?.postcard
 
@@ -164,12 +175,12 @@ export default function PrintCenterPage() {
           <legend>How the cards go out</legend>
           <div className="source-choice" role="radiogroup">
             <label className={postage === 'stamp' ? 'selected' : ''}>
-              <input type="radio" name="postage" checked={postage === 'stamp'} onChange={() => setPostage('stamp')} />
+              <input type="radio" name="postage" checked={postage === 'stamp'} onChange={() => pick('stamp')} />
               <span className="source-label">Stamps by hand</span>
               <span className="source-hint">Cards print with the guest's address and a box for the stamp. Nothing is charged.</span>
             </label>
             <label className={postage === 'bought' ? 'selected' : ''} style={config?.canBuyPostage ? undefined : { opacity: 0.6 }}>
-              <input type="radio" name="postage" checked={postage === 'bought'} disabled={!config?.canBuyPostage} onChange={() => setPostage('bought')} />
+              <input type="radio" name="postage" checked={postage === 'bought'} disabled={!config?.canBuyPostage} onChange={() => pick('bought')} />
               <span className="source-label">Buy and print postage</span>
               <span className="source-hint">
                 {config?.canBuyPostage
@@ -180,18 +191,24 @@ export default function PrintCenterPage() {
               </span>
             </label>
             <label className={postage === 'mail' ? 'selected' : ''} style={config?.canMail ? undefined : { opacity: 0.6 }}>
-              <input type="radio" name="postage" checked={postage === 'mail'} disabled={!config?.canMail} onChange={() => setPostage('mail')} />
+              <input type="radio" name="postage" checked={postage === 'mail'} disabled={!config?.canMail} onChange={() => pick('mail')} />
               <span className="source-label">Mailed for you</span>
               <span className="source-hint">
                 {config?.canMail
                   ? `Both sides are printed and each card is mailed for you${config.mailTest ? ' (test mode: nothing is mailed or charged)' : `, $${(config.mailCentsPerCard / 100).toFixed(2)} a card on your group’s monthly bill`}. Nothing to print here. You confirm on the next screen.`
-                  : config?.mailNeedsPayMethod
-                    ? isGroupWide
-                      ? 'Save a payment method on Billing to use this. Until then, print the cards here.'
-                      : 'Your Investment Group Administrator needs to save a payment method on Billing first.'
-                    : !config?.mailAvailable
-                      ? 'Not switched on for your investment group.'
-                      : 'You need the "buy postage" permission. Ask an owner or administrator.'}
+                  : !config
+                    ? 'Checking whether this can be used…'
+                    : config.mailBlockedBy === 'site'
+                      ? 'Both sides are printed and each card is mailed for you. Not available on this site yet.'
+                      : config.mailBlockedBy === 'group'
+                        ? `Both sides are printed and each card is mailed for you, with nothing to print here. It has to be switched on for your investment group before it can be used. ${isGroupWide ? 'Ask the people who run this site to switch it on.' : 'Your Investment Group Administrator can ask for it to be switched on.'}`
+                        : config.mailBlockedBy === 'limit'
+                          ? 'Switched off for your investment group at the moment (its monthly limit is $0). Ask the people who run this site.'
+                          : config.mailBlockedBy === 'payment' || config.mailNeedsPayMethod
+                            ? isGroupWide
+                              ? 'Switched on for your group. Save a payment method on Billing to start using it. Until then, print the cards here.'
+                              : 'Switched on for your group, but your Investment Group Administrator needs to save a payment method on Billing first.'
+                            : 'You need the "buy postage" permission to use this. Ask an owner or administrator.'}
               </span>
             </label>
           </div>

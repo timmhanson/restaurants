@@ -156,8 +156,13 @@ answer. PostGrid charges per lookup after its free allowance, billed to the acco
   **Preview and mail** shows both sides exactly as sent, then a confirmation naming the number of cards and the
   group's exact price. Sending needs the `BuyPostage` and `MarkResponded` permissions, at most
   `PostGrid__MaxCardsPerMailing` (100) cards at a time; the confirmed count and the confirmed price must both
-  match; the group must be under its monthly limit; and, when the System Administrator requires it, the group
-  must have a payment method saved (otherwise it prints its own cards). A card is never sent twice: cards already
+  match; **mailing must be switched on for the group** (the System Administrator does this per group on Billing,
+  `GroupBilling.MailEnabled`; it is off until then); the group must be under its monthly limit; and, when the
+  System Administrator requires it, the group must have a payment method saved (otherwise it prints its own
+  cards). When any of these is missing, the choice on Print cards stays visible but greyed out and says what it
+  takes (`PrintConfig.MailBlockedBy`: the site, the group's switch, the limit, a payment method or the
+  permission). A restaurant can make "Mailed for you" **its usual way** (Restaurants & staff,
+  `Restaurant.MailByDefault`): Print cards then starts on it when every card chosen is from such a restaurant. A card is never sent twice: cards already
   with the mail house are skipped and each request carries an idempotency key, so a retry returns the first
   order. Each card is marked sent, gets a history entry and an audit row (`CardMailed`, `CardMailFailed`,
   `CardMailOverLimit`). **Cancel mailing** works until printing starts (`CardMailCancelled`), puts the card back
@@ -239,6 +244,8 @@ changes never rewrite history. The System Administrator's **Billing** page (`Sys
 `/api/system/billing`) sets:
 
 - what a card costs the site and **the site's fee per card**, for every group and optionally **per group**;
+- **whether mailing is switched on** for each group (off until the System Administrator switches it on;
+  audited as `GroupMailingSwitchedOn` / `GroupMailingSwitchedOff`);
 - a **monthly limit** per group (site default and per group; $0 switches mailing off), which caps what any
   group can owe;
 - the **bill day** (last month's bills are created on it), days to pay, whether bills are **emailed** and whether

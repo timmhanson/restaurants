@@ -38,12 +38,16 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var used = me.GroupId is int g2 ? (await ledger.ThisMonthAsync(g2, ct)).Cents : 0;
         var test = account?.Test ?? false;
         var needsPayMethod = terms.PayRequired && !terms.HasPayMethod;
-        var mailOn = account is not null && me.GroupId is not null && terms.LimitCents > 0;
+        var mailOn = account is not null && me.GroupId is not null && terms.Enabled && terms.LimitCents > 0;
+        // The first thing in the way, in the order someone would have to deal with them.
+        var blockedBy = account is null || me.GroupId is null ? "site" : !terms.Enabled ? "group" : terms.LimitCents <= 0 ? "limit"
+            : needsPayMethod ? "payment" : !me.Has(ManagerPermission.BuyPostage) ? "permission" : null;
         return new PrintConfig(available, paidBy, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings))
         {
             MailAvailable = mailOn,
             CanMail = mailOn && !needsPayMethod && me.Has(ManagerPermission.BuyPostage),
             MailNeedsPayMethod = mailOn && needsPayMethod,
+            MailBlockedBy = blockedBy,
             MailTest = test,
             MailCentsPerCard = terms.PriceCents,
             MailMaxCards = mailOptions.MaxCardsPerMailing,
@@ -96,6 +100,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (siteMailing.Account is not { } account) return BadRequest(new { message = NotSetUp });
         var pricing = await ledger.TermsAsync(groupId, ct);
         var test = account.Test;
+        if (!pricing.Enabled)
+            return BadRequest(new { message = "Having cards mailed is not switched on for this investment group yet. Ask the site's administrator to switch it on. Until then, print the cards here." });
         if (pricing.PayRequired && !pricing.HasPayMethod)
             return BadRequest(new { message = "Add a payment method on Billing before cards can be mailed for this investment group. Until then, print the cards here." });
         if (!test && req.ConfirmCentsPerCard != pricing.PriceCents)

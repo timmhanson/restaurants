@@ -46,6 +46,8 @@ public class PostGridTests(ApiFactory factory)
         var admin = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword, groupId);
         var site = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
         Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/postgrid/mail", new PostGridMailKeyRequest(key))).StatusCode);
+        // Mailing is off for a group until the System Administrator switches it on.
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, true))).StatusCode);
         // A payment method is required before mailing unless the System Administrator switches that off; the tests
         // that are not about payment switch it off.
         await SaveSettings(site, s => s.RequirePaymentMethod = false);
@@ -720,6 +722,59 @@ public class PostGridTests(ApiFactory factory)
         Assert.DoesNotContain("alert(1)", row.Details ?? "");
 
         Assert.Equal(HttpStatusCode.OK, (await owner.DeleteAsync($"/api/card-designs/{rid}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Mailing_is_off_for_a_group_until_switched_on_and_a_restaurant_can_make_it_its_usual_way()
+    {
+        var (owner, _, site, rid, groupId) = await SetUpAsync();
+        async Task<PrintConfig> Config() => (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
+        async Task<GroupBillingRow> Row() => (await site.GetFromJsonAsync<SystemBillingDto>("/api/system/billing"))!.Groups.Single(g => g.GroupId == groupId);
+        var card = await Create(owner, Card(rid, "Switch"));
+        var send = new MailRequest([card.Id], 1, (await Config()).MailCentsPerCard);
+        try
+        {
+            // Switched off: the group is told why it cannot be used, and nothing can be sent.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, false))).StatusCode);
+            Assert.False((await Row()).MailEnabled);
+            var off = await Config();
+            Assert.False(off.MailAvailable);
+            Assert.False(off.CanMail);
+            Assert.False(off.MailNeedsPayMethod);
+            Assert.Equal("group", off.MailBlockedBy);
+            var refused = await owner.PostAsJsonAsync("/api/comments/mail", send);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            var why = await refused.Content.ReadAsStringAsync();
+            Assert.Contains("not switched on for this investment group", why);
+            Assert.DoesNotContain("PostGrid", why);
+            Assert.False((await owner.GetFromJsonAsync<GroupBillingDto>("/api/billing"))!.MailAvailable);
+
+            // Only the System Administrator switches it. Leaving the switch out of a change to the fee keeps it as it is.
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, true))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(7, null))).StatusCode);
+            Assert.False((await Row()).MailEnabled);
+
+            // Switched on: it can be used (the test group has no payment method, so that comes next when one is required).
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, true))).StatusCode);
+            Assert.True((await Row()).MailEnabled);
+            var on = await Config();
+            Assert.True(on.MailAvailable);
+            Assert.Contains(on.MailBlockedBy, new[] { null, "payment" });
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "GroupMailingSwitchedOff" && a.GroupId == groupId))));
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "GroupMailingSwitchedOn" && a.GroupId == groupId))));
+
+            // A restaurant's owner can make "mailed for you" its usual way; everyone who prints its cards is told.
+            var r = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid);
+            Assert.False(r.MailByDefault);
+            RestaurantRequest With(bool usual) => new() { Name = r.Name, StreetAddress = r.StreetAddress, City = r.City, State = r.State, Zip = r.Zip, Phone = r.Phone, MailByDefault = usual };
+            Assert.True((await (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(true))).Content.ReadFromJsonAsync<RestaurantDto>())!.MailByDefault);
+            Assert.True((await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid).MailByDefault);
+            Assert.False((await (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", With(false))).Content.ReadFromJsonAsync<RestaurantDto>())!.MailByDefault);
+        }
+        finally
+        {
+            await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, true));
+        }
     }
 
     [Fact]

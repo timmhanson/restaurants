@@ -93,6 +93,11 @@ public class Restaurant
     /// Managers, owners and administrators sign the cards they enter with their own name instead. See CardSignature.
     /// </summary>
     public string? SignatureName { get; set; }
+    /// <summary>
+    /// On Print cards, "Mailed for you" is chosen to begin with for this restaurant's cards (when mailing is switched
+    /// on for its group). The restaurant's owners and the group's administrators decide; anyone printing can still pick another way.
+    /// </summary>
+    public bool MailByDefault { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>
     /// Days after a coupon card is sent before the guest should be called to check it arrived.
@@ -290,6 +295,11 @@ public enum ActivityKind
 public class GroupBilling
 {
     public int GroupId { get; set; }
+    /// <summary>
+    /// Whether the System Administrator has switched on having cards printed and mailed for this group. Off until
+    /// then: the group still sees the choice on Print cards, greyed out, with what it takes to use it.
+    /// </summary>
+    public bool MailEnabled { get; set; }
     /// <summary>The site's fee per card for this group, in cents. Null uses the site's default.</summary>
     public int? FeeCents { get; set; }
     /// <summary>The most this group may be billed for mailed cards in a calendar month, in cents. Null uses the site's default; 0 switches mailing off.</summary>
