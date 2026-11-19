@@ -362,6 +362,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<string>("PaySetBy")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool?>("RequirePayMethod")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("State")
                         .HasColumnType("TEXT");
 
@@ -374,6 +377,56 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.HasKey("GroupId");
 
                     b.ToTable("GroupBilling");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupCredit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AmountCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Details")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("GroupCredits");
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GuestComment", b =>
@@ -687,6 +740,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("CostCents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("CreditCents")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("DeliveryError")
                         .HasColumnType("TEXT");
 
@@ -932,6 +988,15 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.HasOne("RestaurantFeedback.Api.Models.OwnerGroup", null)
                         .WithOne()
                         .HasForeignKey("RestaurantFeedback.Api.Models.GroupBilling", "GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupCredit", b =>
+                {
+                    b.HasOne("RestaurantFeedback.Api.Models.OwnerGroup", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

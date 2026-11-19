@@ -115,7 +115,7 @@ public class MailLedger(AppDbContext db, SiteMailing site)
     {
         var s = site.Billing;
         var b = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
-        return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, s.RequirePaymentMethod) { Enabled = b?.MailEnabled ?? false };
+        return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, b?.RequirePayMethod ?? s.RequirePaymentMethod) { Enabled = b?.MailEnabled ?? false };
     }
 
     /// <summary>
@@ -171,10 +171,56 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
             db.MailInvoices.Add(invoice);
             await db.SaveChangesAsync(ct);
             await audit.LogRawAsync(null, by, null, g.Key, "MailBillCreated", "MailInvoice", invoice.Id, new { invoice.Number, invoice.Month, invoice.Cards, invoice.TotalCents, invoice.DueOn });
+            // Any credit the group has comes off the new bill straight away, so the bill it is sent already shows it.
+            await ApplyCreditAsync(g.Key, by, ct);
             created.Add(invoice);
         }
         return created;
     }
+
+    /// <summary>What a bill still needs paying: its total less the credit already used on it.</summary>
+    public static int Due(MailInvoice i) => Math.Max(0, i.TotalCents - i.CreditCents);
+
+    /// <summary>A group's credit: everything given or returned, less everything used or taken back.</summary>
+    public async Task<int> CreditBalanceAsync(int groupId, CancellationToken ct = default) =>
+        await db.GroupCredits.Where(c => c.GroupId == groupId).SumAsync(c => (int?)c.AmountCents, ct) ?? 0;
+
+    /// <summary>
+    /// Uses a group's credit on its bills that are waiting for payment, oldest first. Each use is a line in the
+    /// credit account and an audit row; a bill the credit covers in full is marked paid. Returns what was used.
+    /// </summary>
+    public async Task<int> ApplyCreditAsync(int groupId, string by, CancellationToken ct = default)
+    {
+        var left = await CreditBalanceAsync(groupId, ct);
+        if (left <= 0) return 0;
+        var waiting = (await db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open).ToListAsync(ct)).OrderBy(i => i.Month).ToList();
+        var used = 0;
+        foreach (var invoice in waiting)
+        {
+            var use = Math.Min(left, Due(invoice));
+            if (use <= 0) continue;
+            invoice.CreditCents += use;
+            left -= use;
+            used += use;
+            db.GroupCredits.Add(new GroupCredit { GroupId = groupId, AmountCents = -use, Kind = CreditKinds.Applied, Details = $"Used on bill {invoice.Number}", InvoiceId = invoice.Id, CreatedBy = by });
+            if (Due(invoice) == 0)
+            {
+                invoice.Status = InvoiceStatuses.Paid;
+                invoice.PaidAt = DateTime.UtcNow;
+                invoice.PaidHow = PaidWithCredit;
+                invoice.PaidBy = by;
+                invoice.PaymentError = null;
+            }
+            await db.SaveChangesAsync(ct);
+            await audit.LogRawAsync(null, by, null, groupId, "MailBillCreditApplied", "MailInvoice", invoice.Id,
+                new { invoice.Number, AppliedCents = use, invoice.CreditCents, invoice.TotalCents, StillOwedCents = Due(invoice), invoice.Status });
+            if (left <= 0) break;
+        }
+        return used;
+    }
+
+    /// <summary>How a bill was paid when the group's credit covered all of it.</summary>
+    public const string PaidWithCredit = "credit";
 
     /// <summary>Where a group's bills go: its billing email, or its administrators when none is set.</summary>
     public async Task<List<string>> RecipientsAsync(int groupId, CancellationToken ct = default)
@@ -261,8 +307,9 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         if (payAccount.Current is not { } account) return (false, "Paying on the site is not set up yet.");
         var b = await db.GroupBilling.FirstOrDefaultAsync(x => x.GroupId == invoice.GroupId, ct);
         if (b?.PayMethodId is null || b.PayCustomerId is null || b.PayKind is null) return (false, "No payment method is saved for this investment group.");
-        var fee = ledger.PayFee(invoice.TotalCents, b);
-        var amount = invoice.TotalCents + fee;
+        // Credit already used on the bill is not charged again: only what is still owed, plus the fee on that.
+        var fee = ledger.PayFee(Due(invoice), b);
+        var amount = Due(invoice) + fee;
         if (amount < 50) return (false, "This bill is under 50 cents, which is too small to charge. It can be paid another way and marked as paid.");
         try
         {
@@ -367,7 +414,9 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         if (now.Day >= site.Billing.BillDay)
             await IssueAsync(MailLedger.MonthKey(MailLedger.MonthStart(now).AddMonths(-1)), Schedule, ct);
 
-        var unsent = await db.MailInvoices.Where(i => i.Status == InvoiceStatuses.Open && i.EmailedAt == null && i.PrintedId == null && i.DeliveryError == null).ToListAsync(ct);
+        // A bill the group's credit paid in full is still sent, so the group has it for its records.
+        var unsent = await db.MailInvoices.Where(i => (i.Status == InvoiceStatuses.Open || (i.Status == InvoiceStatuses.Paid && i.PaidHow == PaidWithCredit))
+                                                      && i.EmailedAt == null && i.PrintedId == null && i.DeliveryError == null).ToListAsync(ct);
         foreach (var invoice in unsent) await DeliverAsync(invoice, Schedule, again: false, ct);
 
         if (payAccount.Current is not null)
@@ -396,7 +445,13 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         sb.Append($"Date {i.IssuedAt.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} &middot; Due {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}</p>");
         sb.Append("<table><tr><th>Restaurant</th><th class=\"n\">Cards</th><th class=\"n\">Amount</th></tr>");
         foreach (var l in Lines(i)) sb.Append($"<tr><td>{H(l.Restaurant)}</td><td class=\"n\">{l.Cards}</td><td class=\"n\">{Dollars(l.Cents)}</td></tr>");
-        sb.Append($"<tr class=\"total\"><td>Total due</td><td class=\"n\">{i.Cards}</td><td class=\"n\">{Dollars(i.TotalCents)}</td></tr></table>");
+        if (i.CreditCents > 0)
+        {
+            sb.Append($"<tr class=\"total\"><td>Total</td><td class=\"n\">{i.Cards}</td><td class=\"n\">{Dollars(i.TotalCents)}</td></tr>");
+            sb.Append($"<tr><td>Less your credit</td><td></td><td class=\"n\">-{Dollars(i.CreditCents)}</td></tr>");
+            sb.Append($"<tr class=\"total\"><td>{(Due(i) == 0 ? "Nothing to pay" : "Total due")}</td><td></td><td class=\"n\">{Dollars(Due(i))}</td></tr></table>");
+        }
+        else sb.Append($"<tr class=\"total\"><td>Total due</td><td class=\"n\">{i.Cards}</td><td class=\"n\">{Dollars(i.TotalCents)}</td></tr></table>");
         if (!string.IsNullOrWhiteSpace(s.SiteUrl))
             sb.Append(forPrint
                 ? $"<p>To see this bill or pay it, sign in at {H(s.SiteUrl)} and open Billing.</p>"
@@ -416,7 +471,9 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         sb.AppendLine($"{s.BusinessName}: bill {i.Number} for {group}");
         sb.AppendLine($"Coupon cards printed and mailed in {MailLedger.MonthName(i.Month)}");
         foreach (var l in Lines(i)) sb.AppendLine($"  {l.Restaurant}: {l.Cards} card{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}");
-        sb.AppendLine($"Total due: {Dollars(i.TotalCents)} by {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}");
+        if (i.CreditCents > 0) sb.AppendLine($"Total: {Dollars(i.TotalCents)}, less your credit of {Dollars(i.CreditCents)}");
+        sb.AppendLine(Due(i) == 0 && i.CreditCents > 0 ? "Nothing to pay: your credit covered this bill."
+            : $"Total due: {Dollars(Due(i))} by {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}");
         if (!string.IsNullOrWhiteSpace(s.SiteUrl)) sb.AppendLine($"See it and pay it: {s.SiteUrl}/billing");
         if (!string.IsNullOrWhiteSpace(s.PayInstructions)) sb.AppendLine(s.PayInstructions);
         return sb.ToString();

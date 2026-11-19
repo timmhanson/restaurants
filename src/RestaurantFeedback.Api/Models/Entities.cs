@@ -300,6 +300,11 @@ public class GroupBilling
     /// then: the group still sees the choice on Print cards, greyed out, with what it takes to use it.
     /// </summary>
     public bool MailEnabled { get; set; }
+    /// <summary>
+    /// Whether this group must have a payment method saved before its cards can be mailed. Null follows the site's
+    /// setting (required unless the System Administrator has switched that off).
+    /// </summary>
+    public bool? RequirePayMethod { get; set; }
     /// <summary>The site's fee per card for this group, in cents. Null uses the site's default.</summary>
     public int? FeeCents { get; set; }
     /// <summary>The most this group may be billed for mailed cards in a calendar month, in cents. Null uses the site's default; 0 switches mailing off.</summary>
@@ -334,6 +339,41 @@ public static class InvoiceStatuses
 }
 
 /// <summary>
+/// One line in a group's credit account, which is never edited or removed. The System Administrator gives a credit
+/// (a check received, a correction, a welcome bonus) with its details; the site uses credit on the group's bills and
+/// records each use here too. The group's credit is the sum of its lines.
+/// </summary>
+public class GroupCredit
+{
+    public int Id { get; set; }
+    public int GroupId { get; set; }
+    /// <summary>Above zero for credit given or returned; below zero for credit used on a bill or taken back.</summary>
+    public int AmountCents { get; set; }
+    public string Kind { get; set; } = CreditKinds.Other;
+    /// <summary>What it was for, in the System Administrator's words. The group does not see this.</summary>
+    public string Details { get; set; } = "";
+    /// <summary>The bill it was used on, or returned from.</summary>
+    public int? InvoiceId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string CreatedBy { get; set; } = "";
+    public int? CreatedByUserId { get; set; }
+    /// <summary>Sent with the request that made the line, so pressing the button twice cannot record it twice.</summary>
+    public string? Key { get; set; }
+}
+
+public static class CreditKinds
+{
+    public const string Check = "check", Correction = "correction", Bonus = "bonus", Other = "other", TakenBack = "takenback", Applied = "applied", Returned = "returned";
+    /// <summary>The reasons a System Administrator can give a credit for.</summary>
+    public static readonly string[] Given = [Check, Correction, Bonus, Other];
+    public static string Label(string kind) => kind switch
+    {
+        Check => "Check received", Correction => "Correction", Bonus => "Welcome bonus", Other => "Other credit", TakenBack => "Credit taken back",
+        Applied => "Used on a bill", Returned => "Returned from a cancelled bill", _ => kind
+    };
+}
+
+/// <summary>
 /// One month's bill to one investment group for mailed cards, frozen when it is issued: the cards, what the mail
 /// house cost the site, the site's fee, and how and when it was paid.
 /// </summary>
@@ -347,8 +387,10 @@ public class MailInvoice
     public int Cards { get; set; }
     public int CostCents { get; set; }
     public int FeeCents { get; set; }
-    /// <summary>What the group owes: CostCents + FeeCents.</summary>
+    /// <summary>What the bill comes to: CostCents + FeeCents.</summary>
     public int TotalCents { get; set; }
+    /// <summary>How much of the group's credit has been used on this bill. What is still owed is TotalCents less this.</summary>
+    public int CreditCents { get; set; }
     /// <summary>Per-restaurant lines as JSON: [{restaurantId, restaurant, cards, cents}].</summary>
     public string LinesJson { get; set; } = "[]";
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow;

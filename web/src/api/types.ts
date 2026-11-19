@@ -246,8 +246,16 @@ export interface Invoice {
   /** What paying with the saved payment method would add (a credit card or a bank account). */
   payFeeCents: number
   paymentError?: string | null; lines: InvoiceLine[]
+  /** How much of the group's credit was used on this bill, and what is still owed after it. */
+  creditCents: number; dueCents: number
 }
+/** One line of a group's credit account as the group sees it. Above zero is credit received; below zero is credit used. */
+export interface GroupCreditLine { at: string; kind: string; label: string; amountCents: number; invoiceNumber?: string | null }
+/** One line of the credit log as the System Administrator sees it, with the details entered. */
+export interface GroupCredit { id: number; groupId: number; group: string; at: string; kind: string; label: string; amountCents: number; details: string; by: string; invoiceNumber?: string | null }
 export interface GroupBilling {
+  /** The group's unused credit, which comes off its next bills by itself, and the lines that make it up. */
+  creditCents: number; credits: GroupCreditLine[]
   /** A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage. */
   canManage: boolean
   mailAvailable: boolean; test: boolean; centsPerCard: number; limitCents: number; usedCents: number; cardsThisMonth: number
@@ -271,10 +279,16 @@ export interface GroupBillingRow {
   cardsThisMonth: number; billedThisMonthCents: number; owedCents: number; payLabel?: string | null; autoPay: boolean; billingEmail?: string | null
   /** Having cards printed and mailed is switched on for this group. */
   mailEnabled: boolean
+  /** Whether this group must save a payment method before mailing; ownPayRule is null when it follows the site's setting. */
+  payRequired: boolean; ownPayRule?: boolean | null
+  /** The group's unused credit. */
+  creditCents: number
 }
 export interface SystemBilling {
   settings: BillingSettings; mailReady: boolean; mailTest: boolean; payReady: boolean; payTest: boolean; emailReady: boolean
   groups: GroupBillingRow[]; invoices: SystemInvoice[]; unbilledMonths: string[]; owedCents: number; overdueCents: number
+  /** The credit log (newest first, for the group chosen), unused credit across every group, and the most one credit can be. */
+  credits: GroupCredit[]; creditCents: number; maxCreditCents: number
 }
 export interface SiteMailStatementRow { groupId: number; group: string; restaurantId: number; restaurant: string; cards: number; costCents: number; feeCents: number; totalCents: number }
 export interface SiteMailStatement { month: string; months: string[]; rows: SiteMailStatementRow[]; cards: number; costCents: number; feeCents: number; totalCents: number }

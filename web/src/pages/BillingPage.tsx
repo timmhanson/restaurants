@@ -70,7 +70,7 @@ export default function BillingPage() {
   // What the saved payment method adds to each bill: the card fee for a credit card, the bank fee for a bank account.
   const feePercent = d.method?.kind === 'bank' ? d.bankFeePercent : d.method?.kind === 'card' && d.method.funding === 'credit' ? d.cardFeePercent : 0
   const feeName = d.method?.kind === 'bank' ? 'bank account fee' : 'credit card fee'
-  const amount = (i: Invoice) => i.totalCents + i.payFeeCents
+  const amount = (i: Invoice) => i.dueCents + i.payFeeCents
 
   return (
     <>
@@ -98,6 +98,7 @@ export default function BillingPage() {
         <Stat value={`${d.cardsThisMonth}`} label={`card${d.cardsThisMonth === 1 ? '' : 's'} mailed this month${d.canManage ? '' : ' at your restaurants'}`} />
         <Stat value={money(d.usedCents)} label={d.canManage ? `of this month’s ${money(d.limitCents)} limit (${money(left)} left)` : 'so far this month at your restaurants'} warn={d.canManage && d.limitCents > 0 && left < d.centsPerCard} />
         {d.canManage && <Stat value={money(d.owedCents)} label="in unpaid bills" warn={d.invoices.some((i) => i.overdue)} />}
+        {d.canManage && d.creditCents > 0 && <Stat value={money(d.creditCents)} label="credit, which comes off your next bills by itself" />}
       </div>
 
       {d.canManage && (
@@ -122,7 +123,7 @@ export default function BillingPage() {
                           <td><button type="button" className="btn-link" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id} aria-label={`${open === i.id ? 'Hide' : 'Show'} details of bill ${i.number}`}>{i.number}</button></td>
                           <td>{i.monthName}</td>
                           <td>{i.cards}</td>
-                          <td><strong>{money(i.totalCents)}</strong>{i.surchargeCents > 0 && <div className="muted small">+ {money(i.surchargeCents)} {i.paidHow === 'bank' ? 'bank account fee' : 'credit card fee'}</div>}</td>
+                          <td><strong>{money(i.totalCents)}</strong>{i.creditCents > 0 && <div className="muted small">− {money(i.creditCents)} credit{i.dueCents > 0 ? `, ${money(i.dueCents)} to pay` : ''}</div>}{i.surchargeCents > 0 && <div className="muted small">+ {money(i.surchargeCents)} {i.paidHow === 'bank' ? 'bank account fee' : 'credit card fee'}</div>}</td>
                           <td>{fmtDate(i.dueOn)}</td>
                           <td>
                             {i.overdue ? <Badge kind="danger">Overdue</Badge> : <Badge kind={s.kind}>{s.label}</Badge>}
@@ -234,6 +235,30 @@ export default function BillingPage() {
 
       {d.canManage && <ContactPanel contact={d.contact} busy={busy !== null}
         onSave={(c) => run('contact', async () => { setData(await api.put<GroupBilling>('/billing/contact', c)); setNotice({ ok: true, message: 'Saved where your bills go.' }) })} />}
+      {d.canManage && d.credits.length > 0 && (
+        <div className="panel">
+          <h2>Credit</h2>
+          <p className="muted">
+            Credit {d.businessName} has given your investment group, and where it was used. Credit comes off your bills by itself, oldest bill first.
+            {d.creditCents > 0 ? ` ${money(d.creditCents)} is unused.` : ' None is unused at the moment.'}
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>What</th><th>Bill</th><th>Amount</th></tr></thead>
+              <tbody>
+                {d.credits.map((c, n) => (
+                  <tr key={n}>
+                    <td>{fmtDay(c.at)}</td>
+                    <td>{c.label}</td>
+                    <td>{c.invoiceNumber ?? '—'}</td>
+                    <td>{c.amountCents >= 0 ? <strong>+ {money(c.amountCents)}</strong> : `− ${money(-c.amountCents)}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {d.businessEmail && <p className="muted small">Questions about a bill: {d.businessEmail}</p>}
 
       {paying && (
@@ -241,7 +266,7 @@ export default function BillingPage() {
           title={`Pay bill ${paying.number}?`}
           message={
             `${money(amount(paying))} will be taken from ${d.method?.label}`
-            + (paying.payFeeCents > 0 ? `: the bill of ${money(paying.totalCents)} plus the ${pct(feePercent)} ${feeName} of ${money(paying.payFeeCents)}.` : '.')
+            + (paying.payFeeCents > 0 ? `: the ${money(paying.dueCents)} owed on the bill plus the ${pct(feePercent)} ${feeName} of ${money(paying.payFeeCents)}.` : '.')
             + (d.method?.kind === 'bank' ? ' A bank payment takes a few working days to arrive; the bill shows as paid when it does.' : '')
             + (d.payTest ? ' Payments are in test mode, so no money moves.' : '')
           }

@@ -439,11 +439,23 @@ public record PayMethodDto(string Kind, string? Funding, string Label, DateTime?
 public record BillingContact(string? Name, string? Email, string? Street, string? City, string? State, string? Zip);
 /// <param name="PayFeeCents">What paying this bill with the saved payment method would add (a credit card or a bank account).</param>
 public record InvoiceDto(int Id, string Number, string Month, string MonthName, int Cards, int TotalCents, DateTime IssuedAt, DateOnly DueOn, string Status, bool Overdue,
-    DateTime? PaidAt, string? PaidHow, int SurchargeCents, int PayFeeCents, string? PaymentError, List<Services.InvoiceLine> Lines);
+    DateTime? PaidAt, string? PaidHow, int SurchargeCents, int PayFeeCents, string? PaymentError, List<Services.InvoiceLine> Lines)
+{
+    /// <summary>How much of the group's credit was used on this bill, and what is still owed after it.</summary>
+    public int CreditCents { get; init; }
+    public int DueCents { get; init; }
+}
+/// <summary>One line of a group's credit account as the group sees it: what, when and how much, without the System Administrator's notes.</summary>
+public record GroupCreditLine(DateTime At, string Kind, string Label, int AmountCents, string? InvoiceNumber);
 /// <param name="CanManage">A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage.</param>
 public record GroupBillingDto(bool CanManage, bool MailAvailable, bool Test, int CentsPerCard, int LimitCents, int UsedCents, int CardsThisMonth,
     bool PayAvailable, bool PayRequired, bool PayTest, decimal CardFeePercent, decimal BankFeePercent, PayMethodDto? Method, bool AutoPay, BillingContact Contact,
-    string BusinessName, string? BusinessEmail, string? PayInstructions, int BillDay, int DueDays, List<MailMonth> Months, List<InvoiceDto> Invoices, int OwedCents);
+    string BusinessName, string? BusinessEmail, string? PayInstructions, int BillDay, int DueDays, List<MailMonth> Months, List<InvoiceDto> Invoices, int OwedCents)
+{
+    /// <summary>The group's unused credit, which comes off its next bills by itself.</summary>
+    public int CreditCents { get; init; }
+    public List<GroupCreditLine> Credits { get; init; } = [];
+}
 /// <param name="ConfirmCents">The amount the person was shown and agreed to; the payment is refused if it no longer matches.</param>
 public record PayInvoiceRequest(int ConfirmCents);
 public record PaySetupStart(string Url);
@@ -455,7 +467,18 @@ public record BillingActionResult(bool Ok, string Message, GroupBillingDto Billi
 
 public record SystemInvoiceDto(int Id, int GroupId, string Group, string Number, string Month, string MonthName, int Cards, int CostCents, int FeeCents, int TotalCents,
     DateTime IssuedAt, DateOnly DueOn, string Status, bool Overdue, DateTime? PaidAt, string? PaidHow, string? PaidNote, string? PaidBy, int SurchargeCents,
-    string? PaymentRef, string? PaymentError, DateTime? EmailedAt, string? EmailedTo, DateTime? PrintedAt, string? DeliveryError, List<Services.InvoiceLine> Lines);
+    string? PaymentRef, string? PaymentError, DateTime? EmailedAt, string? EmailedTo, DateTime? PrintedAt, string? DeliveryError, List<Services.InvoiceLine> Lines)
+{
+    public int CreditCents { get; init; }
+    public int DueCents { get; init; }
+}
+/// <summary>One line of the credit log, with the System Administrator's details.</summary>
+public record GroupCreditDto(int Id, int GroupId, string Group, DateTime At, string Kind, string Label, int AmountCents, string Details, string By, string? InvoiceNumber);
+/// <param name="Kind">check, correction, bonus or other.</param>
+/// <param name="ConfirmCents">The amount the person was shown and agreed to; refused if it differs from AmountCents.</param>
+/// <param name="Key">Made by the page for this one credit, so a repeated request cannot record it twice.</param>
+public record AddCreditRequest(int AmountCents, string? Kind, string? Details, int ConfirmCents, string? Key);
+public record TakeBackCreditRequest(int AmountCents, string? Details, string? Key);
 /// <param name="FeeCents">The group's own fee per card, or null when it uses the site's.</param>
 /// <param name="LimitCents">The group's own monthly limit, or null when it uses the site's.</param>
 public record GroupBillingRow(int GroupId, string Group, bool Active, int? FeeCents, int EffectiveFeeCents, int? LimitCents, int EffectiveLimitCents, int CardsThisMonth,
@@ -463,12 +486,25 @@ public record GroupBillingRow(int GroupId, string Group, bool Active, int? FeeCe
 {
     /// <summary>Mailing is switched on for this group.</summary>
     public bool MailEnabled { get; init; }
+    /// <summary>Whether this group must save a payment method before mailing, and whether that is its own rule (null: it follows the site's).</summary>
+    public bool PayRequired { get; init; }
+    public bool? OwnPayRule { get; init; }
+    /// <summary>The group's unused credit.</summary>
+    public int CreditCents { get; init; }
 }
 /// <param name="UnbilledMonths">Finished months that have mailed cards with no bill yet.</param>
 public record SystemBillingDto(Services.BillingSettings Settings, bool MailReady, bool MailTest, bool PayReady, bool PayTest, bool EmailReady, List<GroupBillingRow> Groups,
-    List<SystemInvoiceDto> Invoices, List<string> UnbilledMonths, int OwedCents, int OverdueCents);
+    List<SystemInvoiceDto> Invoices, List<string> UnbilledMonths, int OwedCents, int OverdueCents)
+{
+    /// <summary>The credit log, newest first, for the group chosen (or every group).</summary>
+    public List<GroupCreditDto> Credits { get; init; } = [];
+    /// <summary>Unused credit across every group, and the most one credit can be.</summary>
+    public int CreditCents { get; init; }
+    public int MaxCreditCents { get; init; }
+}
 /// <param name="MailEnabled">Switches mailing on or off for the group. Left out, it stays as it is.</param>
-public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents, bool? MailEnabled = null);
+/// <param name="PayRule">"site" (follow the site's setting), "required" or "notrequired": whether the group must save a payment method before mailing. Left out, it stays as it is.</param>
+public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents, bool? MailEnabled = null, string? PayRule = null);
 /// <param name="How">check, bank, card, cash or other.</param>
 public record MarkPaidRequest(string? How, string? Note, DateOnly? PaidOn);
 public record IssueBillsRequest(string? Month);

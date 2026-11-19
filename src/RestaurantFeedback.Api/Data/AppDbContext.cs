@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CardImage> CardImages => Set<CardImage>();
     public DbSet<GroupBilling> GroupBilling => Set<GroupBilling>();
     public DbSet<MailInvoice> MailInvoices => Set<MailInvoice>();
+    public DbSet<GroupCredit> GroupCredits => Set<GroupCredit>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -82,6 +83,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         invoice.Property(i => i.Month).HasMaxLength(7);
         invoice.Property(i => i.Number).HasMaxLength(40);
         invoice.Property(i => i.Status).HasMaxLength(20);
+        var credit = b.Entity<GroupCredit>();
+        credit.HasIndex(c => c.GroupId);
+        credit.HasIndex(c => c.Key).IsUnique();
+        credit.HasOne<OwnerGroup>().WithMany().HasForeignKey(c => c.GroupId).OnDelete(DeleteBehavior.Cascade);
+        credit.Property(c => c.Kind).HasMaxLength(20);
+        credit.Property(c => c.Details).HasMaxLength(500);
+        credit.Property(c => c.CreatedBy).HasMaxLength(200);
+        credit.Property(c => c.Key).HasMaxLength(64);
         invoice.Property(i => i.PaidNote).HasMaxLength(500);
 
         var log = b.Entity<InteractionLog>();

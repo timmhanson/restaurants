@@ -64,7 +64,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var openBills = await db.MailInvoices.AsNoTracking().Where(i => i.Status == InvoiceStatuses.Open).ToListAsync();
         var overdue = openBills.Where(i => i.DueOn < todayDate).ToList();
         if (overdue.Count > 0)
-            attention.Add(new("high", $"{overdue.Count} mailing bill{(overdue.Count == 1 ? " is" : "s are")} overdue ({BillingService.Dollars(overdue.Sum(i => i.TotalCents))})",
+            attention.Add(new("high", $"{overdue.Count} mailing bill{(overdue.Count == 1 ? " is" : "s are")} overdue ({BillingService.Dollars(overdue.Sum(BillingService.Due))})",
                 "The site has already paid the mail house for these cards. Billing shows who owes what; mark each as paid when the money arrives.", "/system-billing?status=overdue"));
         var undelivered = openBills.Count(i => i.DeliveryError != null);
         if (undelivered > 0)

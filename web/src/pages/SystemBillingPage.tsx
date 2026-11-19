@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { BillingSettings, GroupBillingRow, SiteMailStatement, SystemBilling, SystemInvoice } from '../api/types'
+import type { BillingSettings, GroupBillingRow, GroupCredit, SiteMailStatement, SystemBilling, SystemInvoice } from '../api/types'
 import Stat from '../components/Stat'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, fmtDate, fmtDateTime, fmtDay, today } from '../components/ui'
 
@@ -16,6 +16,14 @@ export const INVOICE_STATUS: Record<string, { label: string; kind: 'neutral' | '
   void: { label: 'Cancelled', kind: 'neutral' },
 }
 const HOW: Record<string, string> = { check: 'Check', bank: 'Bank transfer', card: 'Card', cash: 'Cash', other: 'Other' }
+/** How a bill was paid, for showing. Credit is not offered when marking a bill paid by hand: it is used by itself. */
+const PAID_WITH: Record<string, string> = { ...HOW, credit: 'The group’s credit' }
+const CREDIT_REASONS: { value: string; label: string; hint: string }[] = [
+  { value: 'check', label: 'A check arrived', hint: 'The check number, its date, who it was from and when it was deposited.' },
+  { value: 'correction', label: 'Correcting a mistake', hint: 'What went wrong and which bill or cards it concerns.' },
+  { value: 'bonus', label: 'Welcome bonus', hint: 'Why the bonus is given, for example a new group’s first month.' },
+  { value: 'other', label: 'Something else', hint: 'What the credit is for.' },
+]
 
 /**
  * Billing, for the System Administrator. The site pays the mail house for every card it mails, then bills each
@@ -29,6 +37,8 @@ export default function SystemBillingPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [editGroup, setEditGroup] = useState<GroupBillingRow | null>(null)
+  const [crediting, setCrediting] = useState<GroupBillingRow | null>(null)
+  const [takingBack, setTakingBack] = useState<GroupBillingRow | null>(null)
   const [paying, setPaying] = useState<SystemInvoice | null>(null)
   const [voiding, setVoiding] = useState<SystemInvoice | null>(null)
   const [open, setOpen] = useState<number | null>(null)
@@ -172,7 +182,7 @@ export default function SystemBillingPage() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Group</th><th>Mailing</th><th>Your fee per card</th><th>Price per card</th><th>Monthly limit</th><th>This month</th><th>Unpaid bills</th><th>Pays with</th><th /></tr>
+              <tr><th>Group</th><th>Mailing</th><th>Payment method first</th><th>Your fee per card</th><th>Price per card</th><th>Monthly limit</th><th>This month</th><th>Unpaid bills</th><th>Credit</th><th>Pays with</th><th /></tr>
             </thead>
             <tbody>
               {data.groups.map((g) => (
@@ -185,6 +195,10 @@ export default function SystemBillingPage() {
                       {g.mailEnabled ? 'Switch off' : 'Switch on'}
                     </button>
                   </td>
+                  <td>
+                    {g.payRequired ? <Badge kind="neutral">required</Badge> : <Badge kind="warn">not required</Badge>}{' '}
+                    {g.ownPayRule == null ? <span className="muted small">(site setting)</span> : <Badge kind="accent">own rule</Badge>}
+                  </td>
                   <td>{money(g.effectiveFeeCents)} {g.feeCents == null ? <span className="muted small">(site default)</span> : <Badge kind="accent">own fee</Badge>}</td>
                   <td>{money(data.settings.costCents + g.effectiveFeeCents)}</td>
                   <td>
@@ -194,16 +208,23 @@ export default function SystemBillingPage() {
                   <td>{g.cardsThisMonth} card{g.cardsThisMonth === 1 ? '' : 's'}, {money(g.billedThisMonthCents)}</td>
                   <td>{g.owedCents > 0 ? <strong>{money(g.owedCents)}</strong> : '—'}</td>
                   <td>
+                    {g.creditCents > 0 ? <strong>{money(g.creditCents)}</strong> : '—'}{' '}
+                    <button type="button" className="btn btn-sm" disabled={busy} aria-label={`Add a credit for ${g.group}`} onClick={() => setCrediting(g)}>Add credit</button>
+                    {g.creditCents > 0 && <> <button type="button" className="btn btn-sm" disabled={busy} aria-label={`Take back unused credit from ${g.group}`} onClick={() => setTakingBack(g)}>Take back</button></>}
+                  </td>
+                  <td>
                     {g.payLabel ?? <span className="muted">no payment method</span>}
                     {g.autoPay && <> <Badge kind="ok">automatic</Badge></>}
                   </td>
-                  <td><button type="button" className="btn btn-sm" aria-label={`Change fee and limit for ${g.group}`} onClick={() => setEditGroup(g)}>Change</button></td>
+                  <td><button type="button" className="btn btn-sm" aria-label={`Change fee, limit and payment rule for ${g.group}`} onClick={() => setEditGroup(g)}>Change</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      <CreditLog credits={data.credits} filtered={groupId !== ''} unusedCents={data.creditCents} />
 
       <SettingsPanel settings={data.settings} payReady={data.payReady} busy={busy}
         onSave={(s) => act(async () => { await api.put('/system/billing/settings', s); return { message: 'Billing settings saved.' } })} />
@@ -212,10 +233,26 @@ export default function SystemBillingPage() {
 
       {editGroup && (
         <GroupTermsModal group={editGroup} settings={data.settings} busy={busy} onClose={() => setEditGroup(null)}
-          onSave={(fee, limit) => act(async () => {
-            await api.put(`/system/billing/groups/${editGroup.groupId}`, { feeCents: fee, limitCents: limit })
+          onSave={(fee, limit, payRule) => act(async () => {
+            await api.put(`/system/billing/groups/${editGroup.groupId}`, { feeCents: fee, limitCents: limit, payRule })
             setEditGroup(null)
             return { message: `Saved for ${editGroup.group}.` }
+          })} />
+      )}
+      {crediting && (
+        <AddCreditModal group={crediting} maxCents={data.maxCreditCents} busy={busy} onClose={() => setCrediting(null)}
+          onSave={(amountCents, kind, details, key) => act(async () => {
+            const res = await api.post<{ message: string }>(`/system/billing/groups/${crediting.groupId}/credits`, { amountCents, kind, details, confirmCents: amountCents, key })
+            setCrediting(null)
+            return res
+          })} />
+      )}
+      {takingBack && (
+        <TakeBackModal group={takingBack} busy={busy} onClose={() => setTakingBack(null)}
+          onSave={(amountCents, details, key) => act(async () => {
+            const res = await api.post<{ message: string }>(`/system/billing/groups/${takingBack.groupId}/credits/takeback`, { amountCents, details, key })
+            setTakingBack(null)
+            return res
           })} />
       )}
       {paying && (
@@ -236,6 +273,125 @@ export default function SystemBillingPage() {
   )
 }
 
+/** A key for one request, so pressing the button twice (or a retry after a lost connection) cannot record it twice. */
+const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+
+function AddCreditModal({ group, maxCents, busy, onClose, onSave }: {
+  group: GroupBillingRow; maxCents: number; busy: boolean; onClose: () => void; onSave: (amountCents: number, kind: string, details: string, key: string) => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [kind, setKind] = useState('check')
+  const [details, setDetails] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [key] = useState(newKey)
+  const cents = toCents(amount) || 0
+  const reason = CREDIT_REASONS.find((r) => r.value === kind) ?? CREDIT_REASONS[0]
+  const ready = cents > 0 && cents <= maxCents && details.trim().length >= 5
+  const submit = (e: FormEvent) => { e.preventDefault(); if (ready) setConfirming(true) }
+  if (confirming)
+    return (
+      <Confirm
+        title={`Give ${group.group} a credit of ${money(cents)}?`}
+        message={`${reason.label}: ${details.trim()}. It comes off the bills ${group.group} has waiting${group.owedCents > 0 ? ` (${money(group.owedCents)} at the moment)` : ''}, oldest first, and what is left comes off its next bills. The line stays in the credit log and cannot be edited; unused credit can be taken back.`}
+        confirmLabel={`Record ${money(cents)} credit`}
+        busy={busy}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => onSave(cents, kind, details.trim(), key)}
+      />
+    )
+  return (
+    <Modal title={`Add a credit for ${group.group}`} onClose={onClose}>
+      <form onSubmit={submit} className="grid">
+        <p className="muted" style={{ margin: 0 }}>
+          A credit is money {group.group} does not have to pay you. It comes off its bills by itself.
+          {group.creditCents > 0 ? ` It has ${money(group.creditCents)} of unused credit now.` : ''}
+        </p>
+        <Field label="Amount ($)" hint={`Up to ${money(maxCents)} in one credit.`}>
+          <input type="number" min="0.01" max={maxCents / 100} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required autoFocus />
+        </Field>
+        <Field label="What it is for">
+          <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            {CREDIT_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Details" hint={`${reason.hint} Only System Administrators see this. ${details.length}/500`}>
+          <textarea rows={3} maxLength={500} value={details} onChange={(e) => setDetails(e.target.value)} required minLength={5} />
+        </Field>
+        <div className="row-actions">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || !ready}>Review the credit</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function TakeBackModal({ group, busy, onClose, onSave }: {
+  group: GroupBillingRow; busy: boolean; onClose: () => void; onSave: (amountCents: number, details: string, key: string) => void
+}) {
+  const [amount, setAmount] = useState(dollars(group.creditCents))
+  const [details, setDetails] = useState('')
+  const [key] = useState(newKey)
+  const cents = toCents(amount) || 0
+  const ready = cents > 0 && cents <= group.creditCents && details.trim().length >= 5
+  const submit = (e: FormEvent) => { e.preventDefault(); if (ready) onSave(cents, details.trim(), key) }
+  return (
+    <Modal title={`Take back credit from ${group.group}`} onClose={onClose}>
+      <form onSubmit={submit} className="grid">
+        <p className="muted" style={{ margin: 0 }}>
+          {group.group} has {money(group.creditCents)} of credit it has not used. Taking some back adds a line to the credit log; the line that gave the credit stays as
+          it is. Credit already used on a bill comes back by cancelling that bill.
+        </p>
+        <Field label="Amount to take back ($)" hint={`Up to ${money(group.creditCents)}.`}>
+          <input type="number" min="0.01" max={group.creditCents / 100} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        </Field>
+        <Field label="Why" hint={`For example: entered for the wrong group, or the check was returned. Only System Administrators see this. ${details.length}/500`}>
+          <textarea rows={3} maxLength={500} value={details} onChange={(e) => setDetails(e.target.value)} required minLength={5} />
+        </Field>
+        <div className="row-actions">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn btn-danger" disabled={busy || !ready}>{busy ? 'Saving…' : `Take back ${money(cents)}`}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** Every credit given, used, returned or taken back. Lines are never edited or removed. */
+function CreditLog({ credits, filtered, unusedCents }: { credits: GroupCredit[]; filtered: boolean; unusedCents: number }) {
+  return (
+    <div className="panel">
+      <h2>Credit log</h2>
+      <p className="muted">
+        Every credit you have given a group, what it was for, and each time credit was used on a bill, returned or taken back. Nothing here can be edited or
+        removed. {filtered ? 'Showing the investment group chosen under Bills above.' : `Groups hold ${money(unusedCents)} of unused credit between them. Choose an investment group under Bills above to see only its lines.`}
+      </p>
+      {credits.length === 0 ? (
+        <Empty>No credits yet. Use Add credit beside a group above when a check arrives, to correct a mistake, or to give a welcome bonus.</Empty>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>When</th><th>Group</th><th>What</th><th>Amount</th><th>Details</th><th>Bill</th><th>By</th></tr></thead>
+            <tbody>
+              {credits.map((c) => (
+                <tr key={c.id}>
+                  <td>{fmtDateTime(c.at)}</td>
+                  <td>{c.group}</td>
+                  <td>{c.label}</td>
+                  <td>{c.amountCents >= 0 ? <strong>+ {money(c.amountCents)}</strong> : `− ${money(-c.amountCents)}`}</td>
+                  <td style={{ whiteSpace: 'pre-wrap', maxWidth: 360 }}>{c.details}</td>
+                  <td>{c.invoiceNumber ?? '—'}</td>
+                  <td>{c.by}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function InvoiceRows({ invoice: i, open, onToggle, busy, onPaid, onVoid, onReopen, onSend }: {
   invoice: SystemInvoice; open: boolean; onToggle: () => void; busy: boolean; onPaid: () => void; onVoid: () => void; onReopen: () => void; onSend: () => void
 }) {
@@ -249,11 +405,15 @@ function InvoiceRows({ invoice: i, open, onToggle, busy, onPaid, onVoid, onReope
         <td>{i.cards}</td>
         <td>{money(i.costCents)}</td>
         <td>{money(i.feeCents)}</td>
-        <td><strong>{money(i.totalCents)}</strong>{i.surchargeCents > 0 && <div className="muted small">+ {money(i.surchargeCents)} {i.paidHow === 'bank' ? 'bank fee' : 'card fee'}</div>}</td>
+        <td>
+          <strong>{money(i.totalCents)}</strong>
+          {i.creditCents > 0 && <div className="muted small">− {money(i.creditCents)} credit{i.dueCents > 0 ? `, ${money(i.dueCents)} owed` : ''}</div>}
+          {i.surchargeCents > 0 && <div className="muted small">+ {money(i.surchargeCents)} {i.paidHow === 'bank' ? 'bank fee' : 'card fee'}</div>}
+        </td>
         <td>{fmtDate(i.dueOn)}</td>
         <td>
           {i.overdue ? <Badge kind="danger">Overdue</Badge> : <Badge kind={s.kind}>{s.label}</Badge>}
-          {i.status === 'paid' && <div className="muted small">{fmtDay(i.paidAt)}{i.paidHow ? `, ${HOW[i.paidHow]?.toLowerCase() ?? i.paidHow}` : ''}</div>}
+          {i.status === 'paid' && <div className="muted small">{fmtDay(i.paidAt)}{i.paidHow ? `, ${PAID_WITH[i.paidHow]?.toLowerCase() ?? i.paidHow}` : ''}</div>}
           {i.paymentError && <div className="small" style={{ color: 'var(--danger)' }}>Payment failed</div>}
         </td>
         <td>
@@ -301,7 +461,10 @@ function MarkPaidModal({ invoice, busy, onClose, onSave }: { invoice: SystemInvo
   return (
     <Modal title={`Mark bill ${invoice.number} as paid`} onClose={onClose}>
       <form onSubmit={submit} className="grid">
-        <p style={{ margin: 0 }}>{invoice.group} paid <strong>{money(invoice.totalCents)}</strong> for {invoice.monthName} outside the site.</p>
+        <p style={{ margin: 0 }}>
+          {invoice.group} paid <strong>{money(invoice.dueCents)}</strong> for {invoice.monthName} outside the site
+          {invoice.creditCents > 0 ? ` (the bill of ${money(invoice.totalCents)} less ${money(invoice.creditCents)} of its credit)` : ''}.
+        </p>
         <Field label="How it was paid">
           <select value={how} onChange={(e) => setHow(e.target.value)}>
             {Object.entries(HOW).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -323,17 +486,26 @@ function MarkPaidModal({ invoice, busy, onClose, onSave }: { invoice: SystemInvo
 }
 
 function GroupTermsModal({ group, settings, busy, onClose, onSave }: {
-  group: GroupBillingRow; settings: BillingSettings; busy: boolean; onClose: () => void; onSave: (feeCents: number | null, limitCents: number | null) => void
+  group: GroupBillingRow; settings: BillingSettings; busy: boolean; onClose: () => void; onSave: (feeCents: number | null, limitCents: number | null, payRule: string) => void
 }) {
+  const [payRule, setPayRule] = useState(group.ownPayRule == null ? 'site' : group.ownPayRule ? 'required' : 'notrequired')
   const [ownFee, setOwnFee] = useState(group.feeCents != null)
   const [fee, setFee] = useState(dollars(group.feeCents ?? settings.feeCents))
   const [ownLimit, setOwnLimit] = useState(group.limitCents != null)
   const [limit, setLimit] = useState(dollars(group.limitCents ?? settings.monthlyLimitCents))
-  const submit = (e: FormEvent) => { e.preventDefault(); onSave(ownFee ? toCents(fee) : null, ownLimit ? toCents(limit) : null) }
+  const submit = (e: FormEvent) => { e.preventDefault(); onSave(ownFee ? toCents(fee) : null, ownLimit ? toCents(limit) : null, payRule) }
   const price = settings.costCents + (ownFee ? toCents(fee) || 0 : settings.feeCents)
   return (
-    <Modal title={`Fee and limit for ${group.group}`} onClose={onClose}>
+    <Modal title={`Fee, limit and payment rule for ${group.group}`} onClose={onClose}>
       <form onSubmit={submit} className="grid">
+        <Field label="A payment method before any card is mailed"
+          hint="Whether this group has to save a card or bank account on its Billing page before its cards can be mailed. Without one you bill it and collect the money yourself.">
+          <select value={payRule} onChange={(e) => setPayRule(e.target.value)}>
+            <option value="site">Follow the site’s setting ({settings.requirePaymentMethod ? 'required' : 'not required'})</option>
+            <option value="required">Required for this group</option>
+            <option value="notrequired">Not required for this group</option>
+          </select>
+        </Field>
         <label className="check">
           <input type="checkbox" checked={ownFee} onChange={(e) => setOwnFee(e.target.checked)} />
           <span>Give this group its own fee per card <span className="muted">(otherwise {money(settings.feeCents)}, the site’s)</span></span>

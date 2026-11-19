@@ -32,6 +32,10 @@ See README.md for the architecture, roles and deployment.
   entries, exports and audit rows a group can read say "mailed for you" or "the mailing service"
   (`MailStatuses.ForClients`); the names appear only in the System Administrator's area. Groups also see one
   price per card, never the split between the mail house's cost and the site's fee.
+- **Credit given to a group is a ledger, not a number.** A credit (`GroupCredit`) needs a reason and details, a
+  confirmation naming the amount, a key so it cannot be recorded twice, and an audit row. Lines are never edited
+  or removed: a mistake is put right with a new line (take back, or cancel the bill to return it). Only System
+  Administrators give credit or see its details; the group sees the amounts.
 - **Card and bank numbers never touch the site.** Payment methods are entered on Stripe's own page; store only
   Stripe's references and a label. A charge needs the amount confirmed by the person (or automatic payment they
   switched on), an idempotency key so a bill cannot be charged twice, and an audit row.

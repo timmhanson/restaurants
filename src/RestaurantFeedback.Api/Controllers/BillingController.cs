@@ -161,7 +161,8 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
         var invoice = await db.MailInvoices.FirstOrDefaultAsync(i => i.Id == id && i.GroupId == groupId, ct);
         if (invoice is null) return NotFound();
         var b = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
-        var amount = invoice.TotalCents + ledger.PayFee(invoice.TotalCents, b);
+        var due = BillingService.Due(invoice);
+        var amount = due + ledger.PayFee(due, b);
         if (req.ConfirmCents != amount)
             return BadRequest(new { message = $"The amount to pay is now {BillingService.Dollars(amount)}. Nothing was charged; review it and confirm again." });
         var (ok, message) = await billing.ChargeAsync(invoice, me.DisplayName, me.Id, me.Role, ct);
@@ -209,8 +210,12 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
             ? (await db.MailInvoices.AsNoTracking().Where(i => i.GroupId == groupId && i.Status != InvoiceStatuses.Void).OrderByDescending(i => i.Month).Take(36).ToListAsync(ct))
                 .Select(i => new InvoiceDto(i.Id, i.Number, i.Month, MailLedger.MonthName(i.Month), i.Cards, i.TotalCents, DateTime.SpecifyKind(i.IssuedAt, DateTimeKind.Utc), i.DueOn, i.Status,
                     i.Status == InvoiceStatuses.Open && i.DueOn < today, i.PaidAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null, i.PaidHow, i.SurchargeCents,
-                    ledger.PayFee(i.TotalCents, b), i.PaymentError, BillingService.Lines(i))).ToList()
+                    ledger.PayFee(BillingService.Due(i), b), i.PaymentError, BillingService.Lines(i)) { CreditCents = i.CreditCents, DueCents = BillingService.Due(i) }).ToList()
             : [];
+        // The group's credit account, without the System Administrator's notes.
+        var creditRows = manage ? await db.GroupCredits.AsNoTracking().Where(c => c.GroupId == groupId).OrderByDescending(c => c.Id).Take(100).ToListAsync(ct) : [];
+        var billNumbers = manage ? await db.MailInvoices.AsNoTracking().Where(i => i.GroupId == groupId).ToDictionaryAsync(i => i.Id, i => i.Number, ct) : [];
+        var creditBalance = manage ? await billing.CreditBalanceAsync(groupId, ct) : 0;
         var method = manage && b?.PayMethodId is not null
             ? new PayMethodDto(b.PayKind ?? PayKinds.Card, b.PayFunding, b.PayLabel ?? "Saved payment method", b.PaySetAt is { } set ? DateTime.SpecifyKind(set, DateTimeKind.Utc) : null, b.PaySetBy)
             : null;
@@ -219,6 +224,11 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
             current?.TotalCents ?? 0, current?.Cards ?? 0, payAccount.Current is not null, terms.PayRequired, payAccount.Current?.Test ?? false, s.CardFeePercent, s.BankFeePercent, method, b?.AutoPay ?? false,
             manage ? new BillingContact(b?.BillingName, b?.BillingEmail, b?.Street, b?.City, b?.State, b?.Zip) : new BillingContact(null, null, null, null, null, null),
             s.BusinessName, s.BusinessEmail, s.PayInstructions, s.BillDay, s.DueDays, months, invoices,
-            invoices.Where(i => i.Status == InvoiceStatuses.Open).Sum(i => i.TotalCents));
+            invoices.Where(i => i.Status == InvoiceStatuses.Open).Sum(i => i.DueCents))
+        {
+            CreditCents = creditBalance,
+            Credits = creditRows.Select(c => new GroupCreditLine(DateTime.SpecifyKind(c.CreatedAt, DateTimeKind.Utc), c.Kind, CreditKinds.Label(c.Kind), c.AmountCents,
+                c.InvoiceId is int id ? billNumbers.GetValueOrDefault(id) : null)).ToList()
+        };
     }
 }

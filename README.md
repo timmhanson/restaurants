@@ -246,6 +246,19 @@ changes never rewrite history. The System Administrator's **Billing** page (`Sys
 - what a card costs the site and **the site's fee per card**, for every group and optionally **per group**;
 - **whether mailing is switched on** for each group (off until the System Administrator switches it on;
   audited as `GroupMailingSwitchedOn` / `GroupMailingSwitchedOff`);
+- **whether a group needs a payment method before mailing**: the site's setting (required by default) applies
+  unless the group is given its own rule, required or not required (`GroupBilling.RequirePayMethod`, audited as
+  `GroupPaymentRuleChanged`);
+- **credit** for a group (`GroupCredit`, `POST /api/system/billing/groups/{id}/credits`): a check that arrived, a
+  correction, a welcome bonus. Each credit needs an amount (up to $10,000), a reason and details, is confirmed
+  before it is recorded, and carries a key so a repeated request cannot record it twice. Credit comes off the
+  group's bills by itself, oldest first, as soon as there is a bill waiting (`BillingService.ApplyCreditAsync`,
+  `MailInvoice.CreditCents`); a bill the credit covers in full is marked paid with credit, and only what is
+  still owed is ever charged to a card or bank account. Cancelling a bill returns the credit used on it. Unused
+  credit can be taken back with a reason. The **credit log** on Billing lists every line (given, used,
+  returned, taken back) with who and why, filters by investment group, and nothing in it can be edited or
+  removed. The group's administrators see their credit and where it went on their own Billing page, without
+  the System Administrator's details;
 - a **monthly limit** per group (site default and per group; $0 switches mailing off), which caps what any
   group can owe;
 - the **bill day** (last month's bills are created on it), days to pay, whether bills are **emailed** and whether

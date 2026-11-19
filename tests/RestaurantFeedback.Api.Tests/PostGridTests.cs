@@ -725,6 +725,195 @@ public class PostGridTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task The_System_Administrator_gives_a_group_credit_with_details_and_it_comes_off_its_bills()
+    {
+        var (owner, admin, site, rid, groupId) = await SetUpAsync(LiveKey);
+        await SaveSettings(site, s => { s.CostCents = 90; s.FeeCents = 10; s.EmailBills = false; s.PrintBills = false; s.RequirePaymentMethod = false; });
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, 1_000_000))).StatusCode);
+        // Start from a group with nothing waiting and no credit, whatever the tests before left.
+        await Db(async db =>
+        {
+            foreach (var i in db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open)) i.Status = InvoiceStatuses.Void;
+            db.GroupCredits.RemoveRange(db.GroupCredits.Where(c => c.GroupId == groupId));
+            return await db.SaveChangesAsync();
+        });
+        var now = DateTime.UtcNow;
+        string Month(int back) => MailLedger.MonthKey(MailLedger.MonthStart(now).AddMonths(-back));
+        var mine = new List<int>();
+        async Task MailIn(int back, int cards)
+        {
+            var ids = new List<int>();
+            for (var i = 0; i < cards; i++) ids.Add((await Create(owner, Card(rid, $"Credit {back} {i}"))).Id);
+            Assert.All(await Mail(owner, ids.ToArray()), o => Assert.True(o.Ok));
+            mine.AddRange(ids);
+            await Db(async db =>
+            {
+                foreach (var c in db.Comments.Where(c => ids.Contains(c.Id))) c.MailedAt = MailLedger.MonthStart(now).AddMonths(-back).AddDays(2);
+                return await db.SaveChangesAsync();
+            });
+        }
+        async Task<GroupBillingRow> Row() => (await Billing(site)).Groups.Single(g => g.GroupId == groupId);
+        async Task<SystemInvoiceDto> Bill(int back) => (await Billing(site)).Invoices.Single(i => i.GroupId == groupId && i.Month == Month(back));
+        async Task<List<GroupCreditDto>> Log() => (await site.GetFromJsonAsync<SystemBillingDto>($"/api/system/billing?groupId={groupId}"))!.Credits;
+        Task<HttpResponseMessage> Add(HttpClient who, int cents, string? kind, string? details, string? key, int? confirm = null) =>
+            who.PostAsJsonAsync($"/api/system/billing/groups/{groupId}/credits", new AddCreditRequest(cents, kind, details, confirm ?? cents, key));
+        Task<HttpResponseMessage> TakeBack(int cents, string? details, string? key) =>
+            site.PostAsJsonAsync($"/api/system/billing/groups/{groupId}/credits/takeback", new TakeBackCreditRequest(cents, details, key));
+        try
+        {
+            // Only the System Administrator gives credit, and every credit needs an amount within the cap, a reason and real details.
+            Assert.Equal(HttpStatusCode.Forbidden, (await Add(owner, 250, "bonus", "Welcome to the site", "k-owner")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Add(site, 0, "bonus", "Welcome to the site", "k-a")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Add(site, RestaurantFeedback.Api.Controllers.SystemBillingController.MaxCreditCents + 1, "bonus", "Welcome to the site", "k-b")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Add(site, 250, "bonus", "Welcome to the site", "k-c", confirm: 2500)).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Add(site, 250, "gift", "Welcome to the site", "k-d")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Add(site, 250, "bonus", " ok ", "k-e")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Add(site, 250, "bonus", "Welcome to the site", null)).StatusCode);
+            Assert.Empty(await Log());
+
+            // A welcome bonus before any bill: it waits as unused credit. Sending the same request twice records it once.
+            var key = $"bonus-{Guid.NewGuid():N}";
+            Assert.Equal(HttpStatusCode.OK, (await Add(site, 250, "bonus", "Welcome bonus for the first month <b>", key)).StatusCode);
+            var again = await Add(site, 250, "bonus", "Welcome bonus for the first month <b>", key);
+            Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+            Assert.Contains("already recorded", await again.Content.ReadAsStringAsync());
+            Assert.Equal(250, (await Row()).CreditCents);
+            var first = Assert.Single(await Log());
+            Assert.Equal((250, "bonus", "Welcome bonus", "Welcome bonus for the first month <b>"), (first.AmountCents, first.Kind, first.Label, first.Details));
+            Assert.False(string.IsNullOrWhiteSpace(first.By));
+
+            // The next bill takes the credit by itself: $3.00 of cards, $2.50 of credit, 50 cents still owed.
+            await MailIn(5, 3);
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync("/api/system/billing/issue", new IssueBillsRequest(Month(5)))).StatusCode);
+            var bill = await Bill(5);
+            Assert.Equal((300, 250, 50, "open"), (bill.TotalCents, bill.CreditCents, bill.DueCents, bill.Status));
+            Assert.Equal(0, (await Row()).CreditCents);
+            Assert.Equal(50, (await Row()).OwedCents);
+            Assert.Contains(await Log(), c => c.Kind == "applied" && c.AmountCents == -250 && c.InvoiceNumber == bill.Number);
+
+            // The group's administrators see the credit and where it went, but never the System Administrator's notes.
+            var seen = await admin.GetAsync("/api/billing");
+            var theirs = (await seen.Content.ReadFromJsonAsync<GroupBillingDto>())!;
+            Assert.Equal(50, theirs.OwedCents);
+            Assert.Equal((250, 50), (theirs.Invoices.Single(i => i.Id == bill.Id).CreditCents, theirs.Invoices.Single(i => i.Id == bill.Id).DueCents));
+            Assert.Equal(2, theirs.Credits.Count);
+            Assert.DoesNotContain("first month", await (await admin.GetAsync("/api/billing")).Content.ReadAsStringAsync());
+            Assert.Empty((await owner.GetFromJsonAsync<GroupBillingDto>("/api/billing"))!.Credits);
+
+            // A check arrives for more than is owed: the bill is paid with credit and the rest waits for the next bill.
+            Assert.Equal(HttpStatusCode.OK, (await Add(site, 500, "check", "Check 1042 dated Nov 3, deposited Nov 5", $"check-{Guid.NewGuid():N}")).StatusCode);
+            bill = await Bill(5);
+            Assert.Equal(("paid", "credit", 300, 0), (bill.Status, bill.PaidHow, bill.CreditCents, bill.DueCents));
+            Assert.Equal(450, (await Row()).CreditCents);
+            // There is no payment to undo on a bill the credit paid.
+            Assert.Equal(HttpStatusCode.BadRequest, (await site.PostAsync($"/api/system/billing/invoices/{bill.Id}/unpaid", null)).StatusCode);
+            await MailIn(4, 2);
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync("/api/system/billing/issue", new IssueBillsRequest(Month(4)))).StatusCode);
+            Assert.Equal(("paid", "credit", 200), ((await Bill(4)).Status, (await Bill(4)).PaidHow, (await Bill(4)).CreditCents));
+            Assert.Equal(250, (await Row()).CreditCents);
+
+            // Unused credit can be taken back, with a reason; never more than is unused, and never twice for one request.
+            Assert.Equal(HttpStatusCode.BadRequest, (await TakeBack(251, "The check was returned by the bank", "t-a")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await TakeBack(100, "no", "t-b")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PostAsJsonAsync($"/api/system/billing/groups/{groupId}/credits/takeback", new TakeBackCreditRequest(100, "The check was returned", "t-c"))).StatusCode);
+            var back = $"back-{Guid.NewGuid():N}";
+            Assert.Equal(HttpStatusCode.OK, (await TakeBack(100, "Part of the check was for another group", back)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await TakeBack(100, "Part of the check was for another group", back)).StatusCode);
+            Assert.Equal(150, (await Row()).CreditCents);
+
+            // Cancelling a bill returns the credit used on it; putting the bill back uses the credit again; the rest is paid by hand.
+            await MailIn(6, 3);
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync("/api/system/billing/issue", new IssueBillsRequest(Month(6)))).StatusCode);
+            var last = await Bill(6);
+            Assert.Equal((300, 150, 150, "open"), (last.TotalCents, last.CreditCents, last.DueCents, last.Status));
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsync($"/api/system/billing/invoices/{last.Id}/void", null)).StatusCode);
+            Assert.Equal(150, (await Row()).CreditCents);
+            Assert.Equal(0, (await Bill(6)).CreditCents);
+            Assert.Contains(await Log(), c => c.Kind == "returned" && c.AmountCents == 150 && c.InvoiceNumber == last.Number);
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsync($"/api/system/billing/invoices/{last.Id}/unpaid", null)).StatusCode);
+            Assert.Equal((150, 150, "open"), ((await Bill(6)).CreditCents, (await Bill(6)).DueCents, (await Bill(6)).Status));
+            Assert.Equal(0, (await Row()).CreditCents);
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync($"/api/system/billing/invoices/{last.Id}/paid", new MarkPaidRequest("check", "Check 1050", null))).StatusCode);
+            Assert.Equal("paid", (await Bill(6)).Status);
+
+            // The log keeps every line, in order, and adds up to what the group has left. Each step is in the audit log with its details.
+            var log = await Log();
+            Assert.Equal(0, log.Sum(c => c.AmountCents));
+            Assert.Equal(new[] { "applied", "returned", "applied", "takenback", "applied", "applied", "check", "applied", "bonus" }, log.Select(c => c.Kind).ToArray());
+            Assert.Empty((await site.GetFromJsonAsync<SystemBillingDto>("/api/system/billing?groupId=999999"))!.Credits);
+            var audited = await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.GroupId == groupId).OrderByDescending(a => a.Id).Take(60).ToList()));
+            Assert.Contains(audited, a => a.Action == "GroupCreditAdded" && a.Details!.Contains("Check 1042"));
+            Assert.Contains(audited, a => a.Action == "GroupCreditTakenBack" && a.Details!.Contains("another group"));
+            Assert.Contains(audited, a => a.Action == "MailBillCreditApplied");
+            Assert.Contains(audited, a => a.Action == "MailBillMarkedPaid" && a.Details!.Contains("\"paidCents\":150"));
+        }
+        finally
+        {
+            // Other tests count this group's bills and cards, so everything made here is taken away again.
+            await Db(async db =>
+            {
+                var months = new[] { Month(4), Month(5), Month(6) };
+                db.MailInvoices.RemoveRange(db.MailInvoices.Where(i => i.GroupId == groupId && months.Contains(i.Month)));
+                db.GroupCredits.RemoveRange(db.GroupCredits.Where(c => c.GroupId == groupId));
+                db.Comments.RemoveRange(db.Comments.Where(c => mine.Contains(c.Id)));
+                return await db.SaveChangesAsync();
+            });
+        }
+    }
+
+    [Fact]
+    public async Task Whether_a_payment_method_is_needed_before_mailing_can_be_set_for_one_group()
+    {
+        var (owner, _, site, _, groupId) = await SetUpAsync();
+        async Task<PrintConfig> Config() => (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
+        async Task<GroupBillingRow> Row() => (await Billing(site)).Groups.Single(g => g.GroupId == groupId);
+        Task<HttpResponseMessage> Rule(string? rule) => site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, null, rule));
+        await Db(async db =>
+        {
+            var b = db.GroupBilling.Single(x => x.GroupId == groupId);
+            b.PayMethodId = null;
+            b.RequirePayMethod = null;
+            return await db.SaveChangesAsync();
+        });
+        try
+        {
+            // The site's setting applies to a group with no rule of its own: required, unless the System Administrator switches that off.
+            await SaveSettings(site, s => s.RequirePaymentMethod = true);
+            Assert.Equal((true, (bool?)null), ((await Row()).PayRequired, (await Row()).OwnPayRule));
+            Assert.Equal("payment", (await Config()).MailBlockedBy);
+            Assert.True((await Config()).MailNeedsPayMethod);
+
+            // One group can be let off: it mails without a saved payment method while everyone else still needs one.
+            Assert.Equal(HttpStatusCode.OK, (await Rule("notrequired")).StatusCode);
+            Assert.Equal((false, (bool?)false), ((await Row()).PayRequired, (await Row()).OwnPayRule));
+            Assert.Null((await Config()).MailBlockedBy);
+            Assert.True((await Config()).CanMail);
+
+            // And one group can be held to it when the site as a whole is not.
+            await SaveSettings(site, s => s.RequirePaymentMethod = false);
+            Assert.Equal(HttpStatusCode.OK, (await Rule("required")).StatusCode);
+            Assert.Equal((true, (bool?)true), ((await Row()).PayRequired, (await Row()).OwnPayRule));
+            Assert.Equal("payment", (await Config()).MailBlockedBy);
+
+            // Back to following the site; leaving the rule out of another change keeps it; nonsense is refused; only the System Administrator decides.
+            Assert.Equal(HttpStatusCode.OK, (await Rule("site")).StatusCode);
+            Assert.Null((await Row()).OwnPayRule);
+            Assert.Null((await Config()).MailBlockedBy);
+            Assert.Equal(HttpStatusCode.OK, (await Rule("required")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await Rule(null)).StatusCode);
+            Assert.True((await Row()).OwnPayRule);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Rule("sometimes")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, null, "notrequired"))).StatusCode);
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Count(a => a.Action == "GroupPaymentRuleChanged" && a.GroupId == groupId) >= 4)));
+        }
+        finally
+        {
+            await Rule("site");
+            await SaveSettings(site, s => s.RequirePaymentMethod = false);
+        }
+    }
+
+    [Fact]
     public async Task Mailing_is_off_for_a_group_until_switched_on_and_a_restaurant_can_make_it_its_usual_way()
     {
         var (owner, _, site, rid, groupId) = await SetUpAsync();
