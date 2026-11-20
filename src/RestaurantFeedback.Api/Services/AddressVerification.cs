@@ -47,6 +47,42 @@ public static class AddressStatuses
 }
 
 /// <summary>Checks a US mailing address. Used only to help mail coupon cards; never blocks saving a card.</summary>
+/// <summary>An address offered while the street is being typed. City, state and zip are there when the address service gave them.</summary>
+public record AddressPreview(string StreetAddress, string? City, string? State, string? Zip);
+
+/// <summary>
+/// Offers addresses as a street is typed, for picking. Asking costs nothing (no lookup is used); the address that is
+/// picked is then checked like any other.
+/// </summary>
+public interface IAddressSuggester
+{
+    bool Configured { get; }
+    /// <param name="nearState">The restaurant's state: addresses there are offered first.</param>
+    Task<List<AddressPreview>> SuggestAsync(AddressInput typed, string? nearState, CancellationToken ct = default);
+}
+
+/// <summary>Local development only: offers made-up addresses so the picker can be tried without an address service.</summary>
+public class SampleAddressSuggester : IAddressSuggester
+{
+    public bool Configured => true;
+
+    public Task<List<AddressPreview>> SuggestAsync(AddressInput typed, string? nearState, CancellationToken ct = default)
+    {
+        var street = (typed.Street ?? "").Trim();
+        if (street.Length < PostGridAddressVerifier.MinTyped) return Task.FromResult(new List<AddressPreview>());
+        var state = UsStates.Code(typed.State) ?? UsStates.Code(nearState) ?? "IL";
+        var number = new string(street.TakeWhile(char.IsDigit).ToArray()) is { Length: > 0 } n ? n : "100";
+        var name = street[number.Length..].Trim() is { Length: > 0 } rest ? rest : street;
+        return Task.FromResult(new List<AddressPreview>
+        {
+            new($"{number} {name} St", "Joliet", state, "60431"),
+            new($"{number} {name} Ave", "Lockport", state, "60441"),
+            new($"{number} {name} Rd", "Romeoville", state, "60446"),
+            new($"{number} {name} Blvd", "Springfield", null, "62701"),
+        });
+    }
+}
+
 public interface IAddressVerifier
 {
     bool Configured { get; }

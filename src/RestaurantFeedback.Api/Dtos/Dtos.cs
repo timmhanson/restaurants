@@ -631,6 +631,10 @@ public record FollowUpDaysRequest(int? Days);
 // ---- Checking a mailing address with USPS ------------------------------------------------------------------
 
 public record AddressCheckRequest(string? StreetAddress, string? City, string? State, string? Zip);
+/// <summary>What has been typed of a guest's address so far, and the restaurant the card is for.</summary>
+public record AddressSuggestRequest(int RestaurantId, [MaxLength(200)] string? StreetAddress, [MaxLength(100)] string? City, [MaxLength(40)] string? State, [MaxLength(20)] string? Zip);
+/// <param name="Available">Addresses are offered for this restaurant. When false, the form stops asking.</param>
+public record AddressSuggestResponse(bool Available, List<Services.AddressPreview> Suggestions);
 /// <param name="Available">False when address checking is not set up on this site (the form then shows nothing).</param>
 public record AddressCheckResponse(bool Available, string Status, string Message, AddressSuggestion? Suggested);
 

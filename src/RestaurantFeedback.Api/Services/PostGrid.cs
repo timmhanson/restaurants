@@ -789,8 +789,95 @@ public class PostGridAddressAccountStore(IServiceScopeFactory scopes, IDataProte
 /// PostGrid's US address verification (POST /v1/addver/verifications), which checks against USPS data. Answers are
 /// remembered for a day, and after a refusal (bad key, out of lookups, busy) PostGrid is left alone for a while.
 /// </summary>
-public class PostGridAddressVerifier(HttpClient http, PostGridAddressAccountStore account, PostGridOptions options, IMemoryCache cache, ILogger<PostGridAddressVerifier> log) : IAddressVerifier
+public class PostGridAddressVerifier(HttpClient http, PostGridAddressAccountStore account, PostGridOptions options, IMemoryCache cache, ILogger<PostGridAddressVerifier> log) : IAddressVerifier, IAddressSuggester
 {
+    /// <summary>How much of a street must be typed before addresses are offered.</summary>
+    public const int MinTyped = 4;
+    private const int MaxOffered = 6;
+    private static DateTime _suggestPausedUntil = DateTime.MinValue;
+
+    /// <summary>
+    /// Addresses that begin the way the street was typed (GET /v1/addver/completions, PostGrid's autocomplete
+    /// previews, which use no lookup). Addresses in the restaurant's state come first. Answers are remembered for
+    /// half an hour, and after a refusal PostGrid is not asked again for a few minutes; checking addresses carries on.
+    /// </summary>
+    public async Task<List<AddressPreview>> SuggestAsync(AddressInput typed, string? nearState, CancellationToken ct = default)
+    {
+        if (Account is not { } a) return [];
+        var street = Clean(typed.Street);
+        if (street.Length < MinTyped) return [];
+        var city = Clean(typed.City);
+        var zip5 = Zip5(typed.Zip);
+        var state = UsStates.Code(typed.State);
+        var near = state is null && zip5 is null ? UsStates.Code(nearState) : null;
+        var cacheKey = $"postgrid-suggest:{street}|{city}|{state}|{zip5}|{near}".ToUpperInvariant();
+        if (cache.TryGetValue(cacheKey, out List<AddressPreview>? known) && known is not null) return known;
+        if (DateTime.UtcNow < _suggestPausedUntil) return [];
+        try
+        {
+            var found = new List<AddressPreview>();
+            // Nearby first: most guests live in the restaurant's own state.
+            if (near is not null) found.AddRange(await Previews(a.ApiKey, street, city, near, null, false, ct) ?? []);
+            if (found.Count < 3)
+            {
+                var wider = await Previews(a.ApiKey, street, city, state, zip5, false, ct);
+                if (wider is null && found.Count == 0) return [];
+                // A preview can come with its zip but not its state. Asking for the states instead costs nothing either.
+                if (wider is { Count: > 0 } && wider.Any(p => p.State is null) && await Previews(a.ApiKey, street, city, state, zip5, true, ct) is { } states)
+                    wider = wider.Select((p, i) => p.State is null && i < states.Count && Same(p, states[i]) ? p with { State = states[i].State } : p).ToList();
+                found.AddRange((wider ?? []).Where(w => !found.Any(f => Same(f, w))));
+            }
+            var list = found.Take(MaxOffered).ToList();
+            cache.Set(cacheKey, list, TimeSpan.FromMinutes(30));
+            return list;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            log.LogWarning("PostGrid address suggestions could not be reached: {Error}", ex.GetType().Name);
+            return [];
+        }
+    }
+
+    private static bool Same(AddressPreview x, AddressPreview y) =>
+        string.Equals(x.StreetAddress, y.StreetAddress, StringComparison.OrdinalIgnoreCase) && string.Equals(x.City, y.City, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>One request for previews. Null when PostGrid refused; what was typed is never written to the log.</summary>
+    private async Task<List<AddressPreview>?> Previews(string key, string street, string city, string? state, string? zip5, bool statesInsteadOfZips, CancellationToken ct)
+    {
+        var query = $"partialStreet={Uri.EscapeDataString(street)}&countryFilter=US&properCase=true&limit={MaxOffered}"
+            + (state is null ? "" : $"&stateFilter={state}") + (city.Length == 0 ? "" : $"&cityFilter={Uri.EscapeDataString(city)}")
+            + (zip5 is null ? "" : $"&pcFilter={zip5}") + (statesInsteadOfZips ? "&provInsteadOfPC=true" : "");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/v1/addver/completions?{query}");
+        req.Headers.Add("x-api-key", key);
+        using var res = await http.SendAsync(req, ct);
+        var body = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            _suggestPausedUntil = DateTime.UtcNow.AddMinutes(res.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden ? 10 : 2);
+            log.LogWarning("PostGrid address suggestions answered {Status}", (int)res.StatusCode);
+            return null;
+        }
+        return ReadPreviews(JsonDocument.Parse(body).RootElement, state);
+    }
+
+    /// <summary>Reads { data: [ { preview: { address, city, prov, pc } } ] }. A state filter that was asked for is the state of every answer.</summary>
+    public static List<AddressPreview> ReadPreviews(JsonElement root, string? stateAsked)
+    {
+        var list = new List<AddressPreview>();
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return list;
+        foreach (var item in data.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("preview", out var p)) continue;
+            var street = Text(p, "address");
+            if (string.IsNullOrWhiteSpace(street)) continue;
+            var state = UsStates.Code(Text(p, "prov")) ?? stateAsked;
+            var zip = Zip5(Text(p, "pc"));
+            var city = Text(p, "city");
+            list.Add(new AddressPreview(street.Trim(), string.IsNullOrWhiteSpace(city) ? null : city.Trim(), state, zip));
+        }
+        return list;
+    }
+
     private static DateTime _pausedUntil = DateTime.MinValue;
     private static int _accountVersion = -1;
     private static string? _problem;

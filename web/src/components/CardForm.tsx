@@ -3,6 +3,7 @@ import { api, ApiError } from '../api/client'
 import { COMMENT_SOURCES, PHONE_SOURCE, type CommentRequest, type CommentSummary, type DuplicateCheckResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import AddressCheckNote from './AddressCheckNote'
+import AddressSuggestInput from './AddressSuggestInput'
 import { Alert, Field, Modal, addMonths, fmtDate, today } from './ui'
 
 export type CardFormValues = Omit<CommentRequest, 'force'>
@@ -348,7 +349,16 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
             </Field>
           </div>
           <Field label="Street address">
-            <input value={v.streetAddress ?? ''} onChange={(e) => set('streetAddress', e.target.value)} autoComplete="off" />
+            <AddressSuggestInput
+              value={v.streetAddress ?? ''}
+              city={v.city ?? ''}
+              state={v.state ?? ''}
+              zip={v.zip ?? ''}
+              restaurantId={v.restaurantId}
+              onChange={(street) => set('streetAddress', street)}
+              // What the picked address does not say (a state or zip now and then) is left as it was typed.
+              onPick={(a) => setV((s) => ({ ...s, streetAddress: a.streetAddress, city: a.city ?? s.city, state: a.state ?? s.state, zip: a.zip ?? s.zip }))}
+            />
           </Field>
           <div className="row">
             <Field label="City">

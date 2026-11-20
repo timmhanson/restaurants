@@ -145,6 +145,10 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
             Address Verification key (in PostGrid: Address Verification, Developers). New accounts get some free lookups; after that PostGrid charges per
             lookup, billed to the account whose key is entered here.
           </p>
+          <p className="muted">
+            With this key entered, the street address box on Enter Card also offers addresses to pick as it is typed, for restaurants that have their cards
+            printed and mailed. Offering addresses uses no lookups (PostGrid’s autocomplete previews are free); the address picked is then checked as usual.
+          </p>
           {test && <Alert kind={test.ok ? 'success' : 'error'} onClose={() => setTest(null)}>{test.message}</Alert>}
           {!site.canEnter ? (
             <Alert kind="info">This copy of the site uses a stand-in address service, so no key is needed here.</Alert>

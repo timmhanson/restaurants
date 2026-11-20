@@ -159,6 +159,15 @@ or **PostGrid first**. `AddressCheckers` asks them in that order and moves to th
 answer. PostGrid charges per lookup after its free allowance, billed to the account whose key is entered; the
 `PostGrid__AddressApiKey` app setting is a fallback when nothing is entered in the site.
 
+**Addresses offered as the street is typed.** With that key entered, the street address box on Enter Card offers
+addresses that begin the way the street has been typed, for restaurants that have their cards printed and mailed
+for them (`POST /api/addresses/suggest`, `IAddressSuggester`, `AddressSuggestInput`). Picking one fills in the
+street, city, state and zip, and the address is then checked as usual. It uses PostGrid's autocomplete previews
+(`GET /v1/addver/completions`), which use no lookup, so offering addresses costs nothing; the paid completion
+call is not used. Addresses in the restaurant's state come first. What is typed travels in the request body, the
+list is marked `data-no-track`, outgoing requests are not logged, and only "Picked a suggested address" is
+recorded. Groups never see PostGrid's name here: the form just offers addresses.
+
 **How the cards go out.** The print screen offers three choices every time:
 
 - **Stamps by hand:** nothing is charged; the card prints with the guest's address and a stamp box.

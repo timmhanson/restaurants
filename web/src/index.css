@@ -367,3 +367,11 @@ details.audit-details summary { cursor: pointer; color: var(--accent); font-size
   .print-card.outlined { outline: none; box-shadow: none; }
   .print-card.preprinted.outlined { background: transparent; }
 }
+
+/* Addresses offered under the street box as it is typed. */
+.suggest { position: relative; display: block; }
+.suggest > input { width: 100%; }
+.suggest-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 2px); display: block; background: #fff; border: 1px solid var(--border, #cfd6df); border-radius: 8px; box-shadow: 0 8px 24px rgba(16, 24, 40, 0.16); overflow: hidden; }
+.suggest-item { display: flex; flex-direction: column; gap: 1px; padding: 0.45rem 0.7rem; cursor: pointer; font-weight: 400; }
+.suggest-item.active { background: var(--info-bg, #e8f0fe); }
+.suggest-foot { display: block; padding: 0.35rem 0.7rem; border-top: 1px solid var(--border, #e3e7ec); background: #f8f9fb; }

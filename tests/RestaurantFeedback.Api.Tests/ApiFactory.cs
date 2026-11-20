@@ -47,6 +47,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public CapturingEmailSender Emails { get; } = new();
     public FakePostageProvider Postage { get; } = new();
     public FakeAddressVerifier Addresses { get; } = new();
+    public FakeAddressSuggester Suggestions { get; } = new();
     public FakePostGridMailer Mail { get; } = new();
     public FakePayments Payments { get; } = new();
 
@@ -58,6 +59,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IEmailSender>(Emails);
             services.AddSingleton<IPostageProvider>(Postage);
             services.AddSingleton<IAddressVerifier>(Addresses);
+            services.AddSingleton<IAddressSuggester>(Suggestions);
             services.AddSingleton<IPostGridMailer>(Mail);
             services.AddSingleton<IPaymentProvider>(Payments);
         });
@@ -253,6 +255,26 @@ public class FakePayments : IPaymentProvider
 /// Stands in for USPS: "Nowhere" streets do not exist, "Tower" buildings need a unit, "Avenue" is corrected to
 /// "AVE" with a ZIP+4, a street containing "Outage" means USPS is down, and anything else is confirmed as typed.
 /// </summary>
+/// <summary>Stands in for the address service's suggestions: offers two addresses for whatever street was typed.</summary>
+public class FakeAddressSuggester : IAddressSuggester
+{
+    public int Calls { get; private set; }
+    public string? LastNearState { get; private set; }
+    public bool Configured { get; set; } = true;
+
+    public Task<List<AddressPreview>> SuggestAsync(AddressInput typed, string? nearState, CancellationToken ct = default)
+    {
+        Calls++;
+        LastNearState = nearState;
+        var street = (typed.Street ?? "").Trim();
+        return Task.FromResult(street.Length < 4 ? [] : new List<AddressPreview>
+        {
+            new($"{street} St", "Joliet", "IL", "60431"),
+            new($"{street} Ave", "Lockport", null, "60441"),
+        });
+    }
+}
+
 public class FakeAddressVerifier : IAddressVerifier
 {
     public int Calls { get; private set; }

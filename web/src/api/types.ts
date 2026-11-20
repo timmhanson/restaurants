@@ -715,6 +715,8 @@ export interface SystemPerson { user: UserDto; restaurants: string[]; lastSeen?:
 // ---- Checking a mailing address with USPS ----
 export type AddressStatus = 'Verified' | 'Corrected' | 'NeedsUnit' | 'UnitNotConfirmed' | 'NotFound'
 export interface AddressSuggestion { streetAddress: string; city: string; state: string; zip: string }
+/** An address offered while the street is typed; city, state and zip are there when the address service gave them. */
+export interface AddressPreview { streetAddress: string; city?: string | null; state?: string | null; zip?: string | null }
 export interface AddressCheckResponse { available: boolean; status: AddressStatus | 'Incomplete' | 'Unavailable'; message: string; suggested?: AddressSuggestion | null }
 
 /** An investment group's own postage account. The key itself never reaches the browser. */

@@ -113,6 +113,11 @@ else
     builder.Services.AddHttpClient<PostGridAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
     builder.Services.AddTransient<IAddressVerifier, AddressCheckers>();
 }
+// Addresses offered as the street is typed. Locally, with stand-ins switched on, they are made up.
+if ((usps.Sample || postGrid.Sample) && builder.Environment.IsDevelopment())
+    builder.Services.AddSingleton<IAddressSuggester, SampleAddressSuggester>();
+else
+    builder.Services.AddTransient<IAddressSuggester>(sp => sp.GetRequiredService<PostGridAddressVerifier>());
 
 // ---- Postage for printed coupon cards (optional; stamps by hand always work) ----
 var postage = config.GetSection("Postage").Get<PostageOptions>() ?? new PostageOptions();

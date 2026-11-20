@@ -1696,4 +1696,55 @@ public class PostGridTests(ApiFactory factory)
             });
         }
     }
+
+    [Fact]
+    public async Task Addresses_are_offered_as_the_street_is_typed_for_restaurants_that_have_cards_mailed()
+    {
+        var (owner, _, site, rid, groupId) = await SetUpAsync();
+        const string typed = "7431 Quietwater";
+        async Task<AddressSuggestResponse> Ask(HttpClient who, int restaurant, string street) =>
+            (await (await who.PostAsJsonAsync("/api/addresses/suggest", new AddressSuggestRequest(restaurant, street, null, null, null))).Content.ReadFromJsonAsync<AddressSuggestResponse>())!;
+        try
+        {
+            // Mailing is on for the restaurant: addresses are offered, nearest the restaurant first.
+            var before = factory.Suggestions.Calls;
+            var offered = await Ask(owner, rid, typed);
+            Assert.True(offered.Available);
+            Assert.Equal(new[] { $"{typed} St", $"{typed} Ave" }, offered.Suggestions.Select(s => s.StreetAddress));
+            Assert.Equal(("Joliet", "IL", "60431"), (offered.Suggestions[0].City, offered.Suggestions[0].State, offered.Suggestions[0].Zip));
+            Assert.Equal("IL", factory.Suggestions.LastNearState);
+            Assert.Equal(before + 1, factory.Suggestions.Calls);
+
+            // Someone else's restaurant, or one that does not exist: nothing is offered and the address service is not asked.
+            Assert.False((await Ask(owner, 987654, typed)).Available);
+            Assert.Equal(before + 1, factory.Suggestions.Calls);
+
+            // What was typed is not kept: not in the interaction log, and not in the audit log.
+            Assert.False(await Db(db => Task.FromResult(db.InteractionLogs.ToList().Any(l => $"{l.Path} {l.Action} {l.Detail}".Contains("Quietwater")))));
+            Assert.False(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => (a.Details ?? "").Contains("Quietwater")))));
+
+            // With mailing off for the group, its restaurants are not offered addresses.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("off", null, null, null, null, null))).StatusCode);
+            var off = await Ask(owner, rid, typed);
+            Assert.False(off.Available);
+            Assert.Empty(off.Suggestions);
+            Assert.Equal(before + 1, factory.Suggestions.Calls);
+
+            // And with no address service that can offer them, nothing is offered either.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("on", null, null, null, null, null))).StatusCode);
+            factory.Suggestions.Configured = false;
+            Assert.False((await Ask(owner, rid, typed)).Available);
+        }
+        finally { factory.Suggestions.Configured = true; }
+
+        // PostGrid's previews are read whether or not each one carries its state and zip.
+        var previews = PostGridAddressVerifier.ReadPreviews(System.Text.Json.JsonDocument.Parse(
+            "{\"status\":\"success\",\"data\":[{\"preview\":{\"address\":\"145 Mulberry St\",\"city\":\"New York\",\"prov\":\"NY\",\"pc\":\"10013-1234\"}},"
+            + "{\"preview\":{\"address\":\"145 Mulberry Ave\",\"city\":\"Joliet\",\"pc\":\"60431\"}},{\"preview\":{\"city\":\"Nowhere\"}}]}").RootElement, null);
+        Assert.Equal(2, previews.Count);
+        Assert.Equal(("145 Mulberry St", "New York", "NY", "10013"), (previews[0].StreetAddress, previews[0].City, previews[0].State, previews[0].Zip));
+        Assert.Equal((null, "60431"), (previews[1].State, previews[1].Zip));
+        // A state that was asked for is the state of every answer.
+        Assert.Equal("IL", PostGridAddressVerifier.ReadPreviews(System.Text.Json.JsonDocument.Parse("{\"data\":[{\"preview\":{\"address\":\"1 Main St\",\"city\":\"Joliet\",\"pc\":\"60431\"}}]}").RootElement, "IL").Single().State);
+    }
 }
