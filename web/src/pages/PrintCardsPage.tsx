@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { mailedForYouHint } from './PrintCenterPage'
 import { api } from '../api/client'
 import type { CardQr, CommentSummary, PagedResult, PostageOutcome, PrintConfig } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
@@ -155,6 +156,13 @@ export default function PrintCardsPage() {
                           ? 'Not set up on this site yet. Ask your System Administrator.'
                           : 'You need the "buy postage" permission. Ask an owner or administrator.'}
                     </span>
+                  </label>
+                  {/* Nothing is printed here for this one: choosing it goes to the screen that shows both sides and sends the cards. */}
+                  <label style={config?.canMail ? undefined : { opacity: 0.6 }}>
+                    <input type="radio" name="postage" checked={false} disabled={!config?.canMail} aria-label="Mailed for you"
+                      onChange={() => nav(`/mail-cards?ids=${ids.join(',')}`)} />
+                    <span className="source-label">Mailed for you</span>
+                    <span className="source-hint">{mailedForYouHint(config, isGroupWide)}</span>
                   </label>
                 </div>
               </fieldset>

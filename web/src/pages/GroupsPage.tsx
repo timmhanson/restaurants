@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import type { GroupDto, GroupRequest, RestaurantRequest, UserRequest } from '../api/types'
+import type { GroupBillingRow, GroupDto, GroupRequest, RestaurantRequest, SystemBilling, UserRequest } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { Alert, Badge, Empty, Field, Modal, Spinner, fmtDate } from '../components/ui'
 
@@ -149,7 +149,23 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
   const [restaurants, setRestaurants] = useState<RestaurantDraft[]>([blankRestaurant()])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
+  // Having cards mailed for the group: the same switch and payment rule as on Billing, so they can be set from here too.
+  const [terms, setTerms] = useState<GroupBillingRow | null>(null)
+  const [siteRequiresPay, setSiteRequiresPay] = useState(true)
+  const [mailEnabled, setMailEnabled] = useState(false)
+  const [payRule, setPayRule] = useState('site')
+  useEffect(() => {
+    if (!group) return
+    api.get<SystemBilling>('/system/billing').then((b) => {
+      const row = b.groups.find((g) => g.groupId === group.id) ?? null
+      setTerms(row)
+      setSiteRequiresPay(b.settings.requirePaymentMethod)
+      if (row) {
+        setMailEnabled(row.mailEnabled)
+        setPayRule(row.ownPayRule == null ? 'site' : row.ownPayRule ? 'required' : 'notrequired')
+      }
+    }).catch(() => setTerms(null))
+  }, [group])
   const setRestaurant = (i: number, k: Exclude<keyof RestaurantDraft, 'notOwnedBy'>, val: string) => setRestaurants((s) => s.map((r, j) => (j === i ? { ...r, [k]: val } : r)))
   const toggleOwnerOf = (i: number, ownerKey: string) =>
     setRestaurants((s) => s.map((r, j) => (j === i ? { ...r, notOwnedBy: r.notOwnedBy.includes(ownerKey) ? r.notOwnedBy.filter((k) => k !== ownerKey) : [...r.notOwnedBy, ownerKey] } : r)))
@@ -165,6 +181,8 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
     try {
       if (group) {
         const saved = await api.put<GroupDto>(`/groups/${group.id}`, { name, isActive } satisfies GroupRequest)
+        if (terms)
+          await api.put(`/system/billing/groups/${group.id}`, { feeCents: terms.feeCents ?? null, limitCents: terms.limitCents ?? null, mailEnabled, payRule })
         return onSaved(saved, `${saved.name} was updated.`, false)
       }
       if (adminRows.length === 0) {
@@ -207,6 +225,30 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
               <option value="1">Active</option><option value="0">Inactive (owners and managers cannot sign in)</option>
             </select>
           </Field>
+          {terms && (
+            <>
+              <h3 style={{ margin: '0.5rem 0 0' }}>Cards mailed for this group</h3>
+              <label className="check">
+                <input type="checkbox" checked={mailEnabled} onChange={(e) => setMailEnabled(e.target.checked)} />
+                <span>
+                  Cards can be printed and mailed for this group
+                  <span className="muted small" style={{ display: 'block' }}>Until this is ticked, the group sees “Mailed for you” greyed out on its print screens.</span>
+                </span>
+              </label>
+              <Field label="A payment method before any card is mailed"
+                hint="Whether this group has to save a card or bank account on its Billing page first. A group with credit can mail without one, as far as the credit covers.">
+                <select value={payRule} onChange={(e) => setPayRule(e.target.value)}>
+                  <option value="site">Follow the site’s setting ({siteRequiresPay ? 'required' : 'not required'})</option>
+                  <option value="required">Required for this group</option>
+                  <option value="notrequired">Not required for this group</option>
+                </select>
+              </Field>
+              <p className="muted small" style={{ margin: 0 }}>
+                Credit: {terms.creditCents > 0 ? `$${(terms.creditCents / 100).toFixed(2)} unused` : 'none'}. {terms.payLabel ? `Pays with ${terms.payLabel}.` : 'No payment method saved.'}{' '}
+                Fees, limits, credits and bills are on <Link to="/system-billing">Billing</Link>.
+              </p>
+            </>
+          )}
           <p className="muted" style={{ margin: 0 }}>To add administrators, owners or restaurants, close this and use <strong>Set up</strong> or <strong>Users</strong> on the group.</p>
           <div className="actions">
             <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
