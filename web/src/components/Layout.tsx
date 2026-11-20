@@ -49,13 +49,13 @@ export default function Layout() {
         { to: '/comments', label: 'Comments', show: has('ViewComments') },
         { to: '/print', label: 'Print cards', show: has('ViewComments') && has('MarkResponded') },
         { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
-        { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin') },
-        { to: '/permissions', label: 'Permissions', show: isGroupWide },
-        { to: '/restaurants', label: 'Restaurants & Staff Assignments', show: isAdmin },
         { to: '/card-design', label: 'Card design', show: isAdmin },
-        { to: '/billing', label: 'Billing', show: isAdmin },
-        { to: '/settings', label: 'Settings', show: isGroupWide },
-        { to: '/audit', label: 'Audit log', show: has('ViewAudit') },
+        { to: '/restaurants', label: 'Restaurants & Staff Assignments', show: isAdmin, section: 'Staff' },
+        { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin'), section: 'Staff' },
+        { to: '/permissions', label: 'Permissions', show: isGroupWide, section: 'Configuration' },
+        { to: '/billing', label: 'Billing', show: isAdmin, section: 'Configuration' },
+        { to: '/settings', label: 'Settings', show: isGroupWide, section: 'Configuration' },
+        { to: '/audit', label: 'Audit log', show: has('ViewAudit'), section: 'Configuration' },
       ]
 
   const groupName = isSuperAdmin ? groups.find((g) => g.id === groupId)?.name : user.groupName
@@ -118,9 +118,9 @@ export default function Layout() {
       <nav className={`sidenav ${open ? 'open' : ''}`} onClick={() => setOpen(false)}>
         {links
           .filter((l) => l.show)
-          .map((l) => (
+          .map((l, i, shown) => (
             <Fragment key={l.to}>
-              {l.section && <div className="nav-section">{l.section}</div>}
+              {l.section && (overseeing || shown[i - 1]?.section !== l.section) && <div className="nav-section">{l.section}</div>}
               <NavLink to={l.to} className={({ isActive }) => (isActive ? 'active' : '')}>
                 {l.label}
               </NavLink>

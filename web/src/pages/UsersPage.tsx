@@ -284,9 +284,9 @@ export default function UsersPage() {
 }
 
 /** Map one person to restaurants: where they work, or (for an owner or an administrator) which restaurants they own. */
-function MapRestaurantsModal({ user, restaurants, ownerScoped, onClose, onSaved }: {
+export function MapRestaurantsModal({ user, restaurants, ownerScoped, onClose, onSaved }: {
   user: UserDto
-  restaurants: RestaurantDto[]
+  restaurants: Pick<RestaurantDto, 'id' | 'name' | 'isActive' | 'canManage'>[]
   ownerScoped: boolean
   onClose: () => void
   onSaved: (message: string) => void
@@ -295,7 +295,7 @@ function MapRestaurantsModal({ user, restaurants, ownerScoped, onClose, onSaved 
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // An owner maps people only at restaurants they own; the others are shown as they are.
-  const mine = (r: RestaurantDto) => !ownerScoped || Boolean(r.canManage)
+  const mine = (r: { canManage?: boolean }) => !ownerScoped || Boolean(r.canManage)
   const toggle = (id: number) => setIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
   const what = user.role === 'GroupAdmin' ? 'also owns' : user.role === 'Owner' ? 'owns' : user.role === 'TeamMember' ? 'is the team login for' : 'works at'
   const save = async () => {

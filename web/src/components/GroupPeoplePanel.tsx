@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { SystemPerson, UserDto } from '../api/types'
-import { ResetPasswordModal } from '../pages/UsersPage'
+import type { DirectoryRestaurant, SystemPerson, UserDto } from '../api/types'
+import { MapRestaurantsModal, ResetPasswordModal } from '../pages/UsersPage'
 import { Alert, Badge, Confirm, Empty, RoleBadge, Spinner, fmtDateTime } from './ui'
 
 /**
  * Everyone in one investment group, shown to the System Administrator on the Investment groups screen itself: who
  * they are, what they are, where they work and whether they can sign in, with the account actions that belong at
- * this level (reset a password, suspend or restore). Roles and restaurant assignments are changed inside the group.
+ * this level (map them to restaurants, reset a password, suspend or restore). Roles are changed inside the group.
  */
 export default function GroupPeoplePanel({ groupId, groupName, onOpenInGroup, onChanged }: {
   groupId: number
@@ -21,12 +21,15 @@ export default function GroupPeoplePanel({ groupId, groupName, onOpenInGroup, on
   const [notice, setNotice] = useState<string | null>(null)
   const [resetting, setResetting] = useState<UserDto | null>(null)
   const [suspending, setSuspending] = useState<UserDto | null>(null)
+  const [mapping, setMapping] = useState<UserDto | null>(null)
+  const [restaurants, setRestaurants] = useState<DirectoryRestaurant[]>([])
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const all = await api.get<SystemPerson[]>('/system/people')
+      const [all, places] = await Promise.all([api.get<SystemPerson[]>('/system/people'), api.get<DirectoryRestaurant[]>('/system/restaurants')])
       setPeople(all.filter((p) => p.user.groupId === groupId))
+      setRestaurants(places.filter((r) => r.groupId === groupId))
     } catch (e) {
       setError((e as Error).message)
     }
@@ -92,6 +95,10 @@ export default function GroupPeoplePanel({ groupId, groupName, onOpenInGroup, on
                   <td>{u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : <span className="muted">never</span>}</td>
                   <td>
                     <div className="row-actions">
+                      <button type="button" className="btn btn-sm" aria-label={`Restaurants for ${u.displayName}`} onClick={() => setMapping(u)}
+                        title={u.role === 'GroupAdmin' ? 'Choose the restaurants this administrator also owns' : 'Choose the restaurants this person is assigned to'}>
+                        Restaurants
+                      </button>
                       <button type="button" className="btn btn-sm" aria-label={`Reset the password of ${u.displayName}`} onClick={() => setResetting(u)}>Reset password</button>
                       <button type="button" className="btn btn-sm" aria-label={`${u.isActive ? 'Suspend' : 'Restore'} ${u.displayName}`} onClick={() => setSuspending(u)}>{u.isActive ? 'Suspend' : 'Restore'}</button>
                     </div>
@@ -101,6 +108,20 @@ export default function GroupPeoplePanel({ groupId, groupName, onOpenInGroup, on
             </tbody>
           </table>
         </div>
+      )}
+      {mapping && (
+        <MapRestaurantsModal
+          user={mapping}
+          restaurants={restaurants.filter((r) => r.isActive || mapping.restaurantIds.includes(r.id))}
+          ownerScoped={false}
+          onClose={() => setMapping(null)}
+          onSaved={(message) => {
+            setMapping(null)
+            setNotice(message)
+            void load()
+            onChanged?.()
+          }}
+        />
       )}
       {resetting && (
         <ResetPasswordModal

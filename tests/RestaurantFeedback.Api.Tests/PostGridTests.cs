@@ -1552,6 +1552,11 @@ public class PostGridTests(ApiFactory factory)
             Assert.Equal(2, await Db(db => Task.FromResult(db.AuditLogs.ToList().Count(a => a.Action == "UserRestaurantsChanged" && a.EntityId == managerId.ToString()))));
             Assert.True(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => a.Action == "PermissionRulesSetBySite" && a.GroupId == groupId))));
             Assert.True(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => a.Action == "PermissionRulesChanged" && a.GroupId == groupId))));
+            // The System Administrator maps a person from the Investment groups screen, without opening the group.
+            var bySite = await site.PutAsJsonAsync($"/api/users/{managerId}/restaurants", new UserRestaurantsRequest([]));
+            Assert.Equal(HttpStatusCode.OK, bySite.StatusCode);
+            Assert.Empty((await bySite.Content.ReadFromJsonAsync<UserDto>())!.RestaurantIds);
+            Assert.Equal(new[] { rid }, (await (await site.PutAsJsonAsync($"/api/users/{managerId}/restaurants", new UserRestaurantsRequest([rid]))).Content.ReadFromJsonAsync<UserDto>())!.RestaurantIds);
         }
         finally
         {

@@ -38,6 +38,10 @@ Permissions and settings are decided from the top down, and a decision made high
 4. **Managers** hold what all managers were given plus what was ticked for them, and never a permission the
    group's owners do not hold. **Team logins** only enter cards.
 
+Inside a group the menu has three parts: the cards (Enter card, Comments, Print cards, Analytics, Card design),
+**Staff** (Restaurants & Staff Assignments, All Staff) and, at the bottom, **Configuration** (Permissions,
+Billing, Settings, Audit log). Each person sees only the entries they may use.
+
 Every change of these rules is audited (`PermissionRulesSetBySite`, `PermissionRulesChanged`,
 `GroupSettingsChanged`). On **All Staff**, **Restaurants** on a person's row maps them to restaurants in one step
 (`PUT /api/users/{id}/restaurants`): where a manager or team login works, or which restaurants an owner or an
@@ -374,7 +378,8 @@ All of `/api/system/*` is `SuperAdmin` only.
 - **Real or test** is a setting with levels: the System Administrator can fix it for the whole site (Billing),
   decide it for one group or leave it to the group (Edit group); the group fixes it for all its restaurants or
   leaves it to each restaurant. A batch can mix restaurants: each card goes by its own restaurant's rule.
-- **On Investment groups**, **Users** shows a group's people in place (reset password, suspend, restore), and
+- **On Investment groups**, **Users** shows a group's people in place (map to restaurants, reset password,
+  suspend, restore), and
   **Edit** holds the group's settings and permissions. There is no separate "Set up".
 - **How a group is billed** is the group's own choice (Billing, "How you are billed", `PUT /api/billing/split`):
   one bill for everything, a bill for each restaurant, or bills for sets of restaurants the group names
