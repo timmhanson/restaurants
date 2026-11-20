@@ -38,9 +38,10 @@ Permissions and settings are decided from the top down, and a decision made high
 4. **Managers** hold what all managers were given plus what was ticked for them, and never a permission the
    group's owners do not hold. **Team logins** only enter cards.
 
-Inside a group the menu has three parts: the cards (Enter card, Comments, Print cards, Analytics, Card design),
-**Staff** (Restaurants & Staff Assignments, All Staff) and, at the bottom, **Configuration** (Permissions,
-Billing, Settings, Audit log). Each person sees only the entries they may use.
+Inside a group the menu has four parts: the cards (Enter Card, Comments, Print Cards), **Staff** (Restaurants &
+Staff, All Staff), **Reports** (Billing, Analytics, Audit Log) and, at the bottom, **Configuration**
+(Permissions, Settings, Card Design). Each person sees only the entries they may use. Every word of a tab's
+name is capitalized, in both menus.
 
 Every change of these rules is audited (`PermissionRulesSetBySite`, `PermissionRulesChanged`,
 `GroupSettingsChanged`). On **All Staff**, **Restaurants** on a person's row maps them to restaurants in one step
@@ -63,7 +64,7 @@ Rules worth knowing:
 
 1. A System Administrator creates the investment group on **Groups** with at least one Group
    Administrator, optional Restaurant Owners and the group's restaurants, ticking who owns each restaurant.
-2. **View as admin** opens the group; its **Restaurants & Staff Assignments** page has each restaurant's **Staff** screen, which lists the
+2. **View as admin** opens the group; its **Restaurants & Staff** page has each restaurant's **Staff** screen, which lists the
    group's owners, managers and team logins as checkboxes, with quick-add for new people.
 3. Owners staff only the restaurants they own; managers can be added at several owners' restaurants.
 
@@ -189,7 +190,7 @@ answer. PostGrid charges per lookup after its free allowance, billed to the acco
   System Administrator requires it, the group must have a payment method saved (otherwise it prints its own
   cards). When any of these is missing, the choice on Print cards stays visible but greyed out and says what it
   takes (`PrintConfig.MailBlockedBy`: the site, the group's switch, the limit, a payment method or the
-  permission). A restaurant can make "Mailed for you" **its usual way** (Restaurants & Staff Assignments,
+  permission). A restaurant can make "Mailed for you" **its usual way** (Restaurants & Staff,
   `Restaurant.MailByDefault`): Print cards then starts on it when every card chosen is from such a restaurant. A card is never sent twice: cards already
   with the mail house are skipped and each request carries an idempotency key, so a retry returns the first
   order. Each card is marked sent, gets a history entry and an audit row (`CardMailed`, `CardMailFailed`,
@@ -232,7 +233,7 @@ restaurants' printed card, and is drawn by the same code (`CardElements.Render`)
 - **Who signs a card** (`CardSignature`). A manager, owner or group administrator who enters a card signs it with
   their own name: the "Authorized signature" box on Enter card starts with it and can be changed. The team login
   is shared by the crew, so its cards take the name set for the restaurant (`Restaurant.SignatureName`). Owners
-  and administrators set that on Restaurants & Staff Assignments; the restaurant's managers set it from Enter card
+  and administrators set that on Restaurants & Staff; the restaurant's managers set it from Enter card
   (`PUT /api/restaurants/{id}/signature`, audited as `RestaurantSignatureChanged`); a team login cannot. A card
   saved with no name gets the same default on the server. The mailed card prints the name on the card, or the
   restaurant's name for older cards that carry none. The printed card carries the ones it uses inside its own
@@ -365,7 +366,7 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
-Restaurant-level screens (Enter card, Comments, Analytics, All Staff, Permissions, Restaurants & Staff Assignments, Settings) never appear
+Restaurant-level screens (Enter card, Comments, Analytics, All Staff, Permissions, Restaurants & Staff, Settings) never appear
 for a System Administrator unless they choose **View as admin** / **Open in group**, which shows one group as
 its Investment Group Administrator sees it under a yellow bar. That choice lasts for the browser tab only.
 All of `/api/system/*` is `SuperAdmin` only.

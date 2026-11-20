@@ -104,7 +104,7 @@ export default function BillingPage() {
               onChange={(e) => run('mode', async () => { setData(await api.put<GroupBilling>('/billing/mail-mode', { mode: e.target.value })); setNotice({ ok: true, message: 'Saved.' }) })}>
               <option value="live">Real mailing for all restaurants</option>
               <option value="test">Test mailing for all restaurants</option>
-              <option value="each">Each restaurant decides (set on Restaurants &amp; Staff Assignments)</option>
+              <option value="each">Each restaurant decides (set on Restaurants &amp; Staff)</option>
             </select>
           )}
         </div>

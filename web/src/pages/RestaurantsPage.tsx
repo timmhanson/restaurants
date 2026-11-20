@@ -66,7 +66,7 @@ export default function RestaurantsPage() {
   return (
     <>
       <div className="page-head">
-        <h1>Restaurants &amp; Staff Assignments</h1>
+        <h1>Restaurants &amp; Staff</h1>
         <span className="grow" />
         {has('EditRestaurants') && <button type="button" className="btn btn-primary" onClick={() => setEditing('new')} disabled={needsGroup}>+ Add restaurant</button>}
       </div>

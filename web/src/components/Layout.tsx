@@ -33,29 +33,29 @@ export default function Layout() {
   const links: { to: string; label: string; show: boolean; section?: string }[] = overseeing
     ? [
         { to: '/overview', label: 'Overview', show: true, section: 'Oversee' },
-        { to: '/groups', label: 'Investment groups', show: true },
+        { to: '/groups', label: 'Investment Groups', show: true },
         { to: '/all-restaurants', label: 'Restaurants', show: true },
         { to: '/people', label: 'People', show: true },
         { to: '/reports', label: 'Reports', show: true, section: 'Insight' },
         { to: '/system-billing', label: 'Billing', show: true },
-        { to: '/activity', label: 'Activity log', show: true },
-        { to: '/audit', label: 'Audit log', show: true },
+        { to: '/activity', label: 'Activity Log', show: true },
+        { to: '/audit', label: 'Audit Log', show: true },
         { to: '/security', label: 'Security', show: true, section: 'System' },
         { to: '/connected-systems', label: 'Connected Systems', show: true },
-        { to: '/system', label: 'System status', show: true },
+        { to: '/system', label: 'System Status', show: true },
       ]
     : [
-        { to: '/enter', label: 'Enter card', show: true },
+        { to: '/enter', label: 'Enter Card', show: true },
         { to: '/comments', label: 'Comments', show: has('ViewComments') },
-        { to: '/print', label: 'Print cards', show: has('ViewComments') && has('MarkResponded') },
-        { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
-        { to: '/card-design', label: 'Card design', show: isAdmin },
-        { to: '/restaurants', label: 'Restaurants & Staff Assignments', show: isAdmin, section: 'Staff' },
+        { to: '/print', label: 'Print Cards', show: has('ViewComments') && has('MarkResponded') },
+        { to: '/restaurants', label: 'Restaurants & Staff', show: isAdmin, section: 'Staff' },
         { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin'), section: 'Staff' },
+        { to: '/billing', label: 'Billing', show: isAdmin, section: 'Reports' },
+        { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics'), section: 'Reports' },
+        { to: '/audit', label: 'Audit Log', show: has('ViewAudit'), section: 'Reports' },
         { to: '/permissions', label: 'Permissions', show: isGroupWide, section: 'Configuration' },
-        { to: '/billing', label: 'Billing', show: isAdmin, section: 'Configuration' },
         { to: '/settings', label: 'Settings', show: isGroupWide, section: 'Configuration' },
-        { to: '/audit', label: 'Audit log', show: has('ViewAudit'), section: 'Configuration' },
+        { to: '/card-design', label: 'Card Design', show: isAdmin, section: 'Configuration' },
       ]
 
   const groupName = isSuperAdmin ? groups.find((g) => g.id === groupId)?.name : user.groupName

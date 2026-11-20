@@ -48,8 +48,7 @@ export default function GroupRulesPanel() {
     <div className="panel">
       <h2>For all restaurants, or each restaurant decides</h2>
       <p className="muted">
-        What you set for all restaurants takes precedence over a restaurant’s own choice. Where each restaurant decides, its owners choose on Restaurants &amp; Staff
-        Assignments (Edit). {status === 'saving' ? 'Saving…' : status === 'saved' ? <strong>Saved.</strong> : ''}
+        What you set for all restaurants takes precedence over a restaurant’s own choice. Where each restaurant decides, its owners choose on Restaurants &amp; Staff (Edit). {status === 'saving' ? 'Saving…' : status === 'saved' ? <strong>Saved.</strong> : ''}
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       <div className="grid grid-2">

@@ -630,7 +630,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (guest.Any(string.IsNullOrWhiteSpace)) return "The guest's street, city, state and zip are all needed to buy postage.";
         var r = c.Restaurant;
         string?[] from = [r.StreetAddress, r.City, r.State, r.Zip];
-        if (from.Any(string.IsNullOrWhiteSpace)) return $"{r.Name} needs its full address (street, city, state, zip) as the return address. Add it on Restaurants & Staff Assignments.";
+        if (from.Any(string.IsNullOrWhiteSpace)) return $"{r.Name} needs its full address (street, city, state, zip) as the return address. Add it on Restaurants & Staff.";
         return null;
     }
 
