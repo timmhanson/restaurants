@@ -33,14 +33,21 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var own = me.GroupId is int gid && postage.AcceptsAccountKeys && (await postageAccounts.DescribeAsync(gid, ct)).HasOwnAccount;
         var available = (own || postage.Configured) && (settings.Postcard?.AllowBoughtPostage ?? true);
         var paidBy = own ? $"{postage.Description}, your investment group's account" : postage.Description;
-        var account = siteMailing.Account;
         var terms = await ledger.TermsAsync(me.GroupId ?? 0, ct);
         var used = me.GroupId is int g2 ? (await ledger.ThisMonthAsync(g2, ct)).Cents : 0;
-        var test = account?.Test ?? false;
+        // Whether cards can be mailed, and whether for real or as tests, is worked out restaurant by restaurant.
+        var groupRow = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == me.GroupId, ct);
+        var myIds = me.RestaurantIds.ToList();
+        var byRestaurant = (await db.Restaurants.AsNoTracking().Where(r => r.GroupId == me.GroupId && r.IsActive && myIds.Contains(r.Id)).ToListAsync(ct))
+            .Select(r => (r.Id, Rules: GroupPolicy.For(siteMailing.Billing, groupRow, r)))
+            .Select(x => new MailRestaurantInfo(x.Id, x.Rules.MailOn, x.Rules.MailLive, siteMailing.For(x.Rules.MailLive) is not null)).ToList();
+        var anyOn = byRestaurant.Any(x => x.On);
+        var ready = byRestaurant.Any(x => x.On && x.Ready);
+        var test = ready && !byRestaurant.Any(x => x.On && x.Ready && x.Live);
         var needsPayMethod = terms.NeedsPayMethod;
-        var mailOn = account is not null && me.GroupId is not null && terms.Enabled && terms.LimitCents > 0;
+        var mailOn = ready && me.GroupId is not null && terms.LimitCents > 0;
         // The first thing in the way, in the order someone would have to deal with them.
-        var blockedBy = account is null || me.GroupId is null ? "site" : !terms.Enabled ? "group" : terms.LimitCents <= 0 ? "limit"
+        var blockedBy = siteMailing.Any is null || me.GroupId is null ? "site" : !anyOn ? "group" : !ready ? "site" : terms.LimitCents <= 0 ? "limit"
             : needsPayMethod ? "payment" : !me.Has(ManagerPermission.BuyPostage) ? "permission" : null;
         return new PrintConfig(available, paidBy, available && me.Has(ManagerPermission.BuyPostage), postageOptions.MaxCentsPerCard, MailedMethod(settings))
         {
@@ -51,6 +58,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             MailOnCredit = mailOn && terms.OnCredit && !needsPayMethod,
             MailCreditCents = terms.CreditCents,
             PrintFeeCents = me.GroupId is null ? 0 : terms.PrintFeeCents,
+            MailRestaurants = byRestaurant,
             MailTest = test,
             MailCentsPerCard = terms.PriceCents,
             MailMaxCards = mailOptions.MaxCardsPerMailing,
@@ -100,9 +108,9 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             return BadRequest(new { message = $"Up to {mailOptions.MaxCardsPerMailing} cards can be mailed at a time. Mail these in smaller batches." });
         if (req.ConfirmCount != ids.Length)
             return BadRequest(new { message = "The number of cards confirmed does not match the cards chosen. Nothing was sent; review the cards and confirm again." });
-        if (siteMailing.Account is not { } account) return BadRequest(new { message = NotSetUp });
+        if (siteMailing.Any is null) return BadRequest(new { message = NotSetUp });
         var pricing = await ledger.TermsAsync(groupId, ct);
-        var test = account.Test;
+        var groupRow = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
         if (!pricing.Enabled)
             return BadRequest(new { message = "Having cards mailed is not switched on for this investment group yet. Ask the site's administrator to switch it on. Until then, print the cards here." });
         if (pricing.NeedsPayMethod)
@@ -112,18 +120,23 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                     ? $"This investment group's credit ({Dollars(pricing.CreditCents)}) does not cover a card at {Dollars(pricing.PriceCents)}. Add a payment method on Billing to keep mailing. Until then, print the cards here."
                     : "Add a payment method on Billing before cards can be mailed for this investment group. Until then, print the cards here."
             });
-        if (!test && req.ConfirmCentsPerCard != pricing.PriceCents)
-            return BadRequest(new { message = $"The price is now {Dollars(pricing.PriceCents)} a card. Nothing was sent; review the cards and confirm again." });
         var cards = await Cards(me, ids, ct);
         if (cards.Count == 0) return NotFound();
+        // Each card goes by its own restaurant's settings: whether cards are mailed for it at all, and whether for
+        // real (the live key) or as a test (the test key: a proof only, nothing printed, mailed or billed).
+        var rules = cards.Select(c => c.Restaurant).DistinctBy(r => r.Id).ToDictionary(r => r.Id, r => GroupPolicy.For(siteMailing.Billing, groupRow, r));
+        bool GoesLive(GuestComment c) => rules[c.RestaurantId] is { MailOn: true, MailLive: true } && siteMailing.Live is not null;
+        var anyLive = cards.Any(GoesLive);
+        if (anyLive && req.ConfirmCentsPerCard != pricing.PriceCents)
+            return BadRequest(new { message = $"The price is now {Dollars(pricing.PriceCents)} a card. Nothing was sent; review the cards and confirm again." });
 
         bool AlreadyWithMailHouse(GuestComment c) => c.MailId is not null && c.MailStatus != MailStatuses.Cancelled;
-        if (!test)
+        if (anyLive)
         {
             var limit = pricing.LimitCents;
             if (limit <= 0) return BadRequest(new { message = "Mailing cards is switched off for this investment group. Ask the site's administrator." });
             var used = (await ledger.ThisMonthAsync(groupId, ct)).Cents;
-            var toSend = cards.Count(c => !AlreadyWithMailHouse(c) && !c.Responded && MissingAddress(c) is null);
+            var toSend = cards.Count(c => GoesLive(c) && !AlreadyWithMailHouse(c) && !c.Responded && MissingAddress(c) is null);
             // With no payment method saved, the group mails on its credit, and only as far as the credit goes.
             if (pricing.OnCredit && toSend * pricing.PriceCents > pricing.CreditCents)
             {
@@ -171,7 +184,20 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 continue;
             }
             var r = c.Restaurant;
-            var look = designs.Look(CardDesigns.For(allDesigns, r.Id), groupId, settings.AccentColor);
+            var rule = rules[r.Id];
+            if (!rule.MailOn)
+            {
+                results.Add(new(c.Id, false, null, false, false, $"Having cards mailed is not switched on for {r.Name}. Print this card here instead, or have it switched on for the restaurant."));
+                continue;
+            }
+            var test = !rule.MailLive;
+            if (siteMailing.For(rule.MailLive) is not { } account)
+            {
+                results.Add(new(c.Id, false, null, false, false,
+                    $"{r.Name} is set to {(test ? "test" : "real")} mailing, and that is not set up on this site yet. Ask the site's administrator, or print this card here instead."));
+                continue;
+            }
+            var look = designs.Look(CardDesigns.For(allDesigns, r.Id), groupId, settings.AccentColor) with { TeamSignature = GroupPolicy.SignatureForAll(groupRow) };
             var request = new MailPostcardRequest(
                 new MailContact(c.GuestFirstName, c.GuestLastName, null, c.StreetAddress!, null, c.City!, c.State!, c.Zip!),
                 new MailContact(null, null, r.Name, r.StreetAddress!, null, r.City!, r.State!, r.Zip!),
@@ -236,10 +262,11 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
         if (me.GroupId is null) return BadRequest(new { message = "Select an investment group first." });
         var cards = (await Cards(me, req.CommentIds, ct)).Where(c => c.MailId is not null).ToList();
-        var account = siteMailing.Account;
         var results = new List<MailStatusDto>();
         foreach (var c in cards)
         {
+            // A card is asked about with the key it was sent with: the test key for a test order, the live key for a real one.
+            var account = siteMailing.For(!c.MailTest);
             if (account is null)
             {
                 results.Add(new(c.Id, c.MailStatus, c.MailTest, false, "The latest status cannot be fetched just now. Ask the site's administrator."));
@@ -271,7 +298,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
         var c = await One(me, id, ct);
         if (c?.MailId is null) return NotFound(new { message = "This card has not been sent to be mailed." });
-        if (siteMailing.Account is not { } account) return BadRequest(new { message = NotSetUp });
+        if (siteMailing.For(!c.MailTest) is not { } account) return BadRequest(new { message = NotSetUp });
         var notReady = NotFound(new { message = "The proof is not ready yet. Try again in a minute." });
         try
         {
@@ -308,7 +335,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var c = await One(me, id, ct);
         if (c is null) return NotFound();
         if (c.MailId is null || c.MailStatus == MailStatuses.Cancelled) return BadRequest(new { message = "This card is not waiting to be mailed." });
-        if (siteMailing.Account is not { } account)
+        if (siteMailing.For(!c.MailTest) is not { } account)
             return BadRequest(new { message = "This card cannot be cancelled from here just now. Ask the site's administrator to cancel it." });
         MailedPostcard after;
         try
@@ -347,7 +374,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (c is null) return NotFound();
         var groupId = c.Restaurant.GroupId;
         var settings = await settingsStore.GetAsync(groupId, ct);
-        var look = designs.Look(CardDesigns.For(await designs.ForGroupAsync(groupId, ct), c.RestaurantId), groupId, settings.AccentColor);
+        var groupRow = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
+        var look = designs.Look(CardDesigns.For(await designs.ForGroupAsync(groupId, ct), c.RestaurantId), groupId, settings.AccentColor) with { TeamSignature = GroupPolicy.SignatureForAll(groupRow) };
         return new MailPreview(PostGridCardDesign.Front(look, c, c.Restaurant, settings.CouponValidityMonths),
             PostGridCardDesign.Back(c, c.Restaurant, settings.CouponValidityMonths, settings.AccentColor, look, CardCodes.QrDataUri(codes.Url(c.PublicId, siteAddress.Origin()))));
     }
@@ -590,7 +618,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
     // ---- helpers ----------------------------------------------------------------------------------------------
 
     private static bool CanSetDays(CurrentUser me, int restaurantId) =>
-        me.CanManageRestaurant(restaurantId) || (me.Role == UserRole.Manager && me.Has(ManagerPermission.SetFollowUpDays) && me.CanAccessRestaurant(restaurantId));
+        me.Has(ManagerPermission.SetFollowUpDays) && (me.CanManageRestaurant(restaurantId) || (me.Role == UserRole.Manager && me.CanAccessRestaurant(restaurantId)));
 
     /// <summary>The group's own wording for a mailed reply when it has one, so reports group together.</summary>
     private static string MailedMethod(GroupSettings settings) =>
@@ -602,7 +630,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (guest.Any(string.IsNullOrWhiteSpace)) return "The guest's street, city, state and zip are all needed to buy postage.";
         var r = c.Restaurant;
         string?[] from = [r.StreetAddress, r.City, r.State, r.Zip];
-        if (from.Any(string.IsNullOrWhiteSpace)) return $"{r.Name} needs its full address (street, city, state, zip) as the return address. Add it on Restaurants & staff.";
+        if (from.Any(string.IsNullOrWhiteSpace)) return $"{r.Name} needs its full address (street, city, state, zip) as the return address. Add it on Restaurants & Staff Assignments.";
         return null;
     }
 

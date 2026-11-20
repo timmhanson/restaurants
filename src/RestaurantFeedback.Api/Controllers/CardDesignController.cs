@@ -38,7 +38,7 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         if (scope == GroupScope) return (new Target(groupId, null, me.IsGroupWide), null);
         if (!int.TryParse(scope, out var id) || !me.CanAccessRestaurant(id)) return (null, NotFound());
         var r = await db.Restaurants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && x.GroupId == groupId, ct);
-        return r is null ? (null, NotFound()) : (new Target(groupId, r, me.CanManageRestaurant(id)), null);
+        return r is null ? (null, NotFound()) : (new Target(groupId, r, me.CanManageRestaurant(id) && me.Has(ManagerPermission.DesignCards)), null);
     }
 
     /// <summary>The designs this person can see: the group's, then each restaurant they manage.</summary>
@@ -52,7 +52,7 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         var restaurants = await db.Restaurants.AsNoTracking().Where(r => r.GroupId == groupId && r.IsActive && mine.Contains(r.Id)).OrderBy(r => r.Name)
             .Select(r => new { r.Id, r.Name }).ToListAsync(ct);
         var list = new List<CardDesignScope> { new(GroupScope, null, "Every restaurant (the group's card)", me.IsGroupWide, own.Contains(null)) };
-        list.AddRange(restaurants.Select(r => new CardDesignScope(r.Id.ToString(), r.Id, r.Name, me.CanManageRestaurant(r.Id), own.Contains(r.Id))));
+        list.AddRange(restaurants.Select(r => new CardDesignScope(r.Id.ToString(), r.Id, r.Name, me.CanManageRestaurant(r.Id) && me.Has(ManagerPermission.DesignCards), own.Contains(r.Id))));
         return list;
     }
 
@@ -187,9 +187,10 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         if (check is not null) return BadRequest(new { message = check });
         var draft = new CardDesign { GroupId = t.GroupId, RestaurantId = t.RestaurantId };
         Fill(draft, req);
-        var look = designs.Look(new CardDesigns.Loaded(draft, pictures), t.GroupId, settings.AccentColor);
+        var groupRow = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(b => b.GroupId == t.GroupId, ct);
+        var look = designs.Look(new CardDesigns.Loaded(draft, pictures), t.GroupId, settings.AccentColor) with { TeamSignature = GroupPolicy.SignatureForAll(groupRow) };
         var restaurant = await SampleRestaurant(t, ct);
-        var sample = SampleCard(settings, restaurant);
+        var sample = SampleCard(settings, restaurant, GroupPolicy.Signature(groupRow, restaurant));
         return new MailPreview(PostGridCardDesign.Front(look, sample, restaurant, settings.CouponValidityMonths),
             PostGridCardDesign.Back(sample, restaurant, settings.CouponValidityMonths, settings.AccentColor, look,
                 SampleQr));
@@ -205,15 +206,16 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
         t.Restaurant ?? await db.Restaurants.AsNoTracking().Where(r => r.GroupId == t.GroupId && r.IsActive).OrderBy(r => r.Name).FirstOrDefaultAsync(ct)
         ?? new Restaurant { Name = "Your restaurant" };
 
-    private static GuestComment SampleCard(GroupSettings settings, Restaurant? restaurant = null)
+    private static GuestComment SampleCard(GroupSettings settings, Restaurant? restaurant = null, string? teamSignature = null)
     {
+        teamSignature ??= restaurant?.SignatureName;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return new GuestComment
         {
             GuestFirstName = "Pat", GuestLastName = "Sample", CouponOffer = settings.CouponOffers.FirstOrDefault() ?? "Free Value Basket", DateIssued = today,
             ExpiresOn = today.AddMonths(settings.CouponValidityMonths),
             // The sample is signed as a card entered with the team login would be, when the restaurant has a name set for that.
-            AuthorizedBy = string.IsNullOrWhiteSpace(restaurant?.SignatureName) ? "A. Manager" : restaurant.SignatureName.Trim()
+            AuthorizedBy = string.IsNullOrWhiteSpace(teamSignature) ? "A. Manager" : teamSignature.Trim()
         };
     }
 
@@ -308,7 +310,8 @@ public class CardDesignController(AppDbContext db, AuditService audit, CurrentUs
     {
         var look = CardLook.Plain(settings.AccentColor) with { Website = d?.Website, LegalText = d?.LegalText, BackMessage = d?.BackMessage };
         var sampleRestaurant = await SampleRestaurant(t, ct);
-        var merge = CardMerge.For(SampleCard(settings, sampleRestaurant), sampleRestaurant, settings.CouponValidityMonths, look);
+        var groupRow = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(b => b.GroupId == t.GroupId, ct);
+        var merge = CardMerge.For(SampleCard(settings, sampleRestaurant, GroupPolicy.Signature(groupRow, sampleRestaurant)), sampleRestaurant, settings.CouponValidityMonths, look);
         return CardMerge.Fields.Select(f => new CardMergeField(f.Key, f.Label, merge.Values.GetValueOrDefault(f.Key, ""))).ToList();
     }
 }

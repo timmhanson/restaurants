@@ -3,6 +3,8 @@ export type Role = 'SuperAdmin' | 'GroupAdmin' | 'Owner' | 'Manager' | 'TeamMemb
 export type Permission =
   | 'ViewComments' | 'EditComments' | 'DeleteComments' | 'MarkResponded'
   | 'ViewAnalytics' | 'ExportComments' | 'ViewAudit' | 'ManageTeamLogin' | 'BuyPostage' | 'SetFollowUpDays'
+  // These four belong to owners and are never given to a manager.
+  | 'ManageStaff' | 'SetPermissions' | 'EditRestaurants' | 'DesignCards'
 
 export interface UserDto {
   id: number
@@ -12,6 +14,8 @@ export interface UserDto {
   role: Role
   /** Display title, e.g. "Investment Group Administrator". */
   roleTitle: string
+  /** An investment group administrator who is also an owner of one or more restaurants (restaurantIds are the ones they own). */
+  alsoOwner?: boolean
   groupId?: number | null
   groupName?: string | null
   permissions: number
@@ -43,7 +47,24 @@ export interface UserRequest {
   requirePasswordChange?: boolean
 }
 
-export interface PermissionInfo { name: Permission; value: number; description: string }
+/** A permission as it stands in the signed-in person's group. managers: all hold it, none can, or it is set for each manager. */
+export interface PermissionInfo {
+  name: Permission; value: number; description: string; forManagers: boolean; spendsMoney: boolean
+  ownersCan: boolean; managers: 'all' | 'none' | 'each'; managersSetBy: 'site' | 'group' | 'owners'
+}
+/** One permission, with what the site and the group have each said about it and what comes of that. */
+export interface PermissionState {
+  name: Permission; description: string; forManagers: boolean; spendsMoney: boolean
+  siteOwners: 'yes' | 'no' | 'group'; siteManagers?: 'yes' | 'no' | 'group' | null
+  groupOwners: 'yes' | 'no'; groupManagers?: 'yes' | 'no' | 'each' | null
+  ownersCan: boolean; ownersSetBy: 'site' | 'group'; managers: 'all' | 'none' | 'each'; managersSetBy: 'site' | 'group' | 'owners'
+}
+export interface PermissionRules { groupId: number; group: string; bySite: boolean; permissions: PermissionState[] }
+/** The settings a group's administrators make for all restaurants. groupDecides lists the ones they may change: mail, mode, usual, signature. */
+export interface GroupRules {
+  mail: 'on' | 'off' | 'each'; mailMode: 'live' | 'test' | 'each'; siteMailMode: 'live' | 'test' | 'each'; usualWay: 'mail' | 'stamp' | 'each'
+  signatureForAll?: string | null; groupDecides: string[]
+}
 
 export interface PersonRef { id: number; displayName: string; username: string }
 
@@ -59,6 +80,11 @@ export interface RestaurantDto {
   signatureName?: string | null
   /** On Print cards, "Mailed for you" is chosen to begin with for this restaurant's cards. */
   mailByDefault?: boolean
+  /** The restaurant's own choices; each counts only when its group leaves that decision to the restaurant. */
+  mailOn?: boolean
+  mailLive?: boolean
+  /** What actually applies once the group's (and the site's) settings are counted, and who decided each. */
+  applies?: RestaurantRules | null
   isActive: boolean
   /** Filled in on the admin listing (GET /restaurants?all=true) only. */
   owners?: PersonRef[]
@@ -66,8 +92,37 @@ export interface RestaurantDto {
   teamLoginCount?: number
   ownedByMe?: boolean
   canManage?: boolean
+  /** May change its details and coupon card settings. */
+  canEdit?: boolean
   /** An owner may mark this restaurant as theirs (no owner yet, and no investment group administrator to decide). */
   canClaim?: boolean
+}
+
+/** Who decided a setting: the site (for every group), the group (for all its restaurants) or the restaurant itself. */
+export type SetBy = 'site' | 'group' | 'restaurant'
+/**
+ * What applies to one restaurant: whether cards can be mailed for it, whether for real (not as tests), whether
+ * "Mailed for you" is its usual way, and the name that signs for the team login.
+ */
+export interface RestaurantRules {
+  mailOn: boolean; mailLive: boolean; mailUsual: boolean; signature?: string | null
+  mailOnSetBy: SetBy; mailLiveSetBy: SetBy; mailUsualSetBy: SetBy; signatureSetBy: SetBy
+}
+/** A group's settings as the System Administrator makes them, with each restaurant's own choices. */
+export interface GroupSettingsData {
+  groupId: number; group: string
+  /** on, off, or each (each restaurant decides). */
+  mail: 'on' | 'off' | 'each'
+  /** live, test, or each (each restaurant decides); siteMailMode is the site's: live or test for every group, or each. */
+  mailMode: 'live' | 'test' | 'each'; siteMailMode: 'live' | 'test' | 'each'
+  usualWay: 'mail' | 'stamp' | 'each'
+  /** A name for all restaurants, or empty when each restaurant decides. */
+  signatureForAll?: string | null
+  payRule: 'site' | 'required' | 'notrequired'; siteRequiresPay: boolean
+  hasTestKey: boolean; hasLiveKey: boolean; creditCents: number; payLabel?: string | null
+  /** The settings left to the group's own administrators: mail, mode, usual, signature. The rest are the site's answer for the group. */
+  groupDecides: string[]
+  restaurants: { id: number; name: string; isActive: boolean; mailOn: boolean; mailLive: boolean; mailByDefault: boolean; signatureName?: string | null; applies: RestaurantRules }[]
 }
 
 export interface StaffMember {
@@ -90,6 +145,8 @@ export interface StaffResponse {
   teamLogins: StaffMember[]
   /** Investment Group administrators see every restaurant without being assigned. */
   groupAdmins: PersonRef[]
+  /** The group's administrators, each marked as assigned when they are also an owner of this restaurant. */
+  adminOwners: StaffMember[]
   /** False when the group has an investment group administrator, so a restaurant may have no specific owner. */
   ownerRequired: boolean
 }
@@ -103,6 +160,8 @@ export interface RestaurantRequest {
   phone?: string | null
   signatureName?: string | null
   mailByDefault?: boolean
+  mailOn?: boolean
+  mailLive?: boolean
   isActive: boolean
   /** Group creation only: usernames of the new owners who own this restaurant. */
   ownerUsernames?: string[] | null
@@ -167,6 +226,8 @@ export interface PrintConfig {
   mailCreditCents: number
   /** What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is). Charged once per card, at its first print. */
   printFeeCents: number
+  /** For each restaurant this person works at: whether cards can be mailed for it, whether for real, and whether that is set up on the site. */
+  mailRestaurants: { restaurantId: number; on: boolean; live: boolean; ready: boolean }[]
   /** The site is in test mode for mailing: nothing is printed, mailed or charged. */
   mailTest: boolean
   /** What the group is billed for each mailed card, in cents. */
@@ -252,6 +313,8 @@ export interface Invoice {
   /** What paying with the saved payment method would add (a credit card or a bank account). */
   payFeeCents: number
   paymentError?: string | null; lines: InvoiceLine[]
+  /** The restaurant or set of restaurants the bill is for, when the group's month is split into several bills. */
+  for?: string | null
   /** How much of the group's credit was used on this bill, and what is still owed after it. */
   creditCents: number; dueCents: number
 }
@@ -260,10 +323,14 @@ export interface GroupCreditLine { at: string; kind: string; label: string; amou
 /** One line of the credit log as the System Administrator sees it, with the details entered. */
 export interface GroupCredit { id: number; groupId: number; group: string; at: string; kind: string; label: string; amountCents: number; details: string; by: string; invoiceNumber?: string | null }
 export interface GroupBilling {
+  /** How the group has its month billed (one, restaurant or sets), and the set each restaurant is billed with. Administrators only. */
+  bills?: { split: 'one' | 'restaurant' | 'sets'; sets: { restaurantId: number; restaurant: string; set?: string | null }[] } | null
   /** The group's unused credit, which comes off its next bills by itself, and the lines that make it up. */
   creditCents: number; credits: GroupCreditLine[]
   /** What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is). */
   printFeeCents: number
+  /** Real or test mailing for the group (each: each restaurant decides), and whether the site has fixed it for every group. */
+  mailMode: 'live' | 'test' | 'each'; mailModeSetBySite: boolean
   /** A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage. */
   canManage: boolean
   mailAvailable: boolean; test: boolean; centsPerCard: number; limitCents: number; usedCents: number; cardsThisMonth: number
@@ -277,7 +344,9 @@ export interface BillingSettings {
   costCents: number; feeCents: number; monthlyLimitCents: number; billDay: number; dueDays: number; emailBills: boolean; printBills: boolean
   cardFeePercent: number; bankFeePercent: number; requirePaymentMethod: boolean
   /** Groups are also charged the site's fee for each card they print themselves for a stamp by hand. */
-  chargeHandPrintFee: boolean; businessName: string; businessEmail?: string | null
+  chargeHandPrintFee: boolean
+  /** Real or test mailing for the whole site: live or test for every group, or each (each group decides). */
+  mailMode: 'live' | 'test' | 'each'; businessName: string; businessEmail?: string | null
   street?: string | null; city?: string | null; state?: string | null; zip?: string | null; payInstructions?: string | null; siteUrl?: string | null
 }
 export interface SystemInvoice extends Omit<Invoice, 'payFeeCents'> {
@@ -289,6 +358,8 @@ export interface GroupBillingRow {
   cardsThisMonth: number; billedThisMonthCents: number; owedCents: number; payLabel?: string | null; autoPay: boolean; billingEmail?: string | null
   /** Having cards printed and mailed is switched on for this group. */
   mailEnabled: boolean
+  /** on, off or each (each restaurant decides); and live, test or each for real or test mailing. */
+  mail: 'on' | 'off' | 'each'; mailMode: 'live' | 'test' | 'each'
   /** Whether this group must save a payment method before mailing; ownPayRule is null when it follows the site's setting. */
   payRequired: boolean; ownPayRule?: boolean | null
   /** The group's unused credit. */
@@ -681,6 +752,9 @@ export interface PostGridSite {
   savedBy?: string | null
   canEnter: boolean
   mail: SiteKeyInfo
+  /** The test key and the live key for printing and mailing, each entered on its own. */
+  mailTestKey: SiteKeyInfo
+  mailLiveKey: SiteKeyInfo
   cardsMailed: number
   testCardsMailed: number
   cardsThisMonth: number

@@ -42,8 +42,8 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         var after = site.Billing;
         await audit.LogAsync(me, "BillingSettingsChanged", details: new
         {
-            Before = new { before.CostCents, before.FeeCents, before.MonthlyLimitCents, before.BillDay, before.DueDays, before.EmailBills, before.PrintBills, before.CardFeePercent, before.BankFeePercent, before.RequirePaymentMethod, before.ChargeHandPrintFee },
-            After = new { after.CostCents, after.FeeCents, after.MonthlyLimitCents, after.BillDay, after.DueDays, after.EmailBills, after.PrintBills, after.CardFeePercent, after.BankFeePercent, after.RequirePaymentMethod, after.ChargeHandPrintFee }
+            Before = new { before.CostCents, before.FeeCents, before.MonthlyLimitCents, before.BillDay, before.DueDays, before.EmailBills, before.PrintBills, before.CardFeePercent, before.BankFeePercent, before.RequirePaymentMethod, before.ChargeHandPrintFee, before.MailMode },
+            After = new { after.CostCents, after.FeeCents, after.MonthlyLimitCents, after.BillDay, after.DueDays, after.EmailBills, after.PrintBills, after.CardFeePercent, after.BankFeePercent, after.RequirePaymentMethod, after.ChargeHandPrintFee, after.MailMode }
         });
         return await Dto(null, null, null, ct);
     }
@@ -63,7 +63,8 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         var before = new { b.FeeCents, b.MonthlyLimitCents, b.MailEnabled, b.RequirePayMethod };
         b.FeeCents = req.FeeCents;
         b.MonthlyLimitCents = req.LimitCents;
-        if (req.MailEnabled is bool on) b.MailEnabled = on;
+        // Switched on or off for all the group's restaurants; "each restaurant decides" is set with the group's settings.
+        if (req.MailEnabled is bool on) { b.MailEnabled = on; b.MailPerRestaurant = false; }
         if (req.PayRule is not null) b.RequirePayMethod = req.PayRule switch { "required" => true, "notrequired" => false, _ => null };
         await db.SaveChangesAsync(ct);
         await audit.LogAsync(me, "GroupBillingTermsChanged", "Group", id, new { Group = group.Name, before, after = new { b.FeeCents, b.MonthlyLimitCents, b.MailEnabled, b.RequirePayMethod } }, groupId: id);
@@ -275,6 +276,7 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         var balances = credits.GroupBy(c => c.GroupId).ToDictionary(g => g.Key, g => g.Sum(c => c.AmountCents));
         var numbers = allInvoices.ToDictionary(i => i.Id, i => i.Number);
 
+        var mailOnSomewhere = (await db.Restaurants.AsNoTracking().Where(r => r.IsActive && r.MailOn).Select(r => r.GroupId).Distinct().ToListAsync(ct)).ToHashSet();
         var groupRows = groups.Select(g =>
         {
             var b = rows.FirstOrDefault(x => x.GroupId == g.Id);
@@ -282,7 +284,8 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
             return new GroupBillingRow(g.Id, g.Name, g.IsActive, b?.FeeCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, now.Count, now.Sum(c => c.Cents),
                 allInvoices.Where(i => i.GroupId == g.Id && i.Status == InvoiceStatuses.Open).Sum(BillingService.Due), b?.PayLabel, b?.AutoPay ?? false, b?.BillingEmail)
             {
-                MailEnabled = b?.MailEnabled ?? false, PayRequired = b?.RequirePayMethod ?? s.RequirePaymentMethod, OwnPayRule = b?.RequirePayMethod,
+                MailEnabled = GroupPolicy.Switch(b) == MailChoices.On || (GroupPolicy.Switch(b) == MailChoices.Each && mailOnSomewhere.Contains(g.Id)),
+                Mail = GroupPolicy.Switch(b), MailMode = GroupPolicy.SiteMode(s) != MailChoices.Each ? GroupPolicy.SiteMode(s) : GroupPolicy.Mode(b), PayRequired = b?.RequirePayMethod ?? s.RequirePaymentMethod, OwnPayRule = b?.RequirePayMethod,
                 CreditCents = balances.GetValueOrDefault(g.Id)
             };
         }).ToList();
@@ -295,13 +298,13 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         }).Take(300).Select(i => new SystemInvoiceDto(i.Id, i.GroupId, names.GetValueOrDefault(i.GroupId, "(removed group)"), i.Number, i.Month, MailLedger.MonthName(i.Month), i.Cards, i.CostCents,
             i.FeeCents, i.TotalCents, DateTime.SpecifyKind(i.IssuedAt, DateTimeKind.Utc), i.DueOn, i.Status, Overdue(i), i.PaidAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null, i.PaidHow,
             i.PaidNote, i.PaidBy, i.SurchargeCents, i.PaymentRef, i.PaymentError, i.EmailedAt is { } e ? DateTime.SpecifyKind(e, DateTimeKind.Utc) : null, i.EmailedTo,
-            i.PrintedAt is { } p ? DateTime.SpecifyKind(p, DateTimeKind.Utc) : null, i.DeliveryError, BillingService.Lines(i)) { CreditCents = i.CreditCents, DueCents = BillingService.Due(i) }).ToList();
+            i.PrintedAt is { } p ? DateTime.SpecifyKind(p, DateTimeKind.Utc) : null, i.DeliveryError, BillingService.Lines(i)) { CreditCents = i.CreditCents, DueCents = BillingService.Due(i), For = i.UnitName }).ToList();
 
         var have = allInvoices.Select(i => (i.GroupId, i.Month)).ToHashSet();
         var unbilled = billed.Where(c => c.At < monthStart && c.Cents > 0).Select(c => (c.GroupId, Month: MailLedger.MonthKey(c.At))).Distinct()
             .Where(x => !have.Contains(x)).Select(x => x.Month).Distinct().OrderBy(m => m).ToList();
         var open = allInvoices.Where(i => i.Status == InvoiceStatuses.Open).ToList();
-        return new SystemBillingDto(s, site.Account is not null, site.Account?.Test ?? false, payAccount.Current is not null, payAccount.Current?.Test ?? false, email is not LoggingEmailSender,
+        return new SystemBillingDto(s, site.Any is not null, site.Live is null, payAccount.Current is not null, payAccount.Current?.Test ?? false, email is not LoggingEmailSender,
             groupRows, shown, unbilled, open.Sum(BillingService.Due), open.Where(Overdue).Sum(BillingService.Due))
         {
             Credits = credits.Where(c => groupId is null || c.GroupId == groupId).OrderByDescending(c => c.Id).Take(300)

@@ -3,15 +3,18 @@ import { api } from '../api/client'
 import type { Permission, PermissionInfo, RestaurantDto, Role, UserDto, UserRequest } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { ROLE_HELP, roleTitle } from '../auth/roles'
-import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, fmtDateTime } from '../components/ui'
+import { Alert, Badge, Confirm, Empty, Field, Modal, RoleBadge, Spinner, fmtDateTime } from '../components/ui'
 
 const groupWideRole = (r: Role) => r === 'SuperAdmin' || r === 'GroupAdmin'
 
 export default function UsersPage() {
-  const { user: me, isAdmin, isSuperAdmin, isGroupWide, groupId } = useAuth()
+  const { user: me, isAdmin, isSuperAdmin, isGroupWide, groupId, has } = useAuth()
   const [users, setUsers] = useState<UserDto[] | null>(null)
   const [restaurants, setRestaurants] = useState<RestaurantDto[]>([])
   const [catalog, setCatalog] = useState<PermissionInfo[]>([])
+  // Whether this person chooses what each manager may do: administrators always, owners when their group allows it.
+  const [canSetPermissions, setCanSetPermissions] = useState(false)
+  const [mapping, setMapping] = useState<UserDto | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [editing, setEditing] = useState<UserDto | 'new' | null>(null)
@@ -25,11 +28,12 @@ export default function UsersPage() {
       const [u, r, p] = await Promise.all([
         api.get<UserDto[]>('/users'),
         api.get<RestaurantDto[]>(isAdmin ? '/restaurants?all=true' : '/restaurants'),
-        api.get<{ permissions: PermissionInfo[] }>('/users/permissions'),
+        api.get<{ permissions: PermissionInfo[]; canSet: boolean }>('/users/permissions'),
       ])
       setUsers(u)
       setRestaurants(r)
       setCatalog(p.permissions)
+      setCanSetPermissions(p.canSet)
     } catch (e) {
       setError((e as Error).message)
       setUsers([])
@@ -49,12 +53,14 @@ export default function UsersPage() {
     if (isSuperAdmin) return true
     if (u.role === 'SuperAdmin') return false
     if (isGroupWide || u.id === me?.id) return true
-    if (ownerScoped) return (u.role === 'Manager' || u.role === 'TeamMember') && (u.restaurantIds.length === 0 || u.restaurantIds.some(owns))
+    if (ownerScoped) return has('ManageStaff') && (u.role === 'Manager' || u.role === 'TeamMember') && (u.restaurantIds.length === 0 || u.restaurantIds.some(owns))
     return true
   }
+  // Mapping a person to restaurants: owners and administrators, for anyone in a group (an owner's own restaurants are on the restaurant list).
+  const canMap = (u: UserDto) => isAdmin && u.role !== 'SuperAdmin' && !(ownerScoped && u.id === me?.id)
   const canRemove = (u: UserDto) => canEdit(u) && u.id !== me?.id && (!ownerScoped || u.restaurantIds.every(owns))
   const notMine = (u: UserDto) =>
-    ownerScoped && (u.role === 'Owner' || u.role === 'GroupAdmin')
+    ownerScoped && (u.role === 'Owner' || u.role === 'GroupAdmin' || !has('ManageStaff'))
       ? 'Managed by your investment group administrators'
       : `Managed by the owners of ${u.restaurantIds.map(restaurantName).join(', ')}`
 
@@ -92,11 +98,13 @@ export default function UsersPage() {
   return (
     <>
       <div className="page-head">
-        <h1>Users</h1>
+        <h1>All Staff</h1>
         <span className="grow" />
-        <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
-          + Add user
-        </button>
+        {(!ownerScoped || has('ManageStaff')) && (
+          <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
+            + Add user
+          </button>
+        )}
       </div>
       {!isAdmin && <Alert kind="info">As a manager you can create and reset the shared team login for your restaurants.</Alert>}
       {ownerScoped && (
@@ -129,13 +137,17 @@ export default function UsersPage() {
                     <div className="muted" style={{ fontSize: '0.8rem' }}>{u.username}{u.email ? ` · ${u.email}` : ''}</div>
                   </td>
                   <td>
-                    {groupWideRole(u.role) ? <Badge kind="accent">{roleTitle(u.role)}</Badge> : u.role === 'TeamMember' ? <Badge kind="neutral">Team login</Badge> : roleTitle(u.role)}
+                    <RoleBadge role={u.role} />
+                    {u.role === 'GroupAdmin' && u.restaurantIds.length > 0 && <> <RoleBadge role="Owner" title="This administrator is also an owner of one or more restaurants" /></>}
                   </td>
                   <td>
                     {u.role === 'SuperAdmin' ? (
                       <span className="muted">every group</span>
                     ) : u.role === 'GroupAdmin' ? (
-                      <span className="muted">every restaurant in the group</span>
+                      <>
+                        <span className="muted">every restaurant in the group</span>
+                        {u.restaurantIds.length > 0 && <div className="small">Also an owner of {u.restaurantIds.map(restaurantName).join(', ')}</div>}
+                      </>
                     ) : u.restaurantIds.length ? (
                       u.restaurantIds.map((id) => (
                         <span key={id} className={ownerScoped && !owns(id) ? 'muted' : undefined} title={ownerScoped && !owns(id) ? 'Owned by someone else' : undefined}>
@@ -152,6 +164,8 @@ export default function UsersPage() {
                       u.permissionNames.length ? <span style={{ fontSize: '0.82rem' }}>{u.permissionNames.map(pretty).join(', ')}</span> : <span className="muted">Enter cards only</span>
                     ) : u.role === 'TeamMember' ? (
                       <span className="muted">Enter cards only</span>
+                    ) : u.role === 'Owner' && catalog.some((p) => !p.ownersCan) ? (
+                      <span style={{ fontSize: '0.82rem' }}>Everything except: {catalog.filter((p) => !p.ownersCan).map((p) => pretty(p.name)).join(', ')}</span>
                     ) : (
                       <span className="muted">Everything</span>
                     )}
@@ -161,6 +175,12 @@ export default function UsersPage() {
                     {canEdit(u) ? (
                       <div className="row-actions">
                         <button type="button" className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
+                        {canMap(u) && (
+                          <button type="button" className="btn btn-sm" onClick={() => setMapping(u)} aria-label={`Restaurants for ${u.displayName}`}
+                            title={u.role === 'GroupAdmin' ? 'Choose the restaurants this administrator also owns' : 'Choose the restaurants this person is assigned to'}>
+                            Restaurants
+                          </button>
+                        )}
                         <button type="button" className="btn btn-sm" onClick={() => setResetting(u)}>Reset password</button>
                         {u.id !== me?.id && (
                           <button type="button" className={`btn btn-sm ${u.isActive ? '' : 'btn-primary'}`} onClick={() => setSuspending(u)}>
@@ -187,6 +207,7 @@ export default function UsersPage() {
           user={editing === 'new' ? null : editing}
           restaurants={restaurants.filter((r) => r.isActive || (editing !== 'new' && editing.restaurantIds.includes(r.id)))}
           catalog={catalog}
+          canSetPermissions={canSetPermissions}
           myRole={me?.role ?? 'TeamMember'}
           ownerScoped={ownerScoped}
           restaurantName={restaurantName}
@@ -194,6 +215,19 @@ export default function UsersPage() {
           onClose={() => setEditing(null)}
           onSaved={(msg) => {
             setEditing(null)
+            setNotice(msg)
+            void load()
+          }}
+        />
+      )}
+      {mapping && (
+        <MapRestaurantsModal
+          user={mapping}
+          restaurants={restaurants.filter((r) => r.isActive || mapping.restaurantIds.includes(r.id))}
+          ownerScoped={ownerScoped}
+          onClose={() => setMapping(null)}
+          onSaved={(msg) => {
+            setMapping(null)
             setNotice(msg)
             void load()
           }}
@@ -249,12 +283,68 @@ export default function UsersPage() {
   )
 }
 
+/** Map one person to restaurants: where they work, or (for an owner or an administrator) which restaurants they own. */
+function MapRestaurantsModal({ user, restaurants, ownerScoped, onClose, onSaved }: {
+  user: UserDto
+  restaurants: RestaurantDto[]
+  ownerScoped: boolean
+  onClose: () => void
+  onSaved: (message: string) => void
+}) {
+  const [ids, setIds] = useState<number[]>(user.restaurantIds)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  // An owner maps people only at restaurants they own; the others are shown as they are.
+  const mine = (r: RestaurantDto) => !ownerScoped || Boolean(r.canManage)
+  const toggle = (id: number) => setIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+  const what = user.role === 'GroupAdmin' ? 'also owns' : user.role === 'Owner' ? 'owns' : user.role === 'TeamMember' ? 'is the team login for' : 'works at'
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.put(`/users/${user.id}/restaurants`, { restaurantIds: ids })
+      onSaved(`${user.displayName}’s restaurants were saved.`)
+    } catch (e) {
+      setError((e as Error).message)
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal title={`Restaurants · ${user.displayName}`} onClose={onClose}>
+      <div className="grid">
+        {error && <Alert kind="error">{error}</Alert>}
+        <p className="muted" style={{ margin: 0 }}>
+          Tick the restaurants {user.displayName} {what}.{' '}
+          {user.role === 'GroupAdmin' ? 'An Investment Group Administrator sees and manages every restaurant either way; ticking one makes them one of its owners as well.'
+            : user.role === 'Manager' ? 'A manager can work at one restaurant or at several.'
+              : user.role === 'TeamMember' ? 'Usually one restaurant per team login.' : ''}
+          {ownerScoped && restaurants.some((r) => !mine(r)) ? ' Restaurants you do not own are greyed out; their owners manage who works there.' : ''}
+        </p>
+        <div className="check-list" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+          {restaurants.map((r) => (
+            <label key={r.id} className="check" style={mine(r) ? undefined : { opacity: 0.55 }}>
+              <input type="checkbox" checked={ids.includes(r.id)} disabled={!mine(r) || busy} onChange={() => toggle(r.id)} /> {r.name}{r.isActive ? '' : ' (inactive)'}
+            </label>
+          ))}
+          {restaurants.length === 0 && <span className="muted">No restaurants in this group yet.</span>}
+        </div>
+        <div className="actions">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy}>{busy ? 'Saving…' : 'Save restaurants'}</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 const pretty = (p: string) => p.replace(/([A-Z])/g, ' $1').trim()
 
-function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurantName, meId, onClose, onSaved }: {
+function UserModal({ user, restaurants, catalog, canSetPermissions, myRole, ownerScoped, restaurantName, meId, onClose, onSaved }: {
   user: UserDto | null
   restaurants: RestaurantDto[]
   catalog: PermissionInfo[]
+  /** This person chooses the permissions set manager by manager. */
+  canSetPermissions: boolean
   myRole: Role
   /** Owners may only assign people to restaurants they own (their own account excepted). */
   ownerScoped: boolean
@@ -300,7 +390,8 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
     if (!groupWideRole(v.role) && v.restaurantIds.length === 0) return setError('Pick at least one restaurant.')
     setBusy(true)
     try {
-      const body: UserRequest = { ...v, email: v.email || null, password: v.password || null, restaurantIds: groupWideRole(v.role) ? [] : v.restaurantIds }
+      // For an Investment Group Administrator the restaurants are the ones they also own.
+      const body: UserRequest = { ...v, email: v.email || null, password: v.password || null, restaurantIds: v.role === 'SuperAdmin' ? [] : v.restaurantIds }
       if (user) await api.put(`/users/${user.id}`, body)
       else await api.post('/users', body)
       onSaved(
@@ -414,10 +505,23 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
             </label>
           )}
         </div>
-        {groupWideRole(v.role) ? (
-          <p className="muted" style={{ margin: 0 }}>
-            {v.role === 'GroupAdmin' ? 'Investment Group administrators see and manage every restaurant in the group, so they are not assigned to particular ones.' : 'System Administrators are not part of any group.'}
-          </p>
+        {v.role === 'GroupAdmin' ? (
+          <Field
+            label="Also an owner of (optional)"
+            hint="Investment Group administrators see and manage every restaurant in the group without being assigned. Tick a restaurant to make this person one of its owners as well: a second role, shown wherever the restaurant’s owners are listed."
+          >
+            <div className="check-list" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+              {restaurants.map((r) => (
+                <label key={r.id} className="check">
+                  <input type="checkbox" checked={v.restaurantIds.includes(r.id)} onChange={() => toggleRestaurant(r.id)} /> {r.name}
+                  {r.isActive ? '' : ' (inactive)'}
+                </label>
+              ))}
+              {restaurants.length === 0 && <span className="muted">No restaurants in this group yet.</span>}
+            </div>
+          </Field>
+        ) : groupWideRole(v.role) ? (
+          <p className="muted" style={{ margin: 0 }}>System Administrators are not part of any group.</p>
         ) : (
           <Field
             label="Restaurants"
@@ -438,14 +542,25 @@ function UserModal({ user, restaurants, catalog, myRole, ownerScoped, restaurant
           </Field>
         )}
         {v.role === 'Manager' && (
-          <Field label="Manager permissions" hint="Every manager can enter cards. Tick what else this manager may do; it applies at every restaurant they work at.">
+          <Field label="Manager permissions" hint={canSetPermissions
+            ? 'Every manager can enter cards. Tick what else this manager may do; it applies at every restaurant they work at. The greyed ones are decided for all managers in your investment group.'
+            : 'Every manager can enter cards. What else each manager may do is chosen by your investment group’s administrators.'}>
             <div className="check-list">
-              {catalog.map((p) => (
-                <label key={p.name} className="check">
-                  <input type="checkbox" checked={v.permissions.includes(p.name)} onChange={() => togglePerm(p.name)} />
-                  <span><strong>{pretty(p.name)}</strong> <span className="muted">— {p.description}</span></span>
-                </label>
-              ))}
+              {catalog.filter((p) => p.forManagers).map((p) => {
+                // Decided for every manager at once (all hold it, or none can), or ticked manager by manager.
+                const decided = p.managers !== 'each'
+                return (
+                  <label key={p.name} className="check" style={decided || !canSetPermissions ? { opacity: 0.6 } : undefined}>
+                    <input type="checkbox" checked={p.managers === 'all' || (p.managers === 'each' && v.permissions.includes(p.name))} disabled={decided || !canSetPermissions} onChange={() => togglePerm(p.name)} />
+                    <span>
+                      <strong>{pretty(p.name)}</strong> <span className="muted">— {p.description}</span>
+                      {decided && <span className="muted small" style={{ display: 'block' }}>
+                        {p.managers === 'all' ? 'All managers in your investment group can.' : p.managersSetBy === 'owners' ? 'No manager can, because owners in your investment group cannot.' : 'No manager in your investment group can.'}
+                      </span>}
+                    </span>
+                  </label>
+                )
+              })}
             </div>
           </Field>
         )}

@@ -77,7 +77,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         billing.Property(g => g.BillingName).HasMaxLength(200);
         billing.Property(g => g.BillingEmail).HasMaxLength(200);
         var invoice = b.Entity<MailInvoice>();
-        invoice.HasIndex(i => new { i.GroupId, i.Month }).IsUnique();
+        invoice.HasIndex(i => new { i.GroupId, i.Month, i.Unit }).IsUnique();
+        invoice.Property(i => i.Unit).HasMaxLength(80);
+        invoice.Property(i => i.UnitName).HasMaxLength(200);
         invoice.HasIndex(i => i.Status);
         invoice.HasOne<OwnerGroup>().WithMany().HasForeignKey(i => i.GroupId).OnDelete(DeleteBehavior.Cascade);
         invoice.Property(i => i.Month).HasMaxLength(7);

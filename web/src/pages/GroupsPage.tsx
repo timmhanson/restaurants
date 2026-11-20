@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import type { GroupBillingRow, GroupDto, GroupRequest, RestaurantRequest, SystemBilling, UserRequest } from '../api/types'
+import type { GroupDto, GroupRequest, GroupSettingsData, PermissionRules, RestaurantRequest, UserRequest } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import GroupPeoplePanel from '../components/GroupPeoplePanel'
+import GroupSettingsEditor from '../components/GroupSettingsEditor'
+import PermissionRulesEditor, { type PermissionChange } from '../components/PermissionRulesEditor'
 import { Alert, Badge, Empty, Field, Modal, Spinner, fmtDate } from '../components/ui'
 
 export default function GroupsPage() {
@@ -12,6 +15,8 @@ export default function GroupsPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [editing, setEditing] = useState<GroupDto | 'new' | null>(null)
+  // The group whose people are shown under its row.
+  const [showPeople, setShowPeople] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -30,7 +35,6 @@ export default function GroupsPage() {
     selectGroup(g.id)
     navigate(page)
   }
-  const setUp = (g: GroupDto) => viewAs(g, '/restaurants')
 
   return (
     <>
@@ -42,7 +46,7 @@ export default function GroupsPage() {
       <p className="muted">
         Each investment group has its own administrators, restaurant owners, managers, team logins and settings. Create a group with its
         administrators, owners and restaurants in one step. <strong>View as admin</strong> opens the group just as its Investment Group Administrator sees
-        it (starting on Enter card); <strong>Set up</strong> opens its restaurants and staff. A yellow bar at the top takes you back here.
+        it (starting on Enter card). A yellow bar at the top takes you back here.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind="success" onClose={() => setNotice(null)}>{notice}</Alert>}
@@ -58,9 +62,9 @@ export default function GroupsPage() {
               {list.map((g) => (
                 <tr key={g.id} className={g.isActive ? '' : 'inactive'}>
                   <td>
-                    <strong>{g.name}</strong>
-                    <div>
-                      <button type="button" className="btn btn-sm btn-primary view-as" onClick={() => viewAs(g)} title="See this group as its Investment Group Administrator does">
+                    <div className="group-name">
+                      <strong>{g.name}</strong>
+                      <button type="button" className="btn btn-sm btn-primary view-as" onClick={() => viewAs(g)} title="See this group as its Investment Group Administrator does" aria-label={`View ${g.name} as admin`}>
                         View as admin
                       </button>
                     </div>
@@ -74,13 +78,19 @@ export default function GroupsPage() {
                   <td>{g.isActive ? <Badge kind="ok">Active</Badge> : <Badge kind="neutral">Inactive</Badge>}</td>
                   <td>
                     <div className="row-actions">
-                      <button type="button" className="btn btn-sm" onClick={() => setUp(g)}>Set up</button>
-                      <button type="button" className="btn btn-sm" onClick={() => viewAs(g, '/users')}>Users</button>
+                      <button type="button" className="btn btn-sm" aria-expanded={showPeople === g.id} onClick={() => setShowPeople(showPeople === g.id ? null : g.id)}>
+                        {showPeople === g.id ? 'Hide users' : 'Users'}
+                      </button>
                       <button type="button" className="btn btn-sm" onClick={() => setEditing(g)}>Edit</button>
                     </div>
                   </td>
                 </tr>
-              ))}
+              )).flatMap((row, i) => {
+                const g = list[i]
+                return showPeople === g.id
+                  ? [row, <tr key={`${g.id}-people`}><td colSpan={9} style={{ padding: 0 }}><GroupPeoplePanel groupId={g.id} groupName={g.name} onOpenInGroup={() => viewAs(g, '/users')} onChanged={() => void load()} /></td></tr>]
+                  : [row]
+              })}
             </tbody>
           </table>
         </div>
@@ -94,7 +104,7 @@ export default function GroupsPage() {
             setNotice(msg)
             await load()
             await refreshGroups()
-            if (isNew) setUp(g)
+            if (isNew) viewAs(g, '/restaurants')
           }}
         />
       )}
@@ -149,23 +159,30 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
   const [restaurants, setRestaurants] = useState<RestaurantDraft[]>([blankRestaurant()])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Having cards mailed for the group: the same switch and payment rule as on Billing, so they can be set from here too.
-  const [terms, setTerms] = useState<GroupBillingRow | null>(null)
-  const [siteRequiresPay, setSiteRequiresPay] = useState(true)
-  const [mailEnabled, setMailEnabled] = useState(false)
-  const [payRule, setPayRule] = useState('site')
+  // The group's settings (see GroupSettingsEditor), loaded with the dialog and saved with it.
+  const [settings, setSettings] = useState<GroupSettingsData | null>(null)
   useEffect(() => {
     if (!group) return
-    api.get<SystemBilling>('/system/billing').then((b) => {
-      const row = b.groups.find((g) => g.groupId === group.id) ?? null
-      setTerms(row)
-      setSiteRequiresPay(b.settings.requirePaymentMethod)
-      if (row) {
-        setMailEnabled(row.mailEnabled)
-        setPayRule(row.ownPayRule == null ? 'site' : row.ownPayRule ? 'required' : 'notrequired')
-      }
-    }).catch(() => setTerms(null))
+    api.get<GroupSettingsData>(`/system/groups/${group.id}/settings`).then(setSettings).catch(() => setSettings(null))
   }, [group])
+  // What owners and managers may do in the group, as the System Administrator decides it; saved with the dialog.
+  const [permissions, setPermissions] = useState<PermissionRules | null>(null)
+  const [permissionChanges, setPermissionChanges] = useState<PermissionChange[]>([])
+  useEffect(() => {
+    if (!group) return
+    api.get<PermissionRules>(`/system/groups/${group.id}/permissions`).then(setPermissions).catch(() => setPermissions(null))
+  }, [group])
+  const changePermission = (c: PermissionChange) => {
+    setPermissionChanges((list) => [...list, c])
+    setPermissions((cur) => cur && {
+      ...cur,
+      permissions: cur.permissions.map((x) => {
+        if (x.name !== c.name) return x
+        const next = { ...x, ...(c.owners ? { siteOwners: c.owners as typeof x.siteOwners } : {}), ...(c.managers ? { siteManagers: c.managers as typeof x.siteManagers } : {}) }
+        return { ...next, ownersCan: next.siteOwners === 'yes' || (next.siteOwners === 'group' && next.groupOwners === 'yes') }
+      }),
+    })
+  }
   const setRestaurant = (i: number, k: Exclude<keyof RestaurantDraft, 'notOwnedBy'>, val: string) => setRestaurants((s) => s.map((r, j) => (j === i ? { ...r, [k]: val } : r)))
   const toggleOwnerOf = (i: number, ownerKey: string) =>
     setRestaurants((s) => s.map((r, j) => (j === i ? { ...r, notOwnedBy: r.notOwnedBy.includes(ownerKey) ? r.notOwnedBy.filter((k) => k !== ownerKey) : [...r.notOwnedBy, ownerKey] } : r)))
@@ -181,8 +198,13 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
     try {
       if (group) {
         const saved = await api.put<GroupDto>(`/groups/${group.id}`, { name, isActive } satisfies GroupRequest)
-        if (terms)
-          await api.put(`/system/billing/groups/${group.id}`, { feeCents: terms.feeCents ?? null, limitCents: terms.limitCents ?? null, mailEnabled, payRule })
+        if (settings)
+          await api.put(`/system/groups/${group.id}/settings`, {
+            mail: settings.mail, mailMode: settings.mailMode, usualWay: settings.usualWay, signatureForAll: settings.signatureForAll?.trim() || null, payRule: settings.payRule,
+            groupDecides: settings.groupDecides,
+            restaurants: settings.restaurants.map((r) => ({ id: r.id, mailOn: r.mailOn, mailLive: r.mailLive, mailByDefault: r.mailByDefault, signatureName: r.signatureName?.trim() || null })),
+          })
+        if (permissions && permissionChanges.length > 0) await api.put(`/system/groups/${group.id}/permissions`, { rows: permissionChanges })
         return onSaved(saved, `${saved.name} was updated.`, false)
       }
       if (adminRows.length === 0) {
@@ -216,7 +238,7 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
 
   if (group) {
     return (
-      <Modal title={`Edit ${group.name}`} onClose={onClose}>
+      <Modal title={`Edit ${group.name}`} onClose={onClose} wide>
         <form onSubmit={submit} className="grid">
           {error && <Alert kind="error">{error}</Alert>}
           <Field label="Group name"><input value={name} onChange={(e) => setName(e.target.value)} required /></Field>
@@ -225,31 +247,19 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
               <option value="1">Active</option><option value="0">Inactive (owners and managers cannot sign in)</option>
             </select>
           </Field>
-          {terms && (
+          {settings && <GroupSettingsEditor value={settings} onChange={setSettings} />}
+          {permissions && (
             <>
-              <h3 style={{ margin: '0.5rem 0 0' }}>Cards mailed for this group</h3>
-              <label className="check">
-                <input type="checkbox" checked={mailEnabled} onChange={(e) => setMailEnabled(e.target.checked)} />
-                <span>
-                  Cards can be printed and mailed for this group
-                  <span className="muted small" style={{ display: 'block' }}>Until this is ticked, the group sees “Mailed for you” greyed out on its print screens.</span>
-                </span>
-              </label>
-              <Field label="A payment method before any card is mailed"
-                hint="Whether this group has to save a card or bank account on its Billing page first. A group with credit can mail without one, as far as the credit covers.">
-                <select value={payRule} onChange={(e) => setPayRule(e.target.value)}>
-                  <option value="site">Follow the site’s setting ({siteRequiresPay ? 'required' : 'not required'})</option>
-                  <option value="required">Required for this group</option>
-                  <option value="notrequired">Not required for this group</option>
-                </select>
-              </Field>
+              <h3 style={{ margin: '0.5rem 0 0' }}>What owners and managers may do in this group</h3>
               <p className="muted small" style={{ margin: 0 }}>
-                Credit: {terms.creditCents > 0 ? `$${(terms.creditCents / 100).toFixed(2)} unused` : 'none'}. {terms.payLabel ? `Pays with ${terms.payLabel}.` : 'No payment method saved.'}{' '}
-                Fees, limits, credits and bills are on <Link to="/system-billing">Billing</Link>.
+                Investment Group Administrators can do everything in their group. For owners and for managers, each permission is yours for this group (all can, or
+                none can), which takes precedence, or left to the group’s administrators. They in turn decide it for all their owners and managers, or have it set
+                manager by manager; owners set that for their managers when “Choose what each manager may do” is allowed. A manager never holds what the owners do not.
               </p>
+              <PermissionRulesEditor value={permissions} onChange={changePermission} />
             </>
           )}
-          <p className="muted" style={{ margin: 0 }}>To add administrators, owners or restaurants, close this and use <strong>Set up</strong> or <strong>Users</strong> on the group.</p>
+          <p className="muted" style={{ margin: 0 }}>To add administrators, owners or restaurants, close this and use <strong>View as admin</strong> on the group.</p>
           <div className="actions">
             <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>

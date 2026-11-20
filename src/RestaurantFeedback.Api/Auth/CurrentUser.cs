@@ -39,7 +39,7 @@ public class CurrentUser
     }
 
     /// <summary>Live view built from the database, so role, permission and restaurant changes apply on the next request.</summary>
-    public CurrentUser(AppUser user, int? groupId, IEnumerable<int> restaurantIds)
+    public CurrentUser(AppUser user, int? groupId, IEnumerable<int> restaurantIds, OwnerGroup? group = null)
     {
         IsAuthenticated = true;
         Id = user.Id;
@@ -47,7 +47,7 @@ public class CurrentUser
         DisplayName = user.DisplayName;
         Role = user.Role;
         GroupId = groupId;
-        Permissions = RoleTitles.HasAllPermissions(user.Role) ? ManagerPermission.All : user.Permissions;
+        Permissions = Services.PermissionPolicy.Effective(user.Role, user.Permissions, group);
         RestaurantIds = restaurantIds.ToHashSet();
         MustChangePassword = user.MustChangePassword;
     }
@@ -60,7 +60,11 @@ public class CurrentUser
     /// <summary>Administrators and owners: the people allowed to manage users and restaurants (owners only their own).</summary>
     public bool IsAdmin => Role is UserRole.Owner or UserRole.SuperAdmin or UserRole.GroupAdmin;
     public bool IsTeamMember => Role == UserRole.TeamMember;
-    public bool Has(ManagerPermission p) => IsAdmin || (Role == UserRole.Manager && Permissions.HasFlag(p));
+    /// <summary>
+    /// Whether this person holds the permission. Administrators hold everything; owners and managers hold what their
+    /// group's rules leave them (PermissionPolicy); team logins hold nothing.
+    /// </summary>
+    public bool Has(ManagerPermission p) => Permissions.HasFlag(p);
     public bool CanAccessRestaurant(int restaurantId) => RestaurantIds.Contains(restaurantId);
 
     /// <summary>
@@ -68,6 +72,10 @@ public class CurrentUser
     /// investment group administrators, the restaurants they own for an owner, nothing for anyone else.
     /// </summary>
     public bool CanManageRestaurant(int restaurantId) => IsAdmin && RestaurantIds.Contains(restaurantId);
+    /// <summary>May change this restaurant's details and coupon card settings.</summary>
+    public bool CanEditRestaurant(int restaurantId) => CanManageRestaurant(restaurantId) && Has(ManagerPermission.EditRestaurants);
+    /// <summary>May change who works at this restaurant.</summary>
+    public bool CanStaffRestaurant(int restaurantId) => CanManageRestaurant(restaurantId) && Has(ManagerPermission.ManageStaff);
 }
 
 /// <summary>
@@ -100,7 +108,9 @@ public class CurrentUserProvider(IHttpContextAccessor http, AppDbContext db)
             var rids = await db.Restaurants.Where(r => r.GroupId == user.GroupId).Select(r => r.Id).ToListAsync();
             return _cached = new CurrentUser(user, user.GroupId, rids);
         }
-        return _cached = new CurrentUser(user, user.GroupId, user.UserRestaurants.Select(x => x.RestaurantId));
+        // What owners and managers hold depends on their group's rules, read fresh so a change applies at once.
+        var group = await db.Groups.AsNoTracking().FirstOrDefaultAsync(g => g.Id == user.GroupId);
+        return _cached = new CurrentUser(user, user.GroupId, user.UserRestaurants.Select(x => x.RestaurantId), group);
     }
 }
 

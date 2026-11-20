@@ -186,7 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       selectGroup,
       refreshContext,
       refreshGroups,
-      has: (p) => isAdmin || (user?.role === 'Manager' && user.permissionNames.includes(p)),
+      has: (p) => user?.role === 'SuperAdmin' || user?.role === 'GroupAdmin' || ((user?.role === 'Owner' || user?.role === 'Manager') && user.permissionNames.includes(p)),
       isAdmin,
       isSuperAdmin: user?.role === 'SuperAdmin',
       isGroupAdmin: user?.role === 'GroupAdmin',

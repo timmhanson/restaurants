@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
-import type { Permission, PermissionInfo, RestaurantDto, RestaurantRequest, Role, StaffMember, StaffResponse, UserDto, UserRequest } from '../api/types'
+import type { Permission, PermissionInfo, RestaurantDto, RestaurantRequest, Role, StaffMember, StaffResponse, UserDto, UserRequest, SetBy } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner } from '../components/ui'
 
@@ -8,7 +8,7 @@ const pretty = (p: string) => p.replace(/([A-Z])/g, ' $1').trim()
 const address = (r: RestaurantDto) => [r.streetAddress, [r.city, r.state].filter(Boolean).join(', '), r.zip].filter(Boolean).join(' · ')
 
 export default function RestaurantsPage() {
-  const { user, refreshContext, isSuperAdmin, isGroupWide, groupId } = useAuth()
+  const { user, refreshContext, isSuperAdmin, isGroupWide, groupId, has } = useAuth()
   const [list, setList] = useState<RestaurantDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -66,12 +66,12 @@ export default function RestaurantsPage() {
   return (
     <>
       <div className="page-head">
-        <h1>Restaurants &amp; staff</h1>
+        <h1>Restaurants &amp; Staff Assignments</h1>
         <span className="grow" />
-        <button type="button" className="btn btn-primary" onClick={() => setEditing('new')} disabled={needsGroup}>+ Add restaurant</button>
+        {has('EditRestaurants') && <button type="button" className="btn btn-primary" onClick={() => setEditing('new')} disabled={needsGroup}>+ Add restaurant</button>}
       </div>
       {needsGroup ? (
-        <Alert kind="warn">Open a group with "View as admin" or "Set up" on Investment groups to manage its restaurants.</Alert>
+        <Alert kind="warn">Open a group with "View as admin" on Investment groups to manage its restaurants.</Alert>
       ) : isGroupWide ? (
         <p className="muted">
           As {isSuperAdmin ? 'System Administrator' : 'Investment Group Administrator'} you can edit and staff every restaurant in this group. Use <strong>Staff</strong> to
@@ -117,8 +117,8 @@ export default function RestaurantsPage() {
                       {r.canManage ? (
                         <>
                           <button type="button" className="btn btn-sm btn-primary" onClick={() => setStaffing(r)}>Staff</button>
-                          <button type="button" className="btn btn-sm" onClick={() => setEditing(r)}>Edit</button>
-                          {r.isActive && <button type="button" className="btn btn-sm btn-danger" onClick={() => setDeactivating(r)}>Deactivate</button>}
+                          {r.canEdit && <button type="button" className="btn btn-sm" onClick={() => setEditing(r)}>Edit</button>}
+                          {r.canEdit && r.isActive && <button type="button" className="btn btn-sm btn-danger" onClick={() => setDeactivating(r)}>Deactivate</button>}
                         </>
                       ) : (
                         <button type="button" className="btn btn-sm" onClick={() => setStaffing(r)}>View staff</button>
@@ -193,7 +193,7 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
       ])
       setData(staff)
       setCatalog(perms.permissions)
-      if (initial) setSelected(new Set([...staff.owners, ...staff.managers, ...staff.teamLogins].filter((m) => m.assigned).map((m) => m.id)))
+      if (initial) setSelected(new Set([...staff.owners, ...staff.adminOwners, ...staff.managers, ...staff.teamLogins].filter((m) => m.assigned).map((m) => m.id)))
     },
     [restaurant.id],
   )
@@ -213,7 +213,7 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
   const save = async () => {
     if (!data) return
     setError(null)
-    if (data.ownerRequired && !data.owners.some((o) => selected.has(o.id))) return setError('Every restaurant needs at least one owner. Tick an owner before saving.')
+    if (data.ownerRequired && ![...data.owners, ...data.adminOwners].some((o) => selected.has(o.id))) return setError('Every restaurant needs at least one owner. Tick an owner before saving.')
     setBusy(true)
     try {
       await api.put(`/restaurants/${restaurant.id}/staff`, { userIds: [...selected] })
@@ -284,7 +284,8 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
           {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
           {data.groupAdmins.length > 0 && (
             <p className="muted" style={{ margin: 0 }}>
-              Investment Group administrators ({data.groupAdmins.map((a) => a.displayName).join(', ')}) see and manage every restaurant, so they are not listed below.
+              Investment Group administrators ({data.groupAdmins.map((a) => a.displayName).join(', ')}) see and manage every restaurant without being assigned. One of them
+              can be an owner of this restaurant as well: tick them under Owners.
             </p>
           )}
           {section(
@@ -295,7 +296,28 @@ function StaffModal({ restaurant, onClose, onSaved }: { restaurant: RestaurantDt
               (data.ownerRequired ? 'Every restaurant needs at least one owner.' : 'Leave empty if the investment group administrators run it directly.'),
             '+ New owner',
           )}
-          {section('Managers', 'Manager', data.managers, 'Managers can work at several restaurants, even ones with different owners. What each one may do is set on the Users page and applies everywhere they work.', '+ New manager')}
+          {data.adminOwners.length > 0 && (
+            <section className="staff-section">
+              <h3>Administrators who also own this restaurant <Badge kind="neutral">{data.adminOwners.filter((m) => selected.has(m.id)).length} assigned</Badge></h3>
+              <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+                An Investment Group Administrator can be an owner of this restaurant too: two roles for the same person. They keep everything an administrator can do, and
+                are listed as one of the restaurant’s owners.
+              </p>
+              <div className="staff-list">
+                {data.adminOwners.map((m) => (
+                  <label key={m.id} className={`staff-item ${selected.has(m.id) ? 'on' : ''}`}>
+                    <input type="checkbox" checked={selected.has(m.id)} disabled={!canManage} onChange={() => toggle(m)} />
+                    <span>
+                      <strong>{m.displayName}</strong> {m.id === user?.id && <Badge kind="accent">you</Badge>} {!m.isActive && <Badge kind="neutral">inactive</Badge>}
+                      <div className="sub">{m.username}{m.email && m.email !== m.username ? ` · ${m.email}` : ''} · Investment Group Administrator</div>
+                      {m.otherRestaurants.length > 0 && <div className="sub">Also an owner of {m.otherRestaurants.join(', ')}</div>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
+          {section('Managers', 'Manager', data.managers, 'Managers can work at several restaurants, even ones with different owners. What each one may do is set on the All Staff page and applies everywhere they work.', '+ New manager')}
           {section('Team login', 'TeamMember', data.teamLogins, 'One shared login for the crew at this restaurant. It can only enter cards.', '+ New team login')}
           <div className="actions">
             <button type="button" className="btn" onClick={onClose} disabled={busy}>{canManage ? 'Cancel' : 'Close'}</button>
@@ -402,10 +424,14 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
     phone: restaurant?.phone ?? '',
     signatureName: restaurant?.signatureName ?? '',
     mailByDefault: restaurant?.mailByDefault ?? false,
+    mailOn: restaurant?.mailOn ?? false,
+    mailLive: restaurant?.mailLive ?? false,
     isActive: restaurant?.isActive ?? true,
   })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // What applies to this restaurant, and which of it is decided for all restaurants in the group.
+  const rules = restaurant?.applies ?? null
   const set = (k: keyof RestaurantRequest, val: string | boolean) => setV((s) => ({ ...s, [k]: val }))
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -444,24 +470,66 @@ function RestaurantModal({ restaurant, isSuperAdmin, onClose, onSaved }: {
             </select>
           </Field>
         </div>
-        <Field label="Signature when the team login enters a card" hint="Managers, owners and administrators sign the cards they enter with their own name. Cards entered with this restaurant’s shared team login are signed with this name, such as its manager’s. Its managers can change it from Enter card.">
-          <input value={v.signatureName ?? ''} maxLength={60} onChange={(e) => set('signatureName', e.target.value)} placeholder="For example: Michael Smith" />
-        </Field>
-        <label className="check">
-          <input type="checkbox" checked={v.mailByDefault ?? false} onChange={(e) => set('mailByDefault', e.target.checked)} />
-          <span>
-            Have this restaurant’s cards mailed for us, unless we choose otherwise
-            <span className="muted small" style={{ display: 'block' }}>
-              On Print cards, “Mailed for you” is chosen to begin with for this restaurant’s cards. Whoever is printing can still pick another way. It only
-              takes effect once mailing is switched on for your investment group.
+        <h3 style={{ margin: '0.5rem 0 0' }}>Coupon cards</h3>
+        <p className="muted small" style={{ margin: 0 }}>
+          Some of these are decided for all restaurants in your investment group. Those are shown here but cannot be changed for one restaurant.
+        </p>
+        {rules && rules.mailOnSetBy !== 'restaurant' ? (
+          <Decided label="Having cards printed and mailed" value={rules.mailOn ? 'On' : 'Off'} by={rules.mailOnSetBy} />
+        ) : (
+          <label className="check">
+            <input type="checkbox" checked={v.mailOn ?? false} onChange={(e) => set('mailOn', e.target.checked)} />
+            <span>
+              Cards can be printed and mailed for this restaurant
+              <span className="muted small" style={{ display: 'block' }}>Until this is ticked, “Mailed for you” is greyed out on the print screens for this restaurant’s cards.</span>
             </span>
-          </span>
-        </label>
+          </label>
+        )}
+        {rules && rules.mailLiveSetBy !== 'restaurant' ? (
+          <Decided label="Real or test mailing" value={rules.mailLive ? 'Real mailing' : 'Test mailing'} by={rules.mailLiveSetBy} />
+        ) : (
+          <Field label="Real or test mailing" hint="Real: cards are printed, mailed and billed. Test: a proof of each card is made, and nothing is printed, mailed or billed.">
+            <select value={v.mailLive ? 'live' : 'test'} onChange={(e) => set('mailLive', e.target.value === 'live')}>
+              <option value="test">Test mailing</option>
+              <option value="live">Real mailing</option>
+            </select>
+          </Field>
+        )}
+        {rules && rules.mailUsualSetBy !== 'restaurant' ? (
+          <Decided label="How cards usually go out" value={rules.mailUsual ? 'Mailed for you' : 'Stamps by hand'} by={rules.mailUsualSetBy} />
+        ) : (
+          <label className="check">
+            <input type="checkbox" checked={v.mailByDefault ?? false} onChange={(e) => set('mailByDefault', e.target.checked)} />
+            <span>
+              Have this restaurant’s cards mailed for us, unless we choose otherwise
+              <span className="muted small" style={{ display: 'block' }}>
+                The print screens start on “Mailed for you” for this restaurant’s cards. Whoever is printing can still pick another way.
+              </span>
+            </span>
+          </label>
+        )}
+        {rules && rules.signatureSetBy !== 'restaurant' ? (
+          <Decided label="Signature when the team login enters a card" value={rules.signature ?? 'No name'} by={rules.signatureSetBy} />
+        ) : (
+          <Field label="Signature when the team login enters a card" hint="Managers, owners and administrators sign the cards they enter with their own name. Cards entered with this restaurant’s shared team login are signed with this name, such as its manager’s. Its managers can change it from Enter card.">
+            <input value={v.signatureName ?? ''} maxLength={60} onChange={(e) => set('signatureName', e.target.value)} placeholder="For example: Michael Smith" />
+          </Field>
+        )}
         <div className="actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : restaurant ? 'Save' : 'Add restaurant'}</button>
         </div>
       </form>
     </Modal>
+  )
+}
+
+/** A setting that is one answer for all restaurants in the group (or for the whole site), shown but not changeable here. */
+function Decided({ label, value, by }: { label: string; value: string; by: SetBy }) {
+  return (
+    <div>
+      <div style={{ fontWeight: 600 }}>{label}</div>
+      <div><strong>{value}</strong> <span className="muted small">{by === 'site' ? 'for every investment group on this site' : 'for all restaurants in your investment group'}. It cannot be changed for one restaurant.</span></div>
+    </div>
   )
 }

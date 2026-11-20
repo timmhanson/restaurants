@@ -37,7 +37,10 @@ public static class RoleTitles
     public static bool HasAllPermissions(UserRole role) => role is UserRole.SuperAdmin or UserRole.GroupAdmin or UserRole.Owner;
 }
 
-/// <summary>Fine-grained permissions an owner can grant to a manager. Owners always hold all of them.</summary>
+/// <summary>
+/// What a person may do. Investment Group Administrators hold everything. What owners and managers hold is handed
+/// down level by level: see PermissionPolicy.
+/// </summary>
 [Flags]
 public enum ManagerPermission
 {
@@ -54,7 +57,17 @@ public enum ManagerPermission
     BuyPostage = 256,
     /// <summary>Change how many days after a card is sent the guest should be followed up with, at the manager's restaurants.</summary>
     SetFollowUpDays = 512,
+    // The next four belong to owners and are never given to a manager (PermissionPolicy.OwnerOnly).
+    /// <summary>Add, change, reset and suspend the managers and team logins at their restaurants, and assign them to restaurants.</summary>
+    ManageStaff = 1024,
+    /// <summary>Choose what each manager may do.</summary>
+    SetPermissions = 2048,
+    /// <summary>Add restaurants, and change a restaurant's details and coupon card settings.</summary>
+    EditRestaurants = 4096,
+    /// <summary>Change a restaurant's coupon card design.</summary>
+    DesignCards = 8192,
     All = ViewComments | EditComments | DeleteComments | MarkResponded | ViewAnalytics | ExportComments | ViewAudit | ManageTeamLogin | BuyPostage | SetFollowUpDays
+        | ManageStaff | SetPermissions | EditRestaurants | DesignCards
 }
 
 /// <summary>An investment / ownership group. The tenant boundary for users and restaurants.</summary>
@@ -72,6 +85,18 @@ public class OwnerGroup
     public bool PostageKeyIsTest { get; set; }
     public DateTime? PostageKeySetAt { get; set; }
     public string? PostageKeySetBy { get; set; }
+
+    // What owners and managers may do in this group (see PermissionPolicy). The first four are the System
+    // Administrator's and take precedence: all can, or none can; a permission in neither is left to the group.
+    public ManagerPermission SiteOwnerYes { get; set; }
+    public ManagerPermission SiteOwnerNo { get; set; }
+    public ManagerPermission SiteManagerYes { get; set; }
+    public ManagerPermission SiteManagerNo { get; set; }
+    // The group's administrators' own answers, which count where the site left the permission to them. Owners can
+    // unless listed in OwnerNo. A manager permission in neither list is set manager by manager.
+    public ManagerPermission OwnerNo { get; set; }
+    public ManagerPermission ManagerYes { get; set; }
+    public ManagerPermission ManagerNo { get; set; }
 
     public List<Restaurant> Restaurants { get; set; } = [];
     public List<AppUser> Users { get; set; } = [];
@@ -98,6 +123,15 @@ public class Restaurant
     /// on for its group). The restaurant's owners and the group's administrators decide; anyone printing can still pick another way.
     /// </summary>
     public bool MailByDefault { get; set; }
+    /// <summary>Cards can be mailed for this restaurant. Looked at only when its group leaves that to each restaurant.</summary>
+    public bool MailOn { get; set; }
+    /// <summary>This restaurant's cards are mailed for real, not as tests. Looked at only when the site and its group leave that to each restaurant.</summary>
+    public bool MailLive { get; set; }
+    /// <summary>
+    /// The set of restaurants this one is billed with, when its group has its bills made for sets of restaurants
+    /// (GroupBilling.BillSplit). Restaurants with the same name here share a bill; the ones with none share one too.
+    /// </summary>
+    public string? BillSet { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>
     /// Days after a coupon card is sent before the guest should be called to check it arrived.
@@ -120,7 +154,7 @@ public class AppUser
     public string? Email { get; set; }
     public string PasswordHash { get; set; } = "";
     public UserRole Role { get; set; }
-    /// <summary>Only meaningful for managers. Owners implicitly have everything; team members have nothing.</summary>
+    /// <summary>What was ticked for this manager. What they hold also depends on their group's rules: PermissionPolicy.Effective.</summary>
     public ManagerPermission Permissions { get; set; } = ManagerPermission.None;
     public bool IsActive { get; set; } = true;
     /// <summary>Set when an admin resets the password; the user must pick a new one at next login. Never set for team logins.</summary>
@@ -298,14 +332,52 @@ public enum ActivityKind
 /// How one investment group is billed for the cards the site mails for it: its own fee and monthly limit where they
 /// differ from the site's, where its bills go, and the payment method it has saved with the payment service.
 /// </summary>
+/// <summary>The group settings the System Administrator can hand to the group's own administrators to decide.</summary>
+[Flags]
+public enum GroupChoice
+{
+    None = 0,
+    /// <summary>Whether cards can be printed and mailed.</summary>
+    Mail = 1,
+    /// <summary>Real or test mailing.</summary>
+    Mode = 2,
+    /// <summary>How cards usually go out.</summary>
+    Usual = 4,
+    /// <summary>The name that signs for the team login.</summary>
+    Signature = 8,
+    /// <summary>What a group decides for itself unless the System Administrator says otherwise: everything but switching mailing on.</summary>
+    Default = Mode | Usual | Signature
+}
+
 public class GroupBilling
 {
     public int GroupId { get; set; }
+    /// <summary>
+    /// The settings below that the group's own administrators decide. The others are the System Administrator's
+    /// answer for this group, which the group cannot change.
+    /// </summary>
+    public GroupChoice GroupDecides { get; set; } = GroupChoice.Default;
+    /// <summary>
+    /// How the group's month is billed, which the group's own administrators choose: "one" bill for everything,
+    /// a bill for each "restaurant", or bills for "sets" of restaurants they group (Restaurant.BillSet).
+    /// </summary>
+    public string BillSplit { get; set; } = BillSplits.One;
     /// <summary>
     /// Whether the System Administrator has switched on having cards printed and mailed for this group. Off until
     /// then: the group still sees the choice on Print cards, greyed out, with what it takes to use it.
     /// </summary>
     public bool MailEnabled { get; set; }
+    /// <summary>Each restaurant decides whether cards are mailed for it (Restaurant.MailOn); MailEnabled is then not looked at.</summary>
+    public bool MailPerRestaurant { get; set; }
+    /// <summary>
+    /// Real or test mailing for the group: "live" or "test" for all its restaurants, or "each" (each restaurant
+    /// decides). The site can fix this for every group (BillingSettings.MailMode). A group starts in test.
+    /// </summary>
+    public string? MailMode { get; set; } = Services.MailChoices.Test;
+    /// <summary>How cards usually go out: "mail" or "stamp" for all the group's restaurants, or "each" (each restaurant decides).</summary>
+    public string UsualWay { get; set; } = Services.MailChoices.Each;
+    /// <summary>The name that signs team-login cards at every restaurant in the group. Empty: each restaurant decides.</summary>
+    public string? SignatureForAll { get; set; }
     /// <summary>
     /// Whether this group must have a payment method saved before its cards can be mailed. Null follows the site's
     /// setting (required unless the System Administrator has switched that off).
@@ -337,6 +409,14 @@ public class GroupBilling
     public string? PaySetBy { get; set; }
     /// <summary>Charge the saved payment method automatically when a bill is issued.</summary>
     public bool AutoPay { get; set; }
+}
+
+public static class BillSplits
+{
+    public const string One = "one", Restaurant = "restaurant", Sets = "sets";
+    public static string Of(GroupBilling? b) => b?.BillSplit is Restaurant or Sets ? b.BillSplit : One;
+    /// <summary>What the bill for the restaurants in no set is called.</summary>
+    public const string OtherRestaurants = "Other restaurants";
 }
 
 public static class InvoiceStatuses
@@ -387,8 +467,14 @@ public class MailInvoice
 {
     public int Id { get; set; }
     public int GroupId { get; set; }
-    /// <summary>yyyy-MM. One bill per group per month.</summary>
+    /// <summary>yyyy-MM. One bill per group, month and unit.</summary>
     public string Month { get; set; } = "";
+    /// <summary>
+    /// What part of the group this bill is for: empty for everything, "r12" for one restaurant, "s:north" for a set
+    /// of restaurants. UnitName is how that reads on the bill.
+    /// </summary>
+    public string Unit { get; set; } = "";
+    public string? UnitName { get; set; }
     public string Number { get; set; } = "";
     public int Cards { get; set; }
     public int CostCents { get; set; }

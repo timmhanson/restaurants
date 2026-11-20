@@ -13,12 +13,24 @@ public record UserDto(
     int Id, string Username, string DisplayName, string? Email, string Role, string RoleTitle, int? GroupId, string? GroupName, int Permissions, string[] PermissionNames,
     int[] RestaurantIds, bool IsActive, bool MustChangePassword, DateTime CreatedAt, DateTime? LastLoginAt)
 {
-    public static UserDto From(AppUser u) => new(
-        u.Id, u.Username, u.DisplayName, u.Email, u.Role.ToString(), RoleTitles.Of(u.Role), u.GroupId, u.Group?.Name,
-        (int)(RoleTitles.HasAllPermissions(u.Role) ? ManagerPermission.All : u.Permissions),
-        PermissionNamesOf(RoleTitles.HasAllPermissions(u.Role) ? ManagerPermission.All : u.Permissions),
-        u.UserRestaurants.Select(x => x.RestaurantId).OrderBy(x => x).ToArray(),
-        u.IsActive, u.MustChangePassword, u.CreatedAt, u.LastLoginAt);
+    /// <summary>
+    /// An investment group administrator who is also an owner of one or more restaurants: two roles at once. For
+    /// them RestaurantIds are the restaurants they own (they still see every restaurant in the group).
+    /// </summary>
+    public bool AlsoOwner { get; init; }
+
+    public static UserDto From(AppUser u)
+    {
+        var alsoOwner = u.Role == UserRole.GroupAdmin && u.UserRestaurants.Count > 0;
+        // What they hold once their group's rules are counted (the group is loaded wherever this is called for a member).
+        var holds = Services.PermissionPolicy.Effective(u.Role, u.Permissions, u.Group);
+        return new(
+            u.Id, u.Username, u.DisplayName, u.Email, u.Role.ToString(), alsoOwner ? $"{RoleTitles.Of(u.Role)} and {RoleTitles.Of(UserRole.Owner)}" : RoleTitles.Of(u.Role), u.GroupId, u.Group?.Name,
+            (int)holds,
+            PermissionNamesOf(holds),
+            u.UserRestaurants.Select(x => x.RestaurantId).OrderBy(x => x).ToArray(),
+            u.IsActive, u.MustChangePassword, u.CreatedAt, u.LastLoginAt) { AlsoOwner = alsoOwner };
+    }
 
     public static string[] PermissionNamesOf(ManagerPermission p) =>
         Enum.GetValues<ManagerPermission>()
@@ -49,6 +61,7 @@ public class UserRequest
 public record SetPasswordRequest([Required, MinLength(8)] string Password, bool RequirePasswordChange = true);
 /// <summary>Suspend (Active = false) or restore someone's access to every restaurant they work at.</summary>
 public record UserStatusRequest(bool Active);
+public record UserRestaurantsRequest(int[]? RestaurantIds);
 
 public record GroupDto(int Id, string Name, bool IsActive, DateTime CreatedAt, int RestaurantCount, int UserCount, int CommentCount)
 {
@@ -83,6 +96,8 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
     public int? TeamLoginCount { get; init; }
     public bool? OwnedByMe { get; init; }
     public bool? CanManage { get; init; }
+    /// <summary>May change its details and coupon card settings: an administrator, or an owner where owners were left that.</summary>
+    public bool? CanEdit { get; init; }
     /// <summary>An owner may mark this restaurant as theirs (no owner yet, and no investment group administrator to decide).</summary>
     public bool? CanClaim { get; init; }
 
@@ -90,9 +105,19 @@ public record RestaurantDto(int Id, string Name, string? StreetAddress, string? 
     public string? SignatureName { get; init; }
     /// <summary>On Print cards, "Mailed for you" is chosen to begin with for this restaurant's cards.</summary>
     public bool MailByDefault { get; init; }
+    /// <summary>The restaurant's own choices for whether cards are mailed for it and whether for real; each counts only when its group leaves that to the restaurant.</summary>
+    public bool MailOn { get; init; }
+    public bool MailLive { get; init; }
+    /// <summary>What actually applies to the restaurant once its group's (and the site's) settings are counted, and who decided each.</summary>
+    public Services.RestaurantRules? Applies { get; init; }
 
     public static RestaurantDto From(Restaurant r) =>
-        new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive) { SignatureName = r.SignatureName, MailByDefault = r.MailByDefault };
+        new(r.Id, r.Name, r.StreetAddress, r.City, r.State, r.Zip, r.Phone, r.IsActive)
+        {
+            SignatureName = r.SignatureName, MailByDefault = r.MailByDefault, MailOn = r.MailOn, MailLive = r.MailLive
+        };
+
+    public static RestaurantDto From(Restaurant r, Services.BillingSettings site, GroupBilling? group) => From(r) with { Applies = Services.GroupPolicy.For(site, group, r) };
 }
 
 public record StaffMember(int Id, string DisplayName, string Username, string? Email, string Role, string[] PermissionNames, bool Assigned, bool IsActive, string[] OtherRestaurants);
@@ -100,6 +125,8 @@ public record StaffResponse(RestaurantDto Restaurant, bool CanManage, List<Staff
 {
     /// <summary>Investment Group administrators see every restaurant without being assigned; listed for information.</summary>
     public List<PersonRef> GroupAdmins { get; init; } = [];
+    /// <summary>The group's administrators, each marked as assigned when they are also an owner of this restaurant.</summary>
+    public List<StaffMember> AdminOwners { get; init; } = [];
     /// <summary>False when the group has an investment group administrator, so a restaurant may have no specific owner.</summary>
     public bool OwnerRequired { get; init; } = true;
 }
@@ -117,6 +144,9 @@ public class RestaurantRequest
     public string? Phone { get; set; }
     [MaxLength(60)] public string? SignatureName { get; set; }
     public bool MailByDefault { get; set; }
+    /// <summary>The restaurant's own choices. Left out, they stay as they are; each counts only when the group leaves it to the restaurant.</summary>
+    public bool? MailOn { get; set; }
+    public bool? MailLive { get; set; }
     public bool IsActive { get; set; } = true;
     /// <summary>Group creation only: usernames of the new owners who own this restaurant. Null means all of them.</summary>
     public string[]? OwnerUsernames { get; set; }
@@ -389,6 +419,8 @@ public record PrintConfig(bool PostageAvailable, string PostageProvider, bool Ca
     /// Charged once per card, at its first print.
     /// </summary>
     public int PrintFeeCents { get; init; }
+    /// <summary>For each restaurant this person works at: whether cards can be mailed for it, whether for real, and whether the key for that is entered.</summary>
+    public List<MailRestaurantInfo> MailRestaurants { get; init; } = [];
     /// <summary>MailAvailable, and this person may spend money (the BuyPostage permission).</summary>
     public bool CanMail { get; init; }
     /// <summary>Mailing is on, but the group must first save a payment method on Billing.</summary>
@@ -458,7 +490,14 @@ public record InvoiceDto(int Id, string Number, string Month, string MonthName, 
     /// <summary>How much of the group's credit was used on this bill, and what is still owed after it.</summary>
     public int CreditCents { get; init; }
     public int DueCents { get; init; }
+    /// <summary>The restaurant or set of restaurants the bill is for, when the group's month is split into several bills.</summary>
+    public string? For { get; init; }
 }
+/// <summary>How a group has its month billed. Split: one, restaurant or sets. Sets: each restaurant's set name (for "sets").</summary>
+public record BillSplitDto(string Split, List<BillSetRow> Sets);
+public record BillSetRow(int RestaurantId, string Restaurant, string? Set);
+public record BillSplitRequest(string? Split, List<BillSetRequest>? Sets);
+public record BillSetRequest(int RestaurantId, [MaxLength(60)] string? Set);
 /// <summary>One line of a group's credit account as the group sees it: what, when and how much, without the System Administrator's notes.</summary>
 public record GroupCreditLine(DateTime At, string Kind, string Label, int AmountCents, string? InvoiceNumber);
 /// <param name="CanManage">A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage.</param>
@@ -468,9 +507,17 @@ public record GroupBillingDto(bool CanManage, bool MailAvailable, bool Test, int
 {
     /// <summary>The group's unused credit, which comes off its next bills by itself.</summary>
     public int CreditCents { get; init; }
+    /// <summary>How the group has its month billed, and which set each restaurant is billed with. Administrators only.</summary>
+    public BillSplitDto? Bills { get; init; }
     public List<GroupCreditLine> Credits { get; init; } = [];
     /// <summary>What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is).</summary>
     public int PrintFeeCents { get; init; }
+    /// <summary>
+    /// Real or test mailing for the group (live, test, or each: each restaurant decides), and whether the site has
+    /// fixed it for every group (then the group cannot change it).
+    /// </summary>
+    public string MailMode { get; init; } = Services.MailChoices.Test;
+    public bool MailModeSetBySite { get; init; }
 }
 /// <param name="ConfirmCents">The amount the person was shown and agreed to; the payment is refused if it no longer matches.</param>
 public record PayInvoiceRequest(int ConfirmCents);
@@ -487,6 +534,7 @@ public record SystemInvoiceDto(int Id, int GroupId, string Group, string Number,
 {
     public int CreditCents { get; init; }
     public int DueCents { get; init; }
+    public string? For { get; init; }
 }
 /// <summary>One line of the credit log, with the System Administrator's details.</summary>
 public record GroupCreditDto(int Id, int GroupId, string Group, DateTime At, string Kind, string Label, int AmountCents, string Details, string By, string? InvoiceNumber);
@@ -500,8 +548,11 @@ public record TakeBackCreditRequest(int AmountCents, string? Details, string? Ke
 public record GroupBillingRow(int GroupId, string Group, bool Active, int? FeeCents, int EffectiveFeeCents, int? LimitCents, int EffectiveLimitCents, int CardsThisMonth,
     int BilledThisMonthCents, int OwedCents, string? PayLabel, bool AutoPay, string? BillingEmail)
 {
-    /// <summary>Mailing is switched on for this group.</summary>
+    /// <summary>Mailing is switched on for this group (for all its restaurants, or for at least one where each restaurant decides).</summary>
     public bool MailEnabled { get; init; }
+    /// <summary>on, off or each (each restaurant decides); and live, test or each for real or test mailing.</summary>
+    public string Mail { get; init; } = Services.MailChoices.Off;
+    public string MailMode { get; init; } = Services.MailChoices.Test;
     /// <summary>Whether this group must save a payment method before mailing, and whether that is its own rule (null: it follows the site's).</summary>
     public bool PayRequired { get; init; }
     public bool? OwnPayRule { get; init; }
@@ -521,6 +572,37 @@ public record SystemBillingDto(Services.BillingSettings Settings, bool MailReady
 /// <param name="MailEnabled">Switches mailing on or off for the group. Left out, it stays as it is.</param>
 /// <param name="PayRule">"site" (follow the site's setting), "required" or "notrequired": whether the group must save a payment method before mailing. Left out, it stays as it is.</param>
 public record GroupBillingTermsRequest(int? FeeCents, int? LimitCents, bool? MailEnabled = null, string? PayRule = null);
+public record MailRestaurantInfo(int RestaurantId, bool On, bool Live, bool Ready);
+
+/// <summary>
+/// An investment group's settings as the System Administrator sets them, with each restaurant's own choices.
+/// Mail: on, off or each. MailMode: live, test or each. UsualWay: mail, stamp or each. SignatureForAll: a name for
+/// all restaurants, or empty when each restaurant decides. PayRule: site, required or notrequired.
+/// </summary>
+public record GroupSettingsDto(int GroupId, string Group, string Mail, string MailMode, string SiteMailMode, string UsualWay, string? SignatureForAll, string PayRule,
+    bool SiteRequiresPay, bool HasTestKey, bool HasLiveKey, int CreditCents, string? PayLabel, List<RestaurantSettingsDto> Restaurants)
+{
+    /// <summary>The settings left to the group's own administrators (mail, mode, usual, signature). The rest are the site's answer for the group.</summary>
+    public string[] GroupDecides { get; init; } = [];
+}
+public record RestaurantSettingsDto(int Id, string Name, bool IsActive, bool MailOn, bool MailLive, bool MailByDefault, string? SignatureName, Services.RestaurantRules Applies);
+public record GroupSettingsRequest(string? Mail, string? MailMode, string? UsualWay, string? SignatureForAll, string? PayRule, List<RestaurantSettingsRequest>? Restaurants)
+{
+    /// <summary>The settings to leave to the group's own administrators. Null leaves that as it is.</summary>
+    public string[]? GroupDecides { get; init; }
+}
+/// <summary>The settings as the group's administrators see them. GroupDecides lists the ones they may change (mail, mode, usual, signature).</summary>
+public record GroupRulesDto(string Mail, string MailMode, string SiteMailMode, string UsualWay, string? SignatureForAll, string[] GroupDecides);
+/// <param name="Signature">all (one name for all restaurants, in SignatureForAll) or each.</param>
+public record GroupRulesRequest(string? Mail, string? MailMode, string? UsualWay, string? Signature, string? SignatureForAll);
+/// <param name="BySite">The System Administrator's view (their answers are the ones being set); otherwise the group's.</param>
+public record PermissionRulesDto(int GroupId, string Group, bool BySite, List<Services.PermissionState> Permissions);
+/// <param name="Owners">Site: yes, no or group. Group: yes or no.</param>
+/// <param name="Managers">Site: yes, no or group. Group: yes, no or each.</param>
+public record PermissionRuleChange(string Name, string? Owners, string? Managers);
+public record PermissionRulesRequest(List<PermissionRuleChange>? Rows);
+public record RestaurantSettingsRequest(int Id, bool MailOn, bool MailLive, bool MailByDefault, [MaxLength(60)] string? SignatureName);
+public record MailModeRequest(string? Mode);
 /// <param name="How">check, bank, card, cash or other.</param>
 public record MarkPaidRequest(string? How, string? Note, DateOnly? PaidOn);
 public record IssueBillsRequest(string? Month);
@@ -577,7 +659,12 @@ public record PostGridMailKeyRequest(string? ApiKey);
 public record PostGridMailAccountDto(bool Configured, string Source, string? KeyEnding, bool Test, DateTime? SavedAt, string? SavedBy);
 /// <param name="KeyEnding">The last four characters of the address verification key; the key is never returned.</param>
 public record PostGridSiteDto(bool Configured, string Source, string? KeyEnding, bool UseFirst, DateTime? SavedAt, string? SavedBy, bool CanEnter,
-    PostGridMailAccountDto Mail, int CardsMailed, int TestCardsMailed, int CardsThisMonth);
+    PostGridMailAccountDto Mail, int CardsMailed, int TestCardsMailed, int CardsThisMonth)
+{
+    /// <summary>The test key and the live key for printing and mailing, each entered on its own. Mail is the live one when there is one, else the test one.</summary>
+    public PostGridMailAccountDto MailTestKey { get; init; } = new(false, "None", null, true, null, null);
+    public PostGridMailAccountDto MailLiveKey { get; init; } = new(false, "None", null, false, null, null);
+}
 
 /// <param name="Month">yyyy-MM.</param>
 public record SiteMailStatementRow(int GroupId, string Group, int RestaurantId, string Restaurant, int Cards, int CostCents, int FeeCents, int TotalCents)

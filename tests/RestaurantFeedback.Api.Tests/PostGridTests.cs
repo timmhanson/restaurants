@@ -46,8 +46,13 @@ public class PostGridTests(ApiFactory factory)
         var admin = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword, groupId);
         var site = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
         Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/postgrid/mail", new PostGridMailKeyRequest(key))).StatusCode);
-        // Mailing is off for a group until the System Administrator switches it on.
+        // Mailing is off for a group until the System Administrator switches it on, and a group starts in test. Each
+        // test here works with one key: the group mails for real with the live key and as a test with the test key.
+        var live = !key.StartsWith("test_");
+        Assert.Equal(HttpStatusCode.OK, (await site.DeleteAsync($"/api/system/postgrid/mail?mode={(live ? "test" : "live")}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null, true))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings",
+            new GroupSettingsRequest("on", live ? "live" : "test", "each", null, null, null))).StatusCode);
         // A payment method is required before mailing unless the System Administrator switches that off; the tests
         // that are not about payment switch it off.
         await SaveSettings(site, s => s.RequirePaymentMethod = false);
@@ -100,11 +105,11 @@ public class PostGridTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
         Assert.DoesNotContain(TestKey, await saved.Content.ReadAsStringAsync());
         var dto = (await site.GetFromJsonAsync<PostGridSiteDto>("/api/system/postgrid"))!;
-        Assert.True(dto.Mail.Configured && dto.Mail.Test);
-        Assert.Equal("wxyz", dto.Mail.KeyEnding);
-        Assert.True((await site.PostAsync("/api/system/postgrid/mail/test", null)).IsSuccessStatusCode);
+        Assert.True(dto.MailTestKey.Configured && dto.MailTestKey.Test);
+        Assert.Equal("wxyz", dto.MailTestKey.KeyEnding);
+        Assert.True((await site.PostAsync("/api/system/postgrid/mail/test?mode=test", null)).IsSuccessStatusCode);
 
-        var (stored, audited) = await Db(async db => ((await db.SiteSettings.FindAsync("postgrid.mail"))!.Value, db.AuditLogs.ToList().Any(a => (a.Details ?? "").Contains(TestKey))));
+        var (stored, audited) = await Db(async db => ((await db.SiteSettings.FindAsync("postgrid.mail.test"))!.Value, db.AuditLogs.ToList().Any(a => (a.Details ?? "").Contains(TestKey))));
         Assert.DoesNotContain(TestKey, stored);
         Assert.False(audited);
 
@@ -112,6 +117,10 @@ public class PostGridTests(ApiFactory factory)
         // payment method; the System Administrator can switch that requirement off.
         Assert.True(new BillingSettings().RequirePaymentMethod);
         await SaveSettings(site, s => s.RequirePaymentMethod = true);
+        // The group is switched on and mails as tests, with only the test key on the site.
+        var groupId = (await owner.GetFromJsonAsync<UserDto>("/api/auth/me"))!.GroupId!.Value;
+        Assert.Equal(HttpStatusCode.OK, (await site.DeleteAsync("/api/system/postgrid/mail?mode=live")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("on", "test", "each", null, null, null))).StatusCode);
         var blocked = (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
         Assert.True(blocked.MailAvailable && blocked.MailTest && blocked.MailNeedsPayMethod && !blocked.CanMail);
         Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync("/api/comments/mail", new MailRequest([1], 1, blocked.MailCentsPerCard))).StatusCode);
@@ -863,6 +872,156 @@ public class PostGridTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Settings_are_made_for_all_restaurants_or_left_to_each_restaurant_and_the_higher_level_wins()
+    {
+        var (owner, admin, site, rid, groupId) = await SetUpAsync();
+        async Task<GroupSettingsDto> Settings() => (await site.GetFromJsonAsync<GroupSettingsDto>($"/api/system/groups/{groupId}/settings"))!;
+        Task<HttpResponseMessage> Save(string? mail = null, string? mode = null, string? usual = null, string? signature = null, List<RestaurantSettingsRequest>? restaurants = null) =>
+            site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest(mail, mode, usual, signature, null, restaurants));
+        async Task<RestaurantDto> Mine() => (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.Single(x => x.Id == rid);
+        async Task<PrintConfig> Config() => (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
+        var r = await Mine();
+        RestaurantRequest Own(bool? mailOn = null, bool? mailLive = null, bool usual = false, string? signature = null) => new()
+        {
+            Name = r.Name, StreetAddress = r.StreetAddress, City = r.City, State = r.State, Zip = r.Zip, Phone = r.Phone, MailOn = mailOn, MailLive = mailLive, MailByDefault = usual, SignatureName = signature
+        };
+        try
+        {
+            // The site holds a test key and a live key at once, each entered on its own.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/postgrid/mail", new PostGridMailKeyRequest(LiveKey))).StatusCode);
+            var keys = (await site.GetFromJsonAsync<PostGridSiteDto>("/api/system/postgrid"))!;
+            Assert.True(keys.MailTestKey.Configured && keys.MailTestKey.Test);
+            Assert.True(keys.MailLiveKey.Configured && !keys.MailLiveKey.Test);
+            Assert.NotEqual(keys.MailTestKey.KeyEnding, keys.MailLiveKey.KeyEnding);
+            Assert.True((await site.PostAsync("/api/system/postgrid/mail/test?mode=live", null)).IsSuccessStatusCode);
+            var start = await Settings();
+            Assert.True(start.HasTestKey && start.HasLiveKey);
+            Assert.Equal(("on", "test", "each"), (start.Mail, start.MailMode, start.SiteMailMode));
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync($"/api/system/groups/{groupId}/settings")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Save(mail: "sometimes")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Save(mode: "maybe")).StatusCode);
+
+            // Test for all restaurants: the restaurant is told so, and its own choice is not looked at.
+            var applies = (await Mine()).Applies!;
+            Assert.Equal((true, false, "group", "group"), (applies.MailOn, applies.MailLive, applies.MailOnSetBy, applies.MailLiveSetBy));
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", Own(mailLive: true))).StatusCode);
+            Assert.False((await Mine()).MailLive);
+            Assert.True((await Config()).MailTest);
+            var asTest = await Create(owner, Card(rid, "Policy Test"));
+            Assert.True((await Mail(owner, [asTest.Id])).Single() is { Ok: true, Test: true });
+
+            // Live for all restaurants: the same card screen now mails for real, with the live key.
+            Assert.Equal(HttpStatusCode.OK, (await Save(mode: "live")).StatusCode);
+            Assert.True((await Mine()).Applies!.MailLive);
+            Assert.False((await Config()).MailTest);
+            var asLive = await Create(owner, Card(rid, "Policy Live"));
+            Assert.True((await Mail(owner, [asLive.Id])).Single() is { Ok: true, Test: false });
+            Assert.StartsWith("live_", factory.Mail.Requests.Last(x => x.Request.To.LastName == "Policy Live").Key);
+            Assert.StartsWith("test_", factory.Mail.Requests.Last(x => x.Request.To.LastName == "Policy Test").Key);
+
+            // Each restaurant decides: now the restaurant's own choice counts, and its owner can make it.
+            Assert.Equal(HttpStatusCode.OK, (await Save(mode: "each")).StatusCode);
+            Assert.Equal((false, "restaurant"), ((await Mine()).Applies!.MailLive, (await Mine()).Applies!.MailLiveSetBy));
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", Own(mailLive: true))).StatusCode);
+            Assert.True((await Mine()).Applies!.MailLive);
+            // The System Administrator can set a restaurant's own choice too.
+            Assert.Equal(HttpStatusCode.OK, (await Save(restaurants: [new(rid, false, false, false, null)])).StatusCode);
+            Assert.False((await Mine()).Applies!.MailLive);
+
+            // The group's administrators choose real or test themselves, unless the site has fixed it for every group.
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync("/api/billing/mail-mode", new MailModeRequest("live"))).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync("/api/billing/mail-mode", new MailModeRequest("sometimes"))).StatusCode);
+            var chosen = (await (await admin.PutAsJsonAsync("/api/billing/mail-mode", new MailModeRequest("live"))).Content.ReadFromJsonAsync<GroupBillingDto>())!;
+            Assert.Equal(("live", false), (chosen.MailMode, chosen.MailModeSetBySite));
+            Assert.Equal("live", (await Settings()).MailMode);
+            await SaveSettings(site, s => s.MailMode = "test");
+            Assert.Equal((false, "site"), ((await Mine()).Applies!.MailLive, (await Mine()).Applies!.MailLiveSetBy));
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync("/api/billing/mail-mode", new MailModeRequest("each"))).StatusCode);
+            Assert.True((await admin.GetFromJsonAsync<GroupBillingDto>("/api/billing"))!.MailModeSetBySite);
+            await SaveSettings(site, s => s.MailMode = "each");
+
+            // Whether cards are mailed at all: off for the restaurant that has not been switched on, when each restaurant decides.
+            Assert.Equal(HttpStatusCode.OK, (await Save(mail: "each")).StatusCode);
+            Assert.Equal((false, "restaurant"), ((await Mine()).Applies!.MailOn, (await Mine()).Applies!.MailOnSetBy));
+            Assert.Equal("group", (await Config()).MailBlockedBy);
+            var waiting = await Create(owner, Card(rid, "Policy Off"));
+            Assert.Equal(HttpStatusCode.BadRequest, (await owner.PostAsJsonAsync("/api/comments/mail", new MailRequest([waiting.Id], 1, await Price(owner)))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", Own(mailOn: true))).StatusCode);
+            Assert.True((await Mine()).Applies!.MailOn);
+            Assert.Null((await Config()).MailBlockedBy);
+            Assert.Contains((await Config()).MailRestaurants, x => x.RestaurantId == rid && x is { On: true, Ready: true });
+
+            // How cards usually go out, and the name that signs for the team login: one answer for all restaurants, or each decides.
+            Assert.Equal(HttpStatusCode.OK, (await Save(usual: "mail", signature: "  Pat Group  ")).StatusCode);
+            var fixedForAll = (await Mine()).Applies!;
+            Assert.Equal((true, "group", "Pat Group", "group"), (fixedForAll.MailUsual, fixedForAll.MailUsualSetBy, fixedForAll.Signature, fixedForAll.SignatureSetBy));
+            Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}/signature", new SignatureNameRequest("Someone Else"))).StatusCode);
+            Assert.Equal("Pat Group", (await owner.GetFromJsonAsync<CardDesignDto>($"/api/card-designs/{rid}"))!.MergeFields.Single(f => f.Key == "authorizedBy").Sample);
+            Assert.Equal(HttpStatusCode.OK, (await Save(usual: "each", signature: null)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", Own(mailOn: true, usual: true, signature: "Own Name"))).StatusCode);
+            var own = (await Mine()).Applies!;
+            Assert.Equal((true, "restaurant", "Own Name", "restaurant"), (own.MailUsual, own.MailUsualSetBy, own.Signature, own.SignatureSetBy));
+
+            // Every change is in the audit log.
+            var actions = await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.GroupId == groupId).OrderByDescending(a => a.Id).Take(80).Select(a => a.Action).ToList()));
+            Assert.Contains("GroupSettingsChanged", actions);
+            Assert.Contains("RestaurantSettingsChanged", actions);
+            Assert.Contains("GroupMailModeChanged", actions);
+        }
+        finally
+        {
+            await SaveSettings(site, s => s.MailMode = "each");
+            await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("on", "test", "each", null, null, [new(rid, false, false, false, null)]));
+            await site.DeleteAsync("/api/system/postgrid/mail?mode=live");
+        }
+    }
+
+    [Fact]
+    public async Task An_investment_group_administrator_can_also_be_an_owner_of_a_restaurant()
+    {
+        var (owner, admin, _, rid, groupId) = await SetUpAsync();
+        var n = Interlocked.Increment(ref _n);
+        var username = $"both-roles-{n}";
+        try
+        {
+            // Made an administrator and, in the same step, an owner of one restaurant: two roles for one person.
+            var created = await admin.PostAsJsonAsync("/api/users", new UserRequest
+            {
+                Username = username, DisplayName = "Robin Both", Email = $"{username}@test.local", Password = "BothRoles!123", Role = "GroupAdmin", RestaurantIds = [rid]
+            });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var both = (await created.Content.ReadFromJsonAsync<UserDto>())!;
+            Assert.Equal(("GroupAdmin", true), (both.Role, both.AlsoOwner));
+            Assert.Equal(new[] { rid }, both.RestaurantIds);
+            Assert.Contains(" and ", both.RoleTitle);
+
+            // The restaurant lists them among its owners, and its staffing screen shows them ticked.
+            var listed = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants?all=true"))!.Single(x => x.Id == rid);
+            Assert.Contains(listed.Owners!, o => o.Id == both.Id);
+            var staff = (await owner.GetFromJsonAsync<StaffResponse>($"/api/restaurants/{rid}/staff"))!;
+            Assert.True(staff.AdminOwners.Single(a => a.Id == both.Id).Assigned);
+            Assert.DoesNotContain(staff.Owners, o => o.Id == both.Id);
+
+            // Taking them off the restaurant leaves them an administrator; ticking them again makes them an owner again.
+            var others = staff.Owners.Concat(staff.Managers).Concat(staff.TeamLogins).Where(m => m.Assigned).Select(m => m.Id).ToArray();
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}/staff", new StaffRequest(others))).StatusCode);
+            var after = (await admin.GetFromJsonAsync<List<UserDto>>("/api/users"))!.Single(u => u.Id == both.Id);
+            Assert.Equal(("GroupAdmin", false), (after.Role, after.AlsoOwner));
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}/staff", new StaffRequest([.. others, both.Id]))).StatusCode);
+            Assert.True((await admin.GetFromJsonAsync<List<UserDto>>("/api/users"))!.Single(u => u.Id == both.Id).AlsoOwner);
+        }
+        finally
+        {
+            // Other tests count on this group having no administrator of its own.
+            await Db(async db =>
+            {
+                db.Users.RemoveRange(db.Users.Where(u => u.Username == username));
+                return await db.SaveChangesAsync();
+            });
+        }
+    }
+
+    [Fact]
     public async Task Cards_a_restaurant_prints_itself_for_a_stamp_by_hand_are_charged_the_sites_fee_once()
     {
         var (owner, _, site, rid, groupId) = await SetUpAsync();
@@ -1315,5 +1474,221 @@ public class PostGridTests(ApiFactory factory)
         // The bank account fee is 0.08% unless the System Administrator changes it, and survives being saved.
         Assert.Equal(0.08m, new BillingSettings().BankFeePercent);
         Assert.Equal(0.08m, new BillingSettings { BankFeePercent = 0.08m }.Normalize().BankFeePercent);
+    }
+
+    [Fact]
+    public async Task Permissions_are_handed_down_from_the_site_to_the_group_to_owners_to_managers()
+    {
+        var (owner, admin, site, rid, groupId) = await SetUpAsync();
+        var n = Interlocked.Increment(ref _n);
+        var username = $"perm-manager-{n}";
+        static PermissionRulesRequest Rule(string name, string? owners = null, string? managers = null) => new([new PermissionRuleChange(name, owners, managers)]);
+        async Task<string[]> Holds(HttpClient who) => (await who.GetFromJsonAsync<UserDto>("/api/auth/me"))!.PermissionNames;
+        try
+        {
+            // An owner hires a manager and ticks two permissions for them.
+            var made = await owner.PostAsJsonAsync("/api/users", new UserRequest
+            {
+                Username = username, DisplayName = "Pat Manager", Password = "Manager!12345", Role = "Manager", RestaurantIds = [rid], Permissions = ["ViewComments", "ExportComments", "ManageStaff"]
+            });
+            Assert.Equal(HttpStatusCode.Created, made.StatusCode);
+            var managerId = (await made.Content.ReadFromJsonAsync<UserDto>())!.Id;
+            var manager = await factory.LoginAsync(username, "Manager!12345");
+            // A permission that belongs to owners is never given to a manager, whatever was sent.
+            Assert.Equal(new[] { "ViewComments", "ExportComments" }, await Holds(manager));
+            Assert.Contains("ManageStaff", await Holds(owner));
+
+            // The System Administrator says no owner in this group may export: that takes precedence, the group's own
+            // administrators cannot undo it, and a manager cannot hold what the owners do not.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/permissions", Rule("ExportComments", owners: "no"))).StatusCode);
+            Assert.DoesNotContain("ExportComments", await Holds(owner));
+            Assert.Equal(new[] { "ViewComments" }, await Holds(manager));
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync("/api/comments/export")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await admin.PutAsJsonAsync("/api/permission-rules", Rule("ExportComments", owners: "no", managers: "yes"))).StatusCode);
+            var asGroup = (await admin.GetFromJsonAsync<PermissionRulesDto>("/api/permission-rules"))!.Permissions.Single(x => x.Name == "ExportComments");
+            Assert.Equal((false, "site", "none", "owners"), (asGroup.OwnersCan, asGroup.OwnersSetBy, asGroup.Managers, asGroup.ManagersSetBy));
+            // Investment Group Administrators can do everything, whatever is said about owners and managers.
+            Assert.Contains("ExportComments", await Holds(admin));
+
+            // Left to the group again, its administrators decide: every manager sees the reports, none may edit comments.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/permissions", Rule("ExportComments", owners: "group"))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/permission-rules", new PermissionRulesRequest(
+                [new("ViewAnalytics", null, "yes"), new("EditComments", null, "no")]))).StatusCode);
+            Assert.Equal(new[] { "ViewComments", "ViewAnalytics", "ExportComments" }, await Holds(manager));
+            // An owner ticking a permission no manager may hold changes nothing; one left to each manager is kept.
+            UserRequest Edit(params string[] permissions) => new() { Username = username, DisplayName = "Pat Manager", Role = "Manager", RestaurantIds = [rid], Permissions = permissions };
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/users/{managerId}", Edit("ViewComments", "EditComments", "DeleteComments"))).StatusCode);
+            Assert.Equal(new[] { "ViewComments", "DeleteComments", "ViewAnalytics" }, await Holds(manager));
+            // The System Administrator's answer for managers wins over the group's.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/permissions", Rule("ViewAnalytics", managers: "no"))).StatusCode);
+            Assert.Equal(new[] { "ViewComments", "DeleteComments" }, await Holds(manager));
+
+            // The group's administrators decide whether owners choose what managers may do. Without it, an owner's
+            // ticks are left out, and the manager keeps what they had.
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/permission-rules", Rule("SetPermissions", owners: "no"))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/users/{managerId}", Edit("MarkResponded"))).StatusCode);
+            Assert.Equal(new[] { "ViewComments", "DeleteComments" }, await Holds(manager));
+            // An administrator of the group still can.
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/api/users/{managerId}", Edit("ViewComments", "MarkResponded"))).StatusCode);
+            Assert.Equal(new[] { "ViewComments", "MarkResponded" }, await Holds(manager));
+
+            // Owners who may not manage staff or change restaurants are told so, by name of who can.
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/permission-rules", new PermissionRulesRequest(
+                [new("ManageStaff", "no", null), new("EditRestaurants", "no", null)]))).StatusCode);
+            var refused = await owner.PutAsJsonAsync($"/api/users/{managerId}/restaurants", new UserRestaurantsRequest([]));
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            Assert.Contains("administrators", await refused.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PostAsJsonAsync("/api/users", new UserRequest { Username = username + "-b", DisplayName = "No", Password = "Manager!12345", Role = "Manager", RestaurantIds = [rid] })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync($"/api/restaurants/{rid}", new RestaurantRequest { Name = "Renamed" })).StatusCode);
+            var mine = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants?all=true"))!.Single(x => x.Id == rid);
+            Assert.Equal((true, false), (mine.CanManage, mine.CanEdit));
+
+            // Mapping a person to restaurants in one step: an administrator takes the manager off, and puts them back.
+            var off = await admin.PutAsJsonAsync($"/api/users/{managerId}/restaurants", new UserRestaurantsRequest([]));
+            Assert.Equal(HttpStatusCode.OK, off.StatusCode);
+            Assert.Empty((await off.Content.ReadFromJsonAsync<UserDto>())!.RestaurantIds);
+            var on = await admin.PutAsJsonAsync($"/api/users/{managerId}/restaurants", new UserRestaurantsRequest([rid]));
+            Assert.Equal(new[] { rid }, (await on.Content.ReadFromJsonAsync<UserDto>())!.RestaurantIds);
+            Assert.Equal(2, await Db(db => Task.FromResult(db.AuditLogs.ToList().Count(a => a.Action == "UserRestaurantsChanged" && a.EntityId == managerId.ToString()))));
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => a.Action == "PermissionRulesSetBySite" && a.GroupId == groupId))));
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => a.Action == "PermissionRulesChanged" && a.GroupId == groupId))));
+        }
+        finally
+        {
+            await Db(async db =>
+            {
+                var g = db.Groups.First(x => x.Id == groupId);
+                g.SiteOwnerYes = g.SiteOwnerNo = g.SiteManagerYes = g.SiteManagerNo = g.OwnerNo = g.ManagerYes = g.ManagerNo = ManagerPermission.None;
+                db.Users.RemoveRange(db.Users.Where(u => u.Username.StartsWith(username)));
+                return await db.SaveChangesAsync();
+            });
+        }
+    }
+
+    [Fact]
+    public async Task The_site_decides_a_setting_for_a_group_or_leaves_it_to_the_groups_administrators()
+    {
+        var (_, admin, site, _, groupId) = await SetUpAsync();
+        try
+        {
+            // What the System Administrator decides for the group, the group's administrators cannot change.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings",
+                new GroupSettingsRequest("on", "test", "stamp", null, null, null) { GroupDecides = ["mode"] })).StatusCode);
+            var rules = (await admin.GetFromJsonAsync<GroupRulesDto>("/api/group-rules"))!;
+            Assert.Equal(("on", "test", "stamp"), (rules.Mail, rules.MailMode, rules.UsualWay));
+            Assert.Equal(new[] { "mode" }, rules.GroupDecides);
+            var refused = await admin.PutAsJsonAsync("/api/group-rules", new GroupRulesRequest(null, null, "mail", null, null));
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            Assert.Contains("people who run the site", await refused.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.Forbidden, (await admin.PutAsJsonAsync("/api/group-rules", new GroupRulesRequest("off", null, null, null, null))).StatusCode);
+            // What is left to the group, its administrators set for all restaurants or leave to each restaurant.
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/group-rules", new GroupRulesRequest(null, "each", null, null, null))).StatusCode);
+
+            // Handed over, the group decides the rest too, switching mailing on or off included.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings",
+                new GroupSettingsRequest(null, null, null, null, null, null) { GroupDecides = ["mail", "mode", "usual", "signature"] })).StatusCode);
+            var changed = await admin.PutAsJsonAsync("/api/group-rules", new GroupRulesRequest("each", "live", "mail", "all", "Jordan Lee"));
+            Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+            var now = (await changed.Content.ReadFromJsonAsync<GroupRulesDto>())!;
+            Assert.Equal(("each", "live", "mail", "Jordan Lee"), (now.Mail, now.MailMode, now.UsualWay, now.SignatureForAll));
+            var seen = (await site.GetFromJsonAsync<GroupSettingsDto>($"/api/system/groups/{groupId}/settings"))!;
+            Assert.Equal(("each", "live", "mail", "Jordan Lee", 4), (seen.Mail, seen.MailMode, seen.UsualWay, seen.SignatureForAll, seen.GroupDecides.Length));
+        }
+        finally
+        {
+            await Db(async db =>
+            {
+                var b = db.GroupBilling.First(x => x.GroupId == groupId);
+                b.GroupDecides = GroupChoice.Default;
+                b.SignatureForAll = null;
+                b.UsualWay = "each";
+                return await db.SaveChangesAsync();
+            });
+        }
+    }
+
+    [Fact]
+    public async Task A_group_chooses_one_bill_a_bill_for_each_restaurant_or_bills_for_sets_of_restaurants()
+    {
+        var (owner, admin, site, rid, groupId) = await SetUpAsync();
+        await SaveSettings(site, s => { s.CostCents = 90; s.FeeCents = 10; s.ChargeHandPrintFee = true; s.EmailBills = false; s.PrintBills = false; });
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, 1_000_000))).StatusCode);
+        var start = MailLedger.MonthStart(DateTime.UtcNow).AddMonths(-10);
+        var month = MailLedger.MonthKey(start);
+        var mine = new List<int>();
+        var second = 0;
+        async Task<List<SystemInvoiceDto>> Bills() => (await Billing(site)).Invoices.Where(i => i.GroupId == groupId && i.Month == month).OrderBy(i => i.Number).ToList();
+        async Task Issue() => Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync("/api/system/billing/issue", new IssueBillsRequest(month))).StatusCode);
+        Task<int> Forget() => Db(async db => { db.MailInvoices.RemoveRange(db.MailInvoices.Where(i => i.GroupId == groupId && i.Month == month)); return await db.SaveChangesAsync(); });
+        try
+        {
+            // A second restaurant, and cards both restaurants printed themselves in a month that is over.
+            var made = await admin.PostAsJsonAsync("/api/restaurants", new RestaurantRequest { Name = "Split Second", StreetAddress = "2 Test St", City = "Joliet", State = "IL", Zip = "60431" });
+            Assert.True(made.IsSuccessStatusCode);
+            second = (await made.Content.ReadFromJsonAsync<RestaurantDto>())!.Id;
+            var firstName = (await admin.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants?all=true"))!.Single(r => r.Id == rid).Name;
+            foreach (var (restaurant, name) in new[] { (rid, "Split A"), (rid, "Split B"), (second, "Split C") })
+                mine.Add((await Create(admin, Card(restaurant, name))).Id);
+            Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/comments/printed", new PrintedRequest(mine.ToArray(), true, "stamp"))).StatusCode);
+            await Db(async db =>
+            {
+                foreach (var c in db.Comments.Where(c => mine.Contains(c.Id))) c.PrintFeeAt = start.AddDays(3);
+                return await db.SaveChangesAsync();
+            });
+
+            // Only the group's administrators choose; an owner cannot.
+            Assert.Equal(HttpStatusCode.Forbidden, (await owner.PutAsJsonAsync("/api/billing/split", new BillSplitRequest("restaurant", null))).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync("/api/billing/split", new BillSplitRequest("weekly", null))).StatusCode);
+            Assert.Equal("one", (await admin.GetFromJsonAsync<GroupBillingDto>("/api/billing"))!.Bills!.Split);
+
+            // A bill for each restaurant: two bills, each named for its restaurant, and never made twice.
+            var chosen = await admin.PutAsJsonAsync("/api/billing/split", new BillSplitRequest("restaurant", null));
+            Assert.Equal("restaurant", (await chosen.Content.ReadFromJsonAsync<GroupBillingDto>())!.Bills!.Split);
+            await Issue();
+            await Issue();
+            var each = await Bills();
+            Assert.Equal(2, each.Count);
+            Assert.Equal(new[] { 20, 10 }.Order(), each.Select(b => b.TotalCents).Order());
+            Assert.Equal(new[] { firstName, "Split Second" }.Order(), each.Select(b => b.For!).Order());
+            Assert.All(each, b => Assert.Matches(@"-\d\d$", b.Number[^3..]));
+            Assert.Equal(2, each.Select(b => b.Number).Distinct().Count());
+            // The group sees which restaurant each bill is for.
+            var seen = (await admin.GetFromJsonAsync<GroupBillingDto>("/api/billing"))!.Invoices.Where(i => i.Month == month).ToList();
+            Assert.Equal(2, seen.Count(i => i.For is not null));
+
+            // Bills for sets of restaurants: both in one set share a bill named for the set.
+            await Forget();
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/billing/split",
+                new BillSplitRequest("sets", [new BillSetRequest(rid, "North"), new BillSetRequest(second, " north ")]))).StatusCode);
+            await Issue();
+            var set = Assert.Single(await Bills());
+            Assert.Equal((30, "North", 3), (set.TotalCents, set.For, set.Cards));
+
+            // One set and the rest: the restaurants in no set share the other bill.
+            await Forget();
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/billing/split", new BillSplitRequest(null, [new BillSetRequest(second, "")]))).StatusCode);
+            await Issue();
+            Assert.Equal(new[] { "North", "Other restaurants" }, (await Bills()).Select(b => b.For!).Order());
+
+            // One bill for everything, as before: no name, and the plain number.
+            await Forget();
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/billing/split", new BillSplitRequest("one", null))).StatusCode);
+            await Issue();
+            var one = Assert.Single(await Bills());
+            Assert.Equal((30, null, $"{month.Replace("-", "")}-{groupId:000}"), (one.TotalCents, one.For, one.Number));
+            Assert.True(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => a.Action == "BillSplitChanged" && a.GroupId == groupId && (a.Details ?? "").Contains("North")))));
+        }
+        finally
+        {
+            await Db(async db =>
+            {
+                db.MailInvoices.RemoveRange(db.MailInvoices.Where(i => i.GroupId == groupId && i.Month == month));
+                db.Comments.RemoveRange(db.Comments.Where(c => mine.Contains(c.Id)));
+                db.Restaurants.RemoveRange(db.Restaurants.Where(r => r.Id == second));
+                foreach (var r in db.Restaurants.Where(r => r.GroupId == groupId)) r.BillSet = null;
+                foreach (var b in db.GroupBilling.Where(b => b.GroupId == groupId)) b.BillSplit = "one";
+                return await db.SaveChangesAsync();
+            });
+        }
     }
 }

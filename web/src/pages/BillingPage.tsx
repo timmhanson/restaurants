@@ -1,3 +1,4 @@
+import BillSplitPanel from '../components/BillSplitPanel'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -87,6 +88,28 @@ export default function BillingPage() {
       {notice && <Alert kind={notice.ok ? 'success' : 'warn'} onClose={() => setNotice(null)}>{notice.message}</Alert>}
       {!d.mailAvailable && <Alert kind="info">Having cards mailed for you is not switched on for this investment group at the moment. You can still print your own.</Alert>}
       {d.mailAvailable && d.test && <Alert kind="info">Mailing is in test mode: nothing is printed, mailed or billed yet.</Alert>}
+      {d.canManage && (
+        <div className="panel">
+          <h2>Real or test mailing</h2>
+          <p className="muted">
+            Real: cards chosen as “Mailed for you” are printed, mailed and billed. Test: a proof of each card is made so you can see how it will look, and nothing is
+            printed, mailed or billed.
+          </p>
+          {d.mailModeSetBySite ? (
+            <p style={{ marginBottom: 0 }}>
+              <strong>{d.mailMode === 'live' ? 'Real mailing' : 'Test mailing'}</strong> <span className="muted">for every investment group on this site. It is set by the people who run the site and cannot be changed here.</span>
+            </p>
+          ) : (
+            <select value={d.mailMode} aria-label="Real or test mailing for your restaurants" disabled={busy !== null}
+              onChange={(e) => run('mode', async () => { setData(await api.put<GroupBilling>('/billing/mail-mode', { mode: e.target.value })); setNotice({ ok: true, message: 'Saved.' }) })}>
+              <option value="live">Real mailing for all restaurants</option>
+              <option value="test">Test mailing for all restaurants</option>
+              <option value="each">Each restaurant decides (set on Restaurants &amp; Staff Assignments)</option>
+            </select>
+          )}
+        </div>
+      )}
+      {d.canManage && <BillSplitPanel data={d} onSaved={setData} />}
       {d.mailAvailable && d.payRequired && !d.method && d.canManage && d.creditCents > 0 && (
         <Alert kind="info">
           You have {money(d.creditCents)} of credit, so cards can be mailed for you now and are paid from it. Save a payment method below to keep mailing once the
@@ -129,7 +152,7 @@ export default function BillingPage() {
                       <FragmentRows key={i.id}>
                         <tr>
                           <td><button type="button" className="btn-link" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id} aria-label={`${open === i.id ? 'Hide' : 'Show'} details of bill ${i.number}`}>{i.number}</button></td>
-                          <td>{i.monthName}</td>
+                          <td>{i.monthName}{i.for && <div className="muted small">{i.for}</div>}</td>
                           <td>{i.cards}</td>
                           <td><strong>{money(i.totalCents)}</strong>{i.creditCents > 0 && <div className="muted small">− {money(i.creditCents)} credit{i.dueCents > 0 ? `, ${money(i.dueCents)} to pay` : ''}</div>}{i.surchargeCents > 0 && <div className="muted small">+ {money(i.surchargeCents)} {i.paidHow === 'bank' ? 'bank account fee' : 'credit card fee'}</div>}</td>
                           <td>{fmtDate(i.dueOn)}</td>

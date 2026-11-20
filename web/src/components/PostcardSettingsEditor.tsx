@@ -91,7 +91,7 @@ export default function PostcardSettingsEditor({ settings, onChange, dirty }: { 
         <PostcardFace card={sampleCard(settings)} settings={p} validityMonths={settings.couponValidityMonths} outline qr="sample" />
       </div>
       <p className="legend-note">
-        {dirty ? 'Save the settings, then print a test card.' : <Link to="/print-test">Print a test card</Link>}
+        {dirty ? 'Saving your change…' : <Link to="/print-test">Print a test card</Link>}
       </p>
 
       <h3 style={{ marginTop: '1rem' }}>Postage</h3>

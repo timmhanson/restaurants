@@ -64,6 +64,20 @@ export function Badge({ kind = 'neutral', children, title }: { kind?: 'neutral' 
   )
 }
 
+/** A person's role, in the same rounded outline whichever role it is. */
+export function RoleBadge({ role, title }: { role: string; title?: string }) {
+  const kind = role === 'SuperAdmin' || role === 'GroupAdmin' ? 'accent' : role === 'Owner' ? 'ok' : 'neutral'
+  const text = role === 'TeamMember' ? 'Team login' : ROLE_NAMES[role] ?? role
+  return <Badge kind={kind} title={title}>{text}</Badge>
+}
+
+const ROLE_NAMES: Record<string, string> = {
+  SuperAdmin: 'System Administrator',
+  GroupAdmin: 'Investment Group Administrator',
+  Owner: 'Restaurant Owner',
+  Manager: 'Manager',
+}
+
 export function Confirm({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm, onCancel, busy = false }: {
   title: string
   message: ReactNode

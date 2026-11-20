@@ -352,7 +352,7 @@ export default function CardDesignPage() {
                     <textarea rows={3} value={draft.legalText ?? ''} maxLength={420} onChange={(e) => set('legalText', e.target.value)} placeholder={design.defaultLegalText} />
                   </Field>
                   <p className="muted small" style={{ margin: 0 }}>
-                    The restaurant’s name and address come from Restaurants &amp; staff, and “good for … months” from Settings. The offer, date issued and the name
+                    The restaurant’s name and address come from Restaurants &amp; Staff Assignments, and “good for … months” from Settings. The offer, date issued and the name
                     of whoever authorized the card are printed on the lines for each guest.
                   </p>
                 </div>

@@ -169,6 +169,67 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
         return new BillingActionResult(ok, message, await Dto(me, groupId, ct));
     }
 
+    /// <summary>
+    /// Real or test mailing for the group: "live" or "test" for all its restaurants, or "each" so that each
+    /// restaurant decides. The group's administrators choose, unless the System Administrator has fixed it for the
+    /// whole site.
+    /// </summary>
+    [HttpPut("mail-mode")]
+    public async Task<ActionResult<GroupBillingDto>> SetMailMode(MailModeRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (me.GroupId is not int groupId) return BadRequest(new { message = "Select an investment group first." });
+        if (!me.IsGroupWide) return StatusCode(403, new { message = AdminsOnly });
+        if (req.Mode is not (MailChoices.Live or MailChoices.Test or MailChoices.Each)) return BadRequest(new { message = "Choose real mailing, test mailing, or let each restaurant decide." });
+        if (GroupPolicy.SiteMode(site.Billing) != MailChoices.Each)
+            return BadRequest(new { message = "Real or test mailing is set for the whole site by its administrator, so it cannot be changed here." });
+        var b = await Row(groupId, ct);
+        if (!GroupPolicy.Decides(b, GroupChoice.Mode))
+            return BadRequest(new { message = "Real or test mailing is decided for your investment group by the people who run the site, so it cannot be changed here." });
+        var before = GroupPolicy.Mode(b);
+        b.MailMode = req.Mode;
+        await db.SaveChangesAsync(ct);
+        if (before != req.Mode) await audit.LogAsync(me, "GroupMailModeChanged", "Group", groupId, new { before, after = req.Mode });
+        return await Dto(me, groupId, ct);
+    }
+
+    /// <summary>
+    /// How the group's month is billed: one bill for everything, a bill for each restaurant, or bills for sets of
+    /// restaurants the group puts together. The group's administrators choose; it applies from the next bills made,
+    /// and bills already made stay as they are.
+    /// </summary>
+    [HttpPut("split")]
+    public async Task<ActionResult<GroupBillingDto>> SetSplit(BillSplitRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (me.GroupId is not int groupId) return BadRequest(new { message = "Select an investment group first." });
+        if (!me.IsGroupWide) return StatusCode(403, new { message = AdminsOnly });
+        if (req.Split is not (null or BillSplits.One or BillSplits.Restaurant or BillSplits.Sets))
+            return BadRequest(new { message = "Choose one bill for everything, a bill for each restaurant, or bills for sets of restaurants." });
+        var b = await Row(groupId, ct);
+        var before = BillSplits.Of(b);
+        if (req.Split is not null) b.BillSplit = req.Split;
+        var changed = new List<object>();
+        if (req.Sets is { Count: > 0 } wanted)
+        {
+            var ids = wanted.Select(w => w.RestaurantId).ToList();
+            var restaurants = await db.Restaurants.Where(r => r.GroupId == groupId && ids.Contains(r.Id)).ToListAsync(ct);
+            if (restaurants.Count != ids.Distinct().Count()) return BadRequest(new { message = "One of the restaurants is not in this investment group." });
+            foreach (var r in restaurants)
+            {
+                var set = wanted.First(w => w.RestaurantId == r.Id).Set?.Trim();
+                set = string.IsNullOrEmpty(set) ? null : set;
+                if (set == r.BillSet) continue;
+                changed.Add(new { r.Id, r.Name, before = r.BillSet, after = set });
+                r.BillSet = set;
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        if (before != BillSplits.Of(b) || changed.Count > 0)
+            await audit.LogAsync(me, "BillSplitChanged", "Group", groupId, new { before, after = BillSplits.Of(b), restaurants = changed });
+        return await Dto(me, groupId, ct);
+    }
+
     // ---- helpers ----------------------------------------------------------------------------------------------
 
     private async Task<GroupBilling> Row(int groupId, CancellationToken ct)
@@ -208,10 +269,10 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
         var current = months.FirstOrDefault(m => m.Month == thisMonth);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var invoices = manage
-            ? (await db.MailInvoices.AsNoTracking().Where(i => i.GroupId == groupId && i.Status != InvoiceStatuses.Void).OrderByDescending(i => i.Month).Take(36).ToListAsync(ct))
+            ? (await db.MailInvoices.AsNoTracking().Where(i => i.GroupId == groupId && i.Status != InvoiceStatuses.Void).OrderByDescending(i => i.Month).ThenBy(i => i.Number).Take(120).ToListAsync(ct))
                 .Select(i => new InvoiceDto(i.Id, i.Number, i.Month, MailLedger.MonthName(i.Month), i.Cards, i.TotalCents, DateTime.SpecifyKind(i.IssuedAt, DateTimeKind.Utc), i.DueOn, i.Status,
                     i.Status == InvoiceStatuses.Open && i.DueOn < today, i.PaidAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null, i.PaidHow, i.SurchargeCents,
-                    ledger.PayFee(BillingService.Due(i), b), i.PaymentError, BillingService.Lines(i)) { CreditCents = i.CreditCents, DueCents = BillingService.Due(i) }).ToList()
+                    ledger.PayFee(BillingService.Due(i), b), i.PaymentError, BillingService.Lines(i)) { CreditCents = i.CreditCents, DueCents = BillingService.Due(i), For = i.UnitName }).ToList()
             : [];
         // The group's credit account, without the System Administrator's notes.
         var creditRows = manage ? await db.GroupCredits.AsNoTracking().Where(c => c.GroupId == groupId).OrderByDescending(c => c.Id).Take(100).ToListAsync(ct) : [];
@@ -220,8 +281,7 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
         var method = manage && b?.PayMethodId is not null
             ? new PayMethodDto(b.PayKind ?? PayKinds.Card, b.PayFunding, b.PayLabel ?? "Saved payment method", b.PaySetAt is { } set ? DateTime.SpecifyKind(set, DateTimeKind.Utc) : null, b.PaySetBy)
             : null;
-        var account = site.Account;
-        return new GroupBillingDto(manage, account is not null && terms.Enabled && terms.LimitCents > 0, account?.Test ?? false, terms.PriceCents, terms.LimitCents,
+        return new GroupBillingDto(manage, site.Any is not null && terms.Enabled && terms.LimitCents > 0, terms.AllTest || site.Live is null, terms.PriceCents, terms.LimitCents,
             // The monthly limit is about cards mailed for the group, so what counts against it leaves out the cards it printed itself.
             charges.Where(c => !c.Printed && MailLedger.MonthKey(c.At) == thisMonth).Sum(c => c.Cents), current?.Cards ?? 0, payAccount.Current is not null, terms.PayRequired, payAccount.Current?.Test ?? false, s.CardFeePercent, s.BankFeePercent, method, b?.AutoPay ?? false,
             manage ? new BillingContact(b?.BillingName, b?.BillingEmail, b?.Street, b?.City, b?.State, b?.Zip) : new BillingContact(null, null, null, null, null, null),
@@ -229,7 +289,11 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
             invoices.Where(i => i.Status == InvoiceStatuses.Open).Sum(i => i.DueCents))
         {
             CreditCents = creditBalance,
+            Bills = manage ? new BillSplitDto(BillSplits.Of(b), (await db.Restaurants.AsNoTracking().Where(r => r.GroupId == groupId && r.IsActive).OrderBy(r => r.Name).ToListAsync(ct))
+                .Select(r => new BillSetRow(r.Id, r.Name, string.IsNullOrWhiteSpace(r.BillSet) ? null : r.BillSet.Trim())).ToList()) : null,
             PrintFeeCents = terms.PrintFeeCents,
+            MailMode = GroupPolicy.SiteMode(s) is var siteMode && siteMode != MailChoices.Each ? siteMode : GroupPolicy.Mode(b),
+            MailModeSetBySite = GroupPolicy.SiteMode(s) != MailChoices.Each || !GroupPolicy.Decides(b, GroupChoice.Mode),
             Credits = creditRows.Select(c => new GroupCreditLine(DateTime.SpecifyKind(c.CreatedAt, DateTimeKind.Utc), c.Kind, CreditKinds.Label(c.Kind), c.AmountCents,
                 c.InvoiceId is int id ? billNumbers.GetValueOrDefault(id) : null)).ToList()
         };

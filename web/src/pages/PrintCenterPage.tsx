@@ -96,7 +96,7 @@ export default function PrintCenterPage() {
   // A restaurant can have "Mailed for you" as its usual way. When every card chosen is from such a restaurant, and
   // mailing can be used, it is picked to begin with. Once someone picks a way themselves, their choice stays.
   const pickedPostage = useRef(false)
-  const mailIsUsual = chosen.length > 0 && chosen.every((c) => restaurants.find((r) => r.id === c.restaurantId)?.mailByDefault)
+  const mailIsUsual = chosen.length > 0 && chosen.every((c) => { const r = restaurants.find((x) => x.id === c.restaurantId); return r?.applies ? r.applies.mailUsual : r?.mailByDefault })
   const canMail = config?.canMail ?? false
   useEffect(() => {
     if (pickedPostage.current) return

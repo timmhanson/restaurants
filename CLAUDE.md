@@ -22,6 +22,16 @@ See README.md for the architecture, roles and deployment.
   show them restaurant-level screens unless they chose "View as admin". Put new site-wide features in that area
   (`SystemAdminController`, `/api/system/*`, `SuperAdmin` only) and surface anything needing action in the
   Overview's "Needs your attention" list.
+- **Permissions and settings are handed down level by level, and the higher level wins.** System Administrator
+  (per investment group) → Investment Group Administrators (who can do everything in their group) → Restaurant
+  Owners → Managers; team logins only enter cards. Check `me.Has(ManagerPermission.X)` for anything an owner or
+  manager does, never the role alone: owners hold only what `PermissionPolicy` leaves them, and a manager never
+  holds what the group's owners do not. A new ability gets a `ManagerPermission` (owner-only ones go in
+  `PermissionPolicy.OwnerOnly`) so it shows on the Permissions screens by itself. A new group setting says in
+  plain words who decides it ("X for all restaurants", "Each restaurant decides", "the group decides") and goes
+  through `GroupPolicy`; a level never changes what the level above has decided.
+- **Group and permission screens save each change as it is made** (no Save button), and say "Saved." The System
+  Administrator's Edit group dialog is the exception: it saves with its own Save.
 - **Never create a dead end.** Every forced or modal screen needs a visible way out (Sign out / Cancel), and
   nothing may require a step the person cannot complete (e.g. an emailed code with no email on file).
 - **Money needs its own permission and a cap.** Anything that spends money (postage today) requires a specific

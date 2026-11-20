@@ -13,11 +13,35 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 
 | Title (internal role) | Scope | Can |
 | --- | --- | --- |
-| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **View as admin** opens one group exactly as its Investment Group Administrator sees it, under a yellow bar with **Exit to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
-| **Investment Group Administrator** (`GroupAdmin`) | one investment group | every restaurant, every user account (owners and other administrators included) and the group settings |
-| **Restaurant Owner** (`Owner`) | the restaurants they own | everything at those restaurants: cards, analytics, export, audit, staffing and co-owners. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
-| **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus whatever is granted: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin. Permissions apply at every restaurant they work at |
+| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **View as admin** opens one group exactly as its Investment Group Administrator sees it, under a yellow bar with **Back to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
+| **Investment Group Administrator** (`GroupAdmin`) | one investment group | everything: every restaurant, every user account (owners and other administrators included), the group settings, and what owners and managers may do. Can also be ticked as an owner of particular restaurants (two roles at once) |
+| **Restaurant Owner** (`Owner`) | the restaurants they own | what the levels above leave to owners, by default everything at those restaurants: cards, analytics, export, audit, staffing and co-owners, the restaurant's details and card design. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
+| **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus what all managers in the group were given and what was ticked for them: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin, BuyPostage, SetFollowUpDays. Permissions apply at every restaurant they work at |
 | **Team Member** (`TeamMember`) | the shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
+
+### Who decides what: handed down level by level
+
+Permissions and settings are decided from the top down, and a decision made higher up takes precedence
+(`PermissionPolicy`, `GroupPolicy`):
+
+1. **The System Administrator**, for each investment group (Investment groups, **Edit**). For every permission:
+   *all owners can*, *no owner can* or *the group decides*, and the same for managers. For each group setting
+   (having cards mailed, real or test mailing, how cards usually go out, the name that signs for the team login):
+   the System Administrator's answer for the group, or a tick to let the group's own administrators change it.
+2. **Investment Group Administrators** can do everything in their group. On **Permissions** they decide what is
+   left to them: whether owners can, and for managers *all can*, *none can* or *set for each manager*. On
+   **Settings** they make each setting left to them one answer for all restaurants, or leave it to each restaurant.
+3. **Restaurant Owners** hold what is left to them. The owner-only permissions are `ManageStaff`,
+   `SetPermissions` (choose what each manager may do), `EditRestaurants` and `DesignCards`. An owner makes a
+   restaurant's own choices where "each restaurant decides", and ticks the manager-by-manager permissions on
+   All Staff when owners hold `SetPermissions` (the group's administrators always can).
+4. **Managers** hold what all managers were given plus what was ticked for them, and never a permission the
+   group's owners do not hold. **Team logins** only enter cards.
+
+Every change of these rules is audited (`PermissionRulesSetBySite`, `PermissionRulesChanged`,
+`GroupSettingsChanged`). On **All Staff**, **Restaurants** on a person's row maps them to restaurants in one step
+(`PUT /api/users/{id}/restaurants`): where a manager or team login works, or which restaurants an owner or an
+administrator owns.
 
 Rules worth knowing:
 
@@ -35,7 +59,7 @@ Rules worth knowing:
 
 1. A System Administrator creates the investment group on **Groups** with at least one Group
    Administrator, optional Restaurant Owners and the group's restaurants, ticking who owns each restaurant.
-2. **Set up** opens the group's **Restaurants & staff** page. Each restaurant's **Staff** screen lists the
+2. **View as admin** opens the group; its **Restaurants & Staff Assignments** page has each restaurant's **Staff** screen, which lists the
    group's owners, managers and team logins as checkboxes, with quick-add for new people.
 3. Owners staff only the restaurants they own; managers can be added at several owners' restaurants.
 
@@ -161,7 +185,7 @@ answer. PostGrid charges per lookup after its free allowance, billed to the acco
   System Administrator requires it, the group must have a payment method saved (otherwise it prints its own
   cards). When any of these is missing, the choice on Print cards stays visible but greyed out and says what it
   takes (`PrintConfig.MailBlockedBy`: the site, the group's switch, the limit, a payment method or the
-  permission). A restaurant can make "Mailed for you" **its usual way** (Restaurants & staff,
+  permission). A restaurant can make "Mailed for you" **its usual way** (Restaurants & Staff Assignments,
   `Restaurant.MailByDefault`): Print cards then starts on it when every card chosen is from such a restaurant. A card is never sent twice: cards already
   with the mail house are skipped and each request carries an idempotency key, so a retry returns the first
   order. Each card is marked sent, gets a history entry and an audit row (`CardMailed`, `CardMailFailed`,
@@ -204,7 +228,7 @@ restaurants' printed card, and is drawn by the same code (`CardElements.Render`)
 - **Who signs a card** (`CardSignature`). A manager, owner or group administrator who enters a card signs it with
   their own name: the "Authorized signature" box on Enter card starts with it and can be changed. The team login
   is shared by the crew, so its cards take the name set for the restaurant (`Restaurant.SignatureName`). Owners
-  and administrators set that on Restaurants & staff; the restaurant's managers set it from Enter card
+  and administrators set that on Restaurants & Staff Assignments; the restaurant's managers set it from Enter card
   (`PUT /api/restaurants/{id}/signature`, audited as `RestaurantSignatureChanged`); a team login cannot. A card
   saved with no name gets the same default on the server. The mailed card prints the name on the card, or the
   restaurant's name for older cards that carry none. The printed card carries the ones it uses inside its own
@@ -337,10 +361,26 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
-Restaurant-level screens (Enter card, Comments, Analytics, Users, Restaurants & staff, Settings) never appear
+Restaurant-level screens (Enter card, Comments, Analytics, All Staff, Permissions, Restaurants & Staff Assignments, Settings) never appear
 for a System Administrator unless they choose **View as admin** / **Open in group**, which shows one group as
 its Investment Group Administrator sees it under a yellow bar. That choice lasts for the browser tab only.
 All of `/api/system/*` is `SuperAdmin` only.
+
+### Mailing keys, real or test, and how a group is billed
+
+- **Two PostGrid keys.** Connected Systems takes a test key and a live key (`postgrid.mail.test`,
+  `postgrid.mail.live`, both encrypted). Real mailing uses the live key; test mailing uses the test key, which
+  makes a proof and prints, mails and bills nothing.
+- **Real or test** is a setting with levels: the System Administrator can fix it for the whole site (Billing),
+  decide it for one group or leave it to the group (Edit group); the group fixes it for all its restaurants or
+  leaves it to each restaurant. A batch can mix restaurants: each card goes by its own restaurant's rule.
+- **On Investment groups**, **Users** shows a group's people in place (reset password, suspend, restore), and
+  **Edit** holds the group's settings and permissions. There is no separate "Set up".
+- **How a group is billed** is the group's own choice (Billing, "How you are billed", `PUT /api/billing/split`):
+  one bill for everything, a bill for each restaurant, or bills for sets of restaurants the group names
+  (`Restaurant.BillSet`; the ones in no set share "Other restaurants"). It applies from the next bills made. A
+  group's bills for a month are created together, unique per group, month and unit (`MailInvoice.Unit`), so a
+  month is never billed twice or in part; credit is used on them in bill-number order.
 
 ## Interaction log and System Administrator reports
 

@@ -106,7 +106,10 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
   const signsOwn = user?.role === 'Manager' || user?.role === 'Owner' || user?.role === 'GroupAdmin'
   const signerRestaurant = restaurants.find((r) => r.id === v.restaurantId)
   const [, signerSaved] = useState(0)
-  const restaurantSigner = (signerRestaurant && savedSigners.has(signerRestaurant.id) ? savedSigners.get(signerRestaurant.id) : signerRestaurant?.signatureName) ?? ''
+  // One name can be set for all restaurants in the group; otherwise it is the restaurant's own.
+  const signerForAll = signerRestaurant?.applies?.signatureSetBy === 'group'
+  const restaurantSigner = (signerForAll ? signerRestaurant?.applies?.signature
+    : signerRestaurant && savedSigners.has(signerRestaurant.id) ? savedSigners.get(signerRestaurant.id) : signerRestaurant?.signatureName) ?? ''
   const defaultSigner = signsOwn ? user?.displayName ?? '' : restaurantSigner
   const signerTyped = useRef(false)
   const [changingSigner, setChangingSigner] = useState<string | null>(null)
@@ -309,7 +312,9 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
               {restaurantSigner
                 ? <>Cards entered with the team login at {signerRestaurant.name} are signed “{restaurantSigner}”. </>
                 : <>Cards entered with the team login at {signerRestaurant.name} have no name to sign with yet. </>}
-              <button type="button" className="btn btn-sm" onClick={() => setChangingSigner(restaurantSigner)}>{restaurantSigner ? 'Change the team login’s signature' : 'Choose the team login’s signature'}</button>
+              {signerForAll
+                ? <>That name is set for all restaurants in your investment group.</>
+                : <button type="button" className="btn btn-sm" onClick={() => setChangingSigner(restaurantSigner)}>{restaurantSigner ? 'Change the team login’s signature' : 'Choose the team login’s signature'}</button>}
             </p>
           )}
           {changingSigner !== null && signerRestaurant && (

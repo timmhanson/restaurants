@@ -126,16 +126,27 @@ export default function MailCardsPage() {
 
   const beingMailed = (c: CommentSummary) => (outcomes[c.id]?.ok ? true : Boolean(c.mailStatus && c.mailStatus !== 'cancelled'))
   const statusOf = (c: CommentSummary): MailStatus | null => statuses[c.id]?.status ?? outcomes[c.id]?.status ?? c.mailStatus ?? null
-  const blocked = (c: CommentSummary) => (!hasMailingAddress(c) ? 'no full mailing address' : c.responded && !beingMailed(c) ? 'already marked as sent' : null)
+  // Whether cards can be mailed, and whether for real or as tests, is set restaurant by restaurant.
+  const rules = (c: CommentSummary) => config.mailRestaurants.find((r) => r.restaurantId === c.restaurantId)
+  const blocked = (c: CommentSummary) =>
+    !hasMailingAddress(c) ? 'no full mailing address'
+      : c.responded && !beingMailed(c) ? 'already marked as sent'
+        : rules(c) && !rules(c)!.on ? 'having cards mailed is not switched on for this restaurant'
+          : rules(c) && !rules(c)!.ready ? 'mailing is not set up for this restaurant yet'
+            : null
   const toSend = cards.filter((c) => !beingMailed(c) && !blocked(c) && !outcomes[c.id])
   const sent = cards.filter(beingMailed)
   const failed = Object.values(outcomes).filter((o) => !o.ok)
   const tooMany = toSend.length > config.mailMaxCards
-  const total = toSend.length * config.mailCentsPerCard
-  const overLimit = !config.mailTest && toSend.length > 0 && config.mailUsedCents + total > config.mailLimitCents
+  // Test orders are a proof only: not printed, mailed or billed. Only the cards going out for real cost anything.
+  const liveToSend = toSend.filter((c) => rules(c)?.live ?? !config.mailTest)
+  const testOnly = toSend.length > 0 ? liveToSend.length === 0 : config.mailTest
+  const mixed = liveToSend.length > 0 && liveToSend.length < toSend.length
+  const total = liveToSend.length * config.mailCentsPerCard
+  const overLimit = !testOnly && toSend.length > 0 && config.mailUsedCents + total > config.mailLimitCents
   // With no payment method saved, the group mails on its credit, and only as far as the credit goes.
   const creditCovers = config.mailCentsPerCard > 0 ? Math.floor(config.mailCreditCents / config.mailCentsPerCard) : 0
-  const overCredit = !config.mailTest && config.mailOnCredit && toSend.length > 0 && total > config.mailCreditCents
+  const overCredit = !testOnly && config.mailOnCredit && toSend.length > 0 && total > config.mailCreditCents
 
   const send = async () => {
     setBusy('send')
@@ -147,7 +158,7 @@ export default function MailCardsPage() {
       const ok = res.filter((r) => r.ok && !r.alreadyMailed).length
       if (ok > 0)
         setNotice(
-          config.mailTest
+          testOnly
             ? `${ok} test order${ok === 1 ? '' : 's'} sent. Nothing is printed, mailed or charged in test mode. The cards are marked as sent.`
             : `${ok} card${ok === 1 ? ' is' : 's are'} on the way to be printed and mailed, and marked as sent.${settings.followUpDays > 0 ? ` You will be reminded to follow up after ${settings.followUpDays} day${settings.followUpDays === 1 ? '' : 's'}.` : ''}`,
         )
@@ -225,7 +236,7 @@ export default function MailCardsPage() {
         <Alert kind="warn">Having cards printed and mailed for you is not switched on for this investment group. Print them from <Link to="/print">Print cards</Link> instead.</Alert>
       ) : (
         <>
-          {config.mailTest && (
+          {testOnly && (
             <Alert kind="warn">Mailing is in test mode: cards are not printed, mailed or charged. A proof of each one is made.</Alert>
           )}
           <div className="panel">
@@ -263,9 +274,15 @@ export default function MailCardsPage() {
               <Alert kind="warn">A payment method must be saved before cards can be mailed for this investment group. An Investment Group Administrator can add it on <Link to="/billing">Billing</Link>. Until then, print the cards from Print cards.</Alert>
             )}
             {!config.canMail && !config.mailNeedsPayMethod && toSend.length > 0 && <Alert kind="info">Having cards mailed spends money, so it needs the “buy postage” permission. Ask an owner or administrator.</Alert>}
-            {config.mailOnCredit && !config.mailTest && toSend.length > 0 && !overCredit && (
+            {config.mailOnCredit && !testOnly && toSend.length > 0 && !overCredit && (
               <Alert kind="info">
                 These are paid from your investment group’s credit: {money(config.mailCreditCents)} is left, and {money(total)} of it will be used.
+              </Alert>
+            )}
+            {mixed && (
+              <Alert kind="info">
+                {toSend.length - liveToSend.length} of these cards {toSend.length - liveToSend.length === 1 ? 'is from a restaurant' : 'are from restaurants'} set to test mailing: a proof is
+                made and nothing is printed, mailed or billed. The other {liveToSend.length} {liveToSend.length === 1 ? 'is' : 'are'} really mailed, {money(total)} in all.
               </Alert>
             )}
             {overCredit && (
@@ -343,11 +360,11 @@ export default function MailCardsPage() {
         <Confirm
           title={`Mail ${toSend.length} card${toSend.length === 1 ? '' : 's'}?`}
           message={
-            config.mailTest
+            testOnly
               ? `Mailing is in test mode: nothing is printed, mailed or charged. Each card is marked as sent.`
               : `${toSend.length === 1 ? 'This card is' : `These ${toSend.length} cards are`} printed and mailed for you, and your investment group is billed ${money(config.mailCentsPerCard)} a card: ${money(total)} in all, on next month’s bill (${money(config.mailUsedCents)} of this month’s ${money(config.mailLimitCents)} limit is already used). Each card is marked as sent. A card can be cancelled here until it starts printing, usually the next business day; a cancelled card is not billed.`
           }
-          confirmLabel={config.mailTest ? 'Send test orders' : `Mail for ${money(total)}`}
+          confirmLabel={testOnly ? 'Send test orders' : `Mail for ${money(total)}`}
           busy={busy === 'send'}
           onConfirm={() => void send()}
           onCancel={() => setConfirm(false)}

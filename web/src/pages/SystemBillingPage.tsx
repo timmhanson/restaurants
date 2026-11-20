@@ -175,7 +175,8 @@ export default function SystemBillingPage() {
       <div className="panel">
         <h2>Investment groups</h2>
         <p className="muted">
-          Having cards printed and mailed is off for a group until you switch it on here. Until then the group sees the choice on Print cards greyed out, with
+          Having cards printed and mailed is off for a group until you switch it on here. To leave it to each restaurant, or to choose real or test mailing for a group,
+          use Edit on <Link to="/groups">Investment groups</Link>. Until then the group sees the choice on Print cards greyed out, with
           a note that it has to be switched on first. Each group pays the cost of a card ({money(data.settings.costCents)}) plus your fee. Give a group its
           own fee or its own monthly limit here; otherwise it uses the ones under Settings below.
         </p>
@@ -189,11 +190,14 @@ export default function SystemBillingPage() {
                 <tr key={g.groupId}>
                   <td><strong>{g.group}</strong>{!g.active && <> <Badge kind="neutral">inactive</Badge></>}</td>
                   <td>
-                    {g.mailEnabled ? <Badge kind="ok">switched on</Badge> : <Badge kind="neutral">not switched on</Badge>}{' '}
-                    <button type="button" className="btn btn-sm" disabled={busy} aria-label={`${g.mailEnabled ? 'Switch off' : 'Switch on'} mailing for ${g.group}`}
-                      onClick={() => void act(() => api.put(`/system/billing/groups/${g.groupId}`, { feeCents: g.feeCents ?? null, limitCents: g.limitCents ?? null, mailEnabled: !g.mailEnabled }))}>
-                      {g.mailEnabled ? 'Switch off' : 'Switch on'}
-                    </button>
+                    {g.mail === 'each' ? <Badge kind="accent">each restaurant decides</Badge> : g.mail === 'on' ? <Badge kind="ok">on for all restaurants</Badge> : <Badge kind="neutral">off for all restaurants</Badge>}{' '}
+                    <Badge kind={g.mailMode === 'live' ? 'ok' : g.mailMode === 'test' ? 'warn' : 'accent'}>{g.mailMode === 'live' ? 'real' : g.mailMode === 'test' ? 'test' : 'real or test by restaurant'}</Badge>{' '}
+                    {g.mail !== 'each' && (
+                      <button type="button" className="btn btn-sm" disabled={busy} aria-label={`${g.mail === 'on' ? 'Switch off' : 'Switch on'} mailing for all restaurants of ${g.group}`}
+                        onClick={() => void act(() => api.put(`/system/billing/groups/${g.groupId}`, { feeCents: g.feeCents ?? null, limitCents: g.limitCents ?? null, mailEnabled: g.mail !== 'on' }))}>
+                        {g.mail === 'on' ? 'Switch off' : 'Switch on'}
+                      </button>
+                    )}
                   </td>
                   <td>
                     {g.payRequired ? <Badge kind="neutral">required</Badge> : <Badge kind="warn">not required</Badge>}{' '}
@@ -400,7 +404,7 @@ function InvoiceRows({ invoice: i, open, onToggle, busy, onPaid, onVoid, onReope
     <>
       <tr>
         <td><button type="button" className="btn-link" onClick={onToggle} aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} details of bill ${i.number}`}>{i.number}</button></td>
-        <td>{i.group}</td>
+        <td>{i.group}{i.for && <div className="muted small">{i.for}</div>}</td>
         <td>{i.monthName}</td>
         <td>{i.cards}</td>
         <td>{money(i.costCents)}</td>
@@ -591,6 +595,14 @@ function SettingsPanel({ settings, payReady, busy, onSave }: { settings: Billing
           <input type="checkbox" checked={s.printBills} onChange={(e) => set('printBills', e.target.checked)} />
           <span>Also post a printed statement <span className="muted">(through the mail house, about $1 a letter charged to you; needs your address below and the group’s billing address)</span></span>
         </label>
+        <Field label="Real or test mailing, for the whole site"
+          hint="Real: cards are printed, mailed and billed (the live key). Test: a proof only, nothing printed, mailed or billed (the test key). What you set here for every group takes precedence over a group’s or a restaurant’s own choice.">
+          <select value={s.mailMode} onChange={(e) => set('mailMode', e.target.value as BillingSettings['mailMode'])}>
+            <option value="each">Each investment group decides</option>
+            <option value="live">Real mailing for every group</option>
+            <option value="test">Test mailing for every group</option>
+          </select>
+        </Field>
         <label className="check">
           <input type="checkbox" checked={s.chargeHandPrintFee} onChange={(e) => set('chargeHandPrintFee', e.target.checked)} />
           <span>

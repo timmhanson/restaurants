@@ -318,6 +318,10 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<bool>("AutoPay")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("BillSplit")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BillingEmail")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
@@ -332,7 +336,16 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int?>("FeeCents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("GroupDecides")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("MailEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MailMode")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("MailPerRestaurant")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("MonthlyLimitCents")
@@ -365,10 +378,17 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<bool?>("RequirePayMethod")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("SignatureForAll")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("State")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Street")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UsualWay")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Zip")
@@ -823,11 +843,20 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("TotalCents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UnitName")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("GroupId", "Month")
+                    b.HasIndex("GroupId", "Month", "Unit")
                         .IsUnique();
 
                     b.ToTable("MailInvoices");
@@ -845,9 +874,18 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("ManagerNo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ManagerYes")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("OwnerNo")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PostageKeyEncrypted")
                         .HasColumnType("TEXT");
@@ -864,6 +902,18 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<string>("PostageKeySetBy")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("SiteManagerNo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SiteManagerYes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SiteOwnerNo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SiteOwnerYes")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.ToTable("Groups");
@@ -874,6 +924,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("BillSet")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("City")
                         .HasColumnType("TEXT");
@@ -891,6 +944,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("MailByDefault")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MailLive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MailOn")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Name")

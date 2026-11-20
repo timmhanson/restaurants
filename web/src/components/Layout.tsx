@@ -49,8 +49,9 @@ export default function Layout() {
         { to: '/comments', label: 'Comments', show: has('ViewComments') },
         { to: '/print', label: 'Print cards', show: has('ViewComments') && has('MarkResponded') },
         { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics') },
-        { to: '/users', label: 'Users', show: isAdmin || has('ManageTeamLogin') },
-        { to: '/restaurants', label: 'Restaurants & staff', show: isAdmin },
+        { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin') },
+        { to: '/permissions', label: 'Permissions', show: isGroupWide },
+        { to: '/restaurants', label: 'Restaurants & Staff Assignments', show: isAdmin },
         { to: '/card-design', label: 'Card design', show: isAdmin },
         { to: '/billing', label: 'Billing', show: isAdmin },
         { to: '/settings', label: 'Settings', show: isGroupWide },
@@ -97,7 +98,7 @@ export default function Layout() {
         </div>
         <div className="user-menu">
           <span className="user-name">
-            {user.displayName} <small>({viewingAs ? 'System Administrator, viewing as Investment Group Administrator' : roleTitle(user.role)})</small>
+            {user.displayName} <small>({viewingAs ? 'System Administrator, viewing as Investment Group Administrator' : user.alsoOwner ? user.roleTitle : roleTitle(user.role)})</small>
           </span>
           <NavLink to="/password" className="btn btn-sm">
             Password

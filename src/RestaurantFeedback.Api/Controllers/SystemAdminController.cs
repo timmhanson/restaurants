@@ -380,41 +380,49 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         return await PostGridDto(ct);
     }
 
+    /// <param name="mode">"test" or "live": which of the two keys to check. Left out, the live key when there is one, else the test key.</param>
     [HttpPost("postgrid/mail/test")]
-    public async Task<ServiceTestResult> TestPostGridMail(CancellationToken ct)
+    public async Task<ServiceTestResult> TestPostGridMail(string? mode, CancellationToken ct)
     {
         var me = await users.GetAsync();
-        if (siteMailing.Account is not { } account) return new ServiceTestResult(false, "No PostGrid Print & Mail key has been entered.");
+        var account = mode switch { "test" => siteMailing.Test, "live" => siteMailing.Live, _ => siteMailing.Any };
+        if (account is null) return new ServiceTestResult(false, mode is "test" or "live" ? $"No PostGrid {mode} key has been entered." : "No PostGrid Print & Mail key has been entered.");
         var (ok, message) = await mailer.TestKeyAsync(account.ApiKey, ct);
         await audit.LogAsync(me, ok ? "PostGridMailTestPassed" : "PostGridMailTestFailed", details: new { message });
         return new ServiceTestResult(ok, message);
     }
 
+    /// <param name="mode">"test" or "live": which key to remove. Left out, both.</param>
     [HttpDelete("postgrid/mail")]
-    public async Task<ActionResult<PostGridSiteDto>> RemovePostGridMail(CancellationToken ct)
+    public async Task<ActionResult<PostGridSiteDto>> RemovePostGridMail(string? mode, CancellationToken ct)
     {
         var me = await users.GetAsync();
-        var before = siteMailing.Account;
-        await siteMailing.RemoveKeyAsync(ct);
-        if (before?.Source == "Saved in the site") await audit.LogAsync(me, "PostGridMailKeyRemoved", details: new { KeyEnding = before.ApiKey[^4..] });
+        bool? live = mode switch { "test" => false, "live" => true, _ => null };
+        var before = new[] { live != true ? siteMailing.Test : null, live != false ? siteMailing.Live : null };
+        await siteMailing.RemoveKeyAsync(live, ct);
+        foreach (var key in before)
+            if (key?.Source == "Saved in the site") await audit.LogAsync(me, "PostGridMailKeyRemoved", details: new { KeyEnding = key.ApiKey[^4..], TestKey = key.Test });
         return await PostGridDto(ct);
     }
 
     private async Task<PostGridSiteDto> PostGridDto(CancellationToken ct)
     {
         var a = postGridAccount.Current;
-        var m = siteMailing.Account;
-        var mail = m is null
-            ? new PostGridMailAccountDto(false, "None", null, false, null, null)
+        static PostGridMailAccountDto Key(MailAccount? m, bool test) => m is null
+            ? new PostGridMailAccountDto(false, "None", null, test, null, null)
             : new PostGridMailAccountDto(true, m.Source, m.ApiKey.Length >= 4 ? m.ApiKey[^4..] : null, m.Test, m.SavedAt, m.SavedBy);
+        var mail = Key(siteMailing.Any, false);
         var mailed = await ledger.Billed().CountAsync(ct);
         var month = MailLedger.MonthStart(DateTime.UtcNow);
         var thisMonth = await ledger.Billed().CountAsync(c => c.MailedAt >= month, ct);
         var tests = await db.Comments.CountAsync(c => c.MailId != null && c.MailTest && c.MailStatus != MailStatuses.Cancelled, ct);
         var real = addressVerifier is AddressCheckers;
         return a is null
-            ? new PostGridSiteDto(false, "None", null, false, null, null, real, mail, mailed, tests, thisMonth)
-            : new PostGridSiteDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.UseFirst, a.SavedAt, a.SavedBy, real, mail, mailed, tests, thisMonth);
+            ? new PostGridSiteDto(false, "None", null, false, null, null, real, mail, mailed, tests, thisMonth) { MailTestKey = Key(siteMailing.Test, true), MailLiveKey = Key(siteMailing.Live, false) }
+            : new PostGridSiteDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.UseFirst, a.SavedAt, a.SavedBy, real, mail, mailed, tests, thisMonth)
+            {
+                MailTestKey = Key(siteMailing.Test, true), MailLiveKey = Key(siteMailing.Live, false)
+            };
     }
 
     // ---- Stripe: the site's account that takes payment for mailing bills -----------------------------------------

@@ -61,6 +61,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         var me = await users.GetAsync();
         if (!Enum.TryParse<UserRole>(req.Role, true, out var role) || !Enum.IsDefined(role)) return BadRequest(new { message = "Unknown role." });
         if (!CanGiveRole(me, role, req.RestaurantIds, out var why)) return StatusCode(403, new { message = why });
+        if (me.IsOwner && !me.Has(ManagerPermission.ManageStaff)) return Denied(OwnersDoNotManageStaff);
         if (string.IsNullOrWhiteSpace(req.Password)) return BadRequest(new { message = "Password is required." });
         if (role != UserRole.SuperAdmin && me.GroupId is null) return BadRequest(new { message = "Select an investment group first." });
 
@@ -68,7 +69,8 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (await db.Users.AnyAsync(u => u.Username == username)) return Conflict(new { message = "That username is already taken." });
         var groupId = role == UserRole.SuperAdmin ? null : me.GroupId;
         // Administrators see every restaurant in the group, so they are never assigned to particular ones.
-        int[] rids = groupId is null || IsGroupWideRole(role) ? [] : await ValidRestaurantIds(groupId.Value, req.RestaurantIds);
+        // For an investment group administrator these are the restaurants they also own; they still see every restaurant.
+        int[] rids = groupId is null || role == UserRole.SuperAdmin ? [] : await ValidRestaurantIds(groupId.Value, req.RestaurantIds);
         if (me.IsOwner && rids.Any(r => !me.CanManageRestaurant(r)))
             return StatusCode(403, new { message = await NotOwnedMessage(rids.Where(r => !me.CanManageRestaurant(r))) });
 
@@ -79,7 +81,8 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
             DisplayName = req.DisplayName.Trim(),
             Email = req.Email?.Trim(),
             Role = role,
-            Permissions = role == UserRole.Manager ? ParsePermissions(req.Permissions) : ManagerPermission.None,
+            // Only what is set manager by manager is kept, and only from someone who may choose it.
+            Permissions = role == UserRole.Manager ? PermissionPolicy.Parse(req.Permissions) & await Settable(me, groupId) : ManagerPermission.None,
             IsActive = req.IsActive,
             MustChangePassword = MustChange(me, role, targetId: 0, req.RequirePasswordChange, req.Email),
             UserRestaurants = rids.Select(r => new UserRestaurant { RestaurantId = r }).ToList()
@@ -114,22 +117,9 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         var username = req.Username.Trim().ToLowerInvariant();
         if (username != user.Username && await db.Users.AnyAsync(u => u.Username == username))
             return Conflict(new { message = "That username is already taken." });
-        int[] requested = user.GroupId is null || IsGroupWideRole(role) ? [] : await ValidRestaurantIds(user.GroupId.Value, req.RestaurantIds);
         var existing = user.UserRestaurants.Select(x => x.RestaurantId).ToHashSet();
-        int[] rids;
-        if (me.IsOwner && user.Id != me.Id)
-        {
-            // Owners change assignments only at restaurants they own; assignments elsewhere are left alone.
-            var outside = requested.Where(r => !existing.Contains(r) && !me.CanManageRestaurant(r)).ToList();
-            if (outside.Count > 0) return StatusCode(403, new { message = await NotOwnedMessage(outside) });
-            rids = existing.Where(r => !me.CanManageRestaurant(r)).Union(requested.Where(me.CanManageRestaurant)).ToArray();
-        }
-        else if (me.IsOwner)
-        {
-            // An owner editing themselves keeps their restaurants; ownership changes go through the restaurant list.
-            rids = existing.ToArray();
-        }
-        else rids = requested;
+        var (rids, notMine) = await RestaurantsFor(me, user, role, req.RestaurantIds);
+        if (notMine is not null) return notMine;
 
         if (await LastGroupAdminBlock(user, stillAdmin: role == UserRole.GroupAdmin && req.IsActive) is { } adminBlock) return adminBlock;
         var stillOwns = role == UserRole.Owner && req.IsActive ? rids.ToHashSet() : [];
@@ -142,7 +132,15 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         user.DisplayName = req.DisplayName.Trim();
         user.Email = req.Email?.Trim();
         user.Role = role;
-        user.Permissions = role == UserRole.Manager ? ParsePermissions(req.Permissions) : ManagerPermission.None;
+        if (role == UserRole.Manager)
+        {
+            // What this person may choose is replaced; anything decided elsewhere (for all managers, or by someone
+            // with more say) is left as it was, so it is there again if the rule is later relaxed.
+            var settable = await Settable(me, user.GroupId);
+            var kept = user.Role == UserRole.Manager ? user.Permissions & ~settable : ManagerPermission.None;
+            user.Permissions = (kept | (PermissionPolicy.Parse(req.Permissions) & settable)) & PermissionPolicy.ForManagers;
+        }
+        else user.Permissions = ManagerPermission.None;
         user.IsActive = req.IsActive;
         user.UserRestaurants.Clear();
         foreach (var r in rids) user.UserRestaurants.Add(new UserRestaurant { UserId = user.Id, RestaurantId = r });
@@ -246,14 +244,57 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         return NoContent();
     }
 
-    [HttpGet("permissions")]
-    public ActionResult<object> PermissionCatalog() => new
+    /// <summary>
+    /// Maps a person to restaurants: exactly where they work (or, for an owner or an administrator, which they own).
+    /// The same rules as changing the account: owners map only at restaurants they own, and what a person has at
+    /// other owners' restaurants is left alone.
+    /// </summary>
+    [HttpPut("{id:int}/restaurants")]
+    public async Task<ActionResult<UserDto>> SetRestaurants(int id, UserRestaurantsRequest req)
     {
-        permissions = Enum.GetValues<ManagerPermission>()
-            .Where(v => v != ManagerPermission.None && v != ManagerPermission.All)
-            .Select(v => new { name = v.ToString(), value = (int)v, description = Describe(v) }),
-        roles = Enum.GetValues<UserRole>().OrderBy(RoleRank).Select(r => new { name = r.ToString(), title = RoleTitles.Of(r) })
-    };
+        var me = await users.GetAsync();
+        var user = await FindInScope(me, id);
+        if (user is null) return NotFound();
+        if (!me.IsAdmin) return Denied("Only owners and administrators can assign people to restaurants.");
+        if (user.Role == UserRole.SuperAdmin) return BadRequest(new { message = "System Administrators are not part of any group, so they are not assigned to restaurants." });
+        if (user.Id != me.Id && await CanActOn(me, user) is { } denied) return denied;
+        if (user.Id == me.Id && me.IsOwner) return BadRequest(new { message = "To own or stop owning a restaurant yourself, use the restaurant list." });
+        var existing = user.UserRestaurants.Select(x => x.RestaurantId).ToHashSet();
+        var (rids, notMine) = await RestaurantsFor(me, user, user.Role, req.RestaurantIds ?? []);
+        if (notMine is not null) return notMine;
+        var orphaned = await RestaurantsLosingLastOwner(user, existing.Except(rids));
+        if (orphaned.Count > 0)
+            return BadRequest(new { message = $"{string.Join(", ", orphaned)} would be left without an owner. Add another owner there first." });
+        if (existing.SetEquals(rids)) return UserDto.From(user);
+        var before = await RestaurantNames(existing);
+        user.UserRestaurants.Clear();
+        foreach (var r in rids) user.UserRestaurants.Add(new UserRestaurant { UserId = user.Id, RestaurantId = r });
+        await db.SaveChangesAsync();
+        await audit.LogAsync(me, "UserRestaurantsChanged", "User", user.Id,
+            new { user.DisplayName, Role = RoleTitles.Of(user.Role), before, after = await RestaurantNames(rids) }, groupId: user.GroupId);
+        return UserDto.From(user);
+    }
+
+    /// <summary>
+    /// Every permission as it stands in this person's group: whether owners hold it, and whether all managers do,
+    /// none do, or it is set manager by manager. CanSet: this person may choose the manager-by-manager ones.
+    /// </summary>
+    [HttpGet("permissions")]
+    public async Task<ActionResult<object>> PermissionCatalog()
+    {
+        var me = await users.GetAsync();
+        var group = me.GroupId is null ? null : await db.Groups.AsNoTracking().FirstOrDefaultAsync(g => g.Id == me.GroupId);
+        return new
+        {
+            permissions = PermissionPolicy.States(group).Select(s => new
+            {
+                name = s.Name, value = (int)Enum.Parse<ManagerPermission>(s.Name), description = s.Description, s.ForManagers, s.SpendsMoney,
+                s.OwnersCan, s.Managers, s.ManagersSetBy
+            }),
+            canSet = CanSetPermissions(me),
+            roles = Enum.GetValues<UserRole>().OrderBy(RoleRank).Select(r => new { name = r.ToString(), title = RoleTitles.Of(r) })
+        };
+    }
 
     // ---- helpers ------------------------------------------------------------------------
 
@@ -284,6 +325,7 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         if (target.Id == me.Id) return me.IsTeamMember ? Denied("Team logins cannot manage accounts.") : null;
         if (me.IsOwner)
         {
+            if (!me.Has(ManagerPermission.ManageStaff)) return Denied(OwnersDoNotManageStaff);
             if (target.Role is UserRole.GroupAdmin or UserRole.Owner)
                 return Denied($"Only an investment group administrator can change {target.DisplayName}'s account, because they are {RoleTitles.WithArticle(target.Role)}. You can still add or remove co-owners on a restaurant's Staff screen.");
             var shares = target.UserRestaurants.Count == 0 || target.UserRestaurants.Any(ur => me.CanManageRestaurant(ur.RestaurantId));
@@ -323,6 +365,37 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
 
     private ObjectResult Denied(string message) => StatusCode(403, new { message });
 
+    private const string OwnersDoNotManageStaff = "Owners in your investment group may not add or change staff accounts. Ask one of the group's administrators.";
+
+    /// <summary>Administrators always choose what each manager may do; an owner does when owners in the group were left that.</summary>
+    private static bool CanSetPermissions(CurrentUser me) => me.IsGroupWide || (me.IsOwner && me.Has(ManagerPermission.SetPermissions));
+
+    /// <summary>The permissions this person may tick or untick for a manager: the ones set manager by manager in the group, or none.</summary>
+    private async Task<ManagerPermission> Settable(CurrentUser me, int? groupId)
+    {
+        if (!CanSetPermissions(me)) return ManagerPermission.None;
+        var group = groupId is null ? null : await db.Groups.AsNoTracking().FirstOrDefaultAsync(g => g.Id == groupId);
+        return PermissionPolicy.PerManager(group);
+    }
+
+    /// <summary>
+    /// The restaurants a person ends up mapped to when <paramref name="me"/> asks for these. Owners change
+    /// assignments only at restaurants they own; what the person has elsewhere is left alone.
+    /// </summary>
+    private async Task<(int[] Ids, ObjectResult? Problem)> RestaurantsFor(CurrentUser me, AppUser user, UserRole role, int[] wanted)
+    {
+        int[] requested = user.GroupId is null || role == UserRole.SuperAdmin ? [] : await ValidRestaurantIds(user.GroupId.Value, wanted);
+        var existing = user.UserRestaurants.Select(x => x.RestaurantId).ToHashSet();
+        if (me.IsOwner && user.Id != me.Id)
+        {
+            var outside = requested.Where(r => !existing.Contains(r) && !me.CanManageRestaurant(r)).ToList();
+            if (outside.Count > 0) return ([], StatusCode(403, new { message = await NotOwnedMessage(outside) }));
+            return (existing.Where(r => !me.CanManageRestaurant(r)).Union(requested.Where(me.CanManageRestaurant)).ToArray(), null);
+        }
+        // An owner editing themselves keeps their restaurants; ownership changes go through the restaurant list.
+        return (me.IsOwner ? existing.ToArray() : requested, null);
+    }
+
     /// <summary>Stops the last active investment group administrator of a group from being demoted, suspended or removed.</summary>
     private async Task<ObjectResult?> LastGroupAdminBlock(AppUser user, bool stillAdmin)
     {
@@ -336,29 +409,6 @@ public class UsersController(AppDbContext db, IPasswordHasher<AppUser> hasher, A
         u.Username, u.DisplayName, u.Email, Role = RoleTitles.Of(u.Role), Permissions = UserDto.PermissionNamesOf(u.Permissions), u.IsActive,
         RestaurantIds = u.UserRestaurants.Select(x => x.RestaurantId).OrderBy(x => x).ToArray()
     };
-
-    private static string Describe(ManagerPermission p) => p switch
-    {
-        ManagerPermission.ViewComments => "View guest comments for their restaurants",
-        ManagerPermission.EditComments => "Edit guest comments after entry",
-        ManagerPermission.DeleteComments => "Remove guest comments",
-        ManagerPermission.MarkResponded => "Mark comments as responded / not responded",
-        ManagerPermission.ViewAnalytics => "See graphs, analytics and roll-up reports across their restaurants",
-        ManagerPermission.ExportComments => "Download comments as CSV",
-        ManagerPermission.ViewAudit => "View the audit log for their restaurants",
-        ManagerPermission.ManageTeamLogin => "Create and reset the shared team login",
-        ManagerPermission.BuyPostage => "Buy USPS postage when printing coupon cards (spends money)",
-        ManagerPermission.SetFollowUpDays => "Set how many days after a card is sent the guest is followed up with",
-        _ => p.ToString()
-    };
-
-    private static ManagerPermission ParsePermissions(IEnumerable<string> names)
-    {
-        var result = ManagerPermission.None;
-        foreach (var n in names)
-            if (Enum.TryParse<ManagerPermission>(n, true, out var p) && p != ManagerPermission.All) result |= p;
-        return result;
-    }
 
     private async Task<string> NotOwnedMessage(IEnumerable<int> restaurantIds) =>
         $"You can only assign people to restaurants you own. Not yours: {await RestaurantNames(restaurantIds)}.";

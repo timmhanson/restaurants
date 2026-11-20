@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { ROLE_TITLES } from '../auth/roles'
 import { useViewAs } from '../auth/useViewAs'
 import DataTable from '../components/DataTable'
-import { Alert, Badge, Confirm, Field, Modal, Spinner, fmtDateTime } from '../components/ui'
+import { Alert, Badge, Confirm, Field, Modal, RoleBadge, Spinner, fmtDateTime } from '../components/ui'
 import { ResetPasswordModal } from './UsersPage'
 
 const STATUSES = [
@@ -155,7 +155,7 @@ export default function PeoplePage() {
             },
             { key: 'username', label: 'Username', value: (p) => p.user.username, csvOnly: true },
             { key: 'email', label: 'Email', value: (p) => p.user.email ?? null, csvOnly: true },
-            { key: 'role', label: 'Role', value: (p) => p.user.roleTitle, render: (p) => (p.user.role === 'SuperAdmin' ? <Badge kind="accent">{p.user.roleTitle}</Badge> : p.user.roleTitle) },
+            { key: 'role', label: 'Role', value: (p) => p.user.roleTitle, render: (p) => <RoleBadge role={p.user.role} /> },
             { key: 'group', label: 'Investment group', value: (p) => p.user.groupName ?? null, render: (p) => p.user.groupName ?? <span className="muted">whole site</span> },
             {
               key: 'restaurants', label: 'Restaurants', value: (p) => p.restaurants.join('; ') || null,

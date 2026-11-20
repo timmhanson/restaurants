@@ -305,43 +305,65 @@ public record MailAccount(string ApiKey, string Source, DateTime? SavedAt, strin
 }
 
 /// <summary>
-/// The site's own PostGrid Print &amp; Mail key, entered by the System Administrator on Connected Systems. Encrypted
-/// with Data Protection before it is stored and never returned to a browser, logged or audited beyond its last four
-/// characters. PostGrid__MailApiKey is a fallback. Also holds the site's billing settings (see BillingSettings).
+/// The site's own PostGrid Print &amp; Mail keys, entered by the System Administrator on Connected Systems: a test
+/// key (nothing is printed, mailed or charged; PostGrid makes a proof) and a live key (cards are really printed,
+/// mailed and charged). Both can be held at once; which one a restaurant's cards use is a setting of its investment
+/// group or of the restaurant (see GroupPolicy). Each is encrypted with Data Protection before it is stored and never
+/// returned to a browser, logged or audited beyond its last four characters. PostGrid__MailApiKey is a fallback.
+/// Also holds the site's billing settings (see BillingSettings).
 /// </summary>
 public class SiteMailing(IServiceScopeFactory scopes, IDataProtectionProvider protection, PostGridOptions options, ILogger<SiteMailing> log)
 {
+    /// <summary>Where the single key was kept before test and live were kept apart. Still read, as whichever kind it is.</summary>
     private const string KeySetting = "postgrid.mail";
+    private const string TestKeySetting = "postgrid.mail.test";
+    private const string LiveKeySetting = "postgrid.mail.live";
     private const string BillingSetting = "mail.billing";
     private readonly IDataProtector _protector = protection.CreateProtector("RestaurantFeedback.SiteSecret.PostGridMail.v1");
-    private volatile MailAccount? _account;
+    private volatile MailAccount? _test;
+    private volatile MailAccount? _live;
     private volatile BillingSettings? _billing;
 
     private record SavedKey(string ApiKey);
 
-    public MailAccount? Account => _account;
+    public MailAccount? Test => _test;
+    public MailAccount? Live => _live;
+    /// <summary>The key for real mailing or for test mailing; null when that one has not been entered.</summary>
+    public MailAccount? For(bool live) => live ? _live : _test;
+    /// <summary>Either key, the live one first: for things the site sends itself, such as a printed bill.</summary>
+    public MailAccount? Any => _live ?? _test;
     public BillingSettings Billing => _billing ?? Defaults;
     private BillingSettings Defaults => new() { CostCents = options.EstimatedCentsPerCard, FeeCents = options.FeeCentsPerCard, MonthlyLimitCents = options.MonthlyLimitCents };
 
     public async Task LoadAsync(CancellationToken ct = default)
     {
-        MailAccount? account = null;
+        MailAccount? test = null, live = null;
         BillingSettings? billing = null;
         using (var scope = scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            try
+            async Task<MailAccount?> Read(string setting)
             {
-                var row = await db.SiteSettings.FindAsync([KeySetting], ct);
-                if (row is not null)
+                try
                 {
+                    var row = await db.SiteSettings.FindAsync([setting], ct);
+                    if (row is null) return null;
                     var saved = JsonSerializer.Deserialize<SavedKey>(_protector.Unprotect(row.Value))!;
-                    account = new MailAccount(saved.ApiKey, "Saved in the site", DateTime.SpecifyKind(row.UpdatedAt, DateTimeKind.Utc), row.UpdatedBy);
+                    return new MailAccount(saved.ApiKey, "Saved in the site", DateTime.SpecifyKind(row.UpdatedAt, DateTimeKind.Utc), row.UpdatedBy);
+                }
+                catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or JsonException)
+                {
+                    log.LogError(ex, "A saved PostGrid mailing key ({Setting}) can no longer be read and must be entered again", setting);
+                    return null;
                 }
             }
-            catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or JsonException)
+            test = await Read(TestKeySetting);
+            live = await Read(LiveKeySetting);
+            // The key saved before the two were kept apart counts as whichever kind it is, unless that kind has since been entered.
+            if (await Read(KeySetting) is { } old)
             {
-                log.LogError(ex, "The saved PostGrid mailing key can no longer be read and must be entered again");
+                if (old.Test) test ??= old;
+                else live ??= old;
             }
             try
             {
@@ -352,23 +374,68 @@ public class SiteMailing(IServiceScopeFactory scopes, IDataProtectionProvider pr
             {
                 log.LogError(ex, "The saved billing settings could not be read; the defaults are used");
             }
+            if (!string.IsNullOrWhiteSpace(options.MailApiKey))
+            {
+                var fallback = new MailAccount(options.MailApiKey.Trim(), "App settings", null, null);
+                if (fallback.Test) test ??= fallback;
+                else live ??= fallback;
+            }
+            // Groups from before test and live could be chosen keep mailing the way they did: for real when the site
+            // had a live key, as tests otherwise. A group set up since then starts in test until it is switched to live.
+            try
+            {
+                var unset = await db.GroupBilling.Where(g => g.MailMode == null).ToListAsync(ct);
+                if (unset.Count > 0)
+                {
+                    foreach (var g in unset) g.MailMode = live is not null ? MailChoices.Live : MailChoices.Test;
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                log.LogError(ex, "Could not record whether existing groups mail for real or as tests");
+            }
         }
-        if (account is null && !string.IsNullOrWhiteSpace(options.MailApiKey))
-            account = new MailAccount(options.MailApiKey.Trim(), "App settings", null, null);
-        _account = account;
+        _test = test;
+        _live = live;
         _billing = billing;
     }
 
+    /// <summary>Saves a key as the test key or the live key, whichever it is.</summary>
     public async Task SaveKeyAsync(string apiKey, string by, CancellationToken ct = default)
     {
-        await SiteSettingRows.SetAsync(scopes, KeySetting, _protector.Protect(JsonSerializer.Serialize(new SavedKey(apiKey.Trim()))), by, ct);
+        var key = apiKey.Trim();
+        var forTest = MailStatuses.IsKeyForTest(key);
+        await SiteSettingRows.SetAsync(scopes, forTest ? TestKeySetting : LiveKeySetting, _protector.Protect(JsonSerializer.Serialize(new SavedKey(key))), by, ct);
+        await DropOldKeyAsync(forTest, ct);
         await LoadAsync(ct);
     }
 
-    public async Task RemoveKeyAsync(CancellationToken ct = default)
+    /// <summary>Removes the test key, the live key, or both.</summary>
+    public async Task RemoveKeyAsync(bool? live = null, CancellationToken ct = default)
     {
-        await SiteSettingRows.RemoveAsync(scopes, KeySetting, ct);
+        if (live != true) { await SiteSettingRows.RemoveAsync(scopes, TestKeySetting, ct); await DropOldKeyAsync(true, ct); }
+        if (live != false) { await SiteSettingRows.RemoveAsync(scopes, LiveKeySetting, ct); await DropOldKeyAsync(false, ct); }
         await LoadAsync(ct);
+    }
+
+    /// <summary>The key from before the two were kept apart is dropped once its kind is saved again or removed, so it cannot come back.</summary>
+    private async Task DropOldKeyAsync(bool forTest, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var row = await db.SiteSettings.FindAsync([KeySetting], ct);
+        if (row is null) return;
+        try
+        {
+            if (MailStatuses.IsKeyForTest(JsonSerializer.Deserialize<SavedKey>(_protector.Unprotect(row.Value))!.ApiKey) != forTest) return;
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or JsonException)
+        {
+            // An unreadable old key is of no use to anyone: remove it.
+        }
+        db.SiteSettings.Remove(row);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task SaveBillingAsync(BillingSettings billing, string by, CancellationToken ct = default)
@@ -415,6 +482,8 @@ public record CardLook(string Front, string Layout, string? Headline, string? Me
     /// <summary>The items of a back or front laid out in the card designer.</summary>
     public List<CardElement>? BackLayout { get; init; }
     public List<CardElement>? FrontLayout { get; init; }
+    /// <summary>The name the group has set to sign team-login cards at all its restaurants, for a card that carries no name of its own.</summary>
+    public string? TeamSignature { get; init; }
     /// <summary>The address of every uploaded picture, by kind, for the pictures a layout places.</summary>
     public IReadOnlyDictionary<string, string> Pictures { get; init; } = new Dictionary<string, string>();
 
@@ -500,7 +569,7 @@ public static class PostGridCardDesign
     /// <param name="qr">The card's QR code as a picture address (see CardCodes), printed so staff can scan the card back to its record.</param>
     public static string Back(GuestComment c, Restaurant r, int validityMonths, string? accent, CardLook look, string? qr = null)
     {
-        if (look.BackStyle == CardBacks.Simple) return SimpleBack(c, r, validityMonths, accent, look.BackMessage, qr);
+        if (look.BackStyle == CardBacks.Simple) return SimpleBack(c, r, validityMonths, accent, look.BackMessage, qr, look.TeamSignature);
         var layout = look.BackStyle == CardBacks.Custom && look.BackLayout is { Count: > 0 } own ? own : CardElements.ClassicBack();
         return CardElements.Render(layout, CardMerge.For(c, r, validityMonths, look), SafeColor(look.Ink, CardBacks.DefaultInk), "#ffffff", look.Pictures, qr);
     }
@@ -509,7 +578,7 @@ public static class PostGridCardDesign
     private static string Months(int n) => $"{n} month{(n == 1 ? "" : "s")}";
 
     /// <summary>A plain coupon box: the restaurant's name, the offer, the dates and the small print.</summary>
-    private static string SimpleBack(GuestComment c, Restaurant r, int validityMonths, string? accent, string? backMessage, string? qr)
+    private static string SimpleBack(GuestComment c, Restaurant r, int validityMonths, string? accent, string? backMessage, string? qr, string? groupSignature = null)
     {
         var color = SafeColor(accent);
         var months = Months(validityMonths);
@@ -529,7 +598,7 @@ public static class PostGridCardDesign
         sb.Append($"<p class=\"enjoy\">Please enjoy <strong>{H(string.IsNullOrWhiteSpace(c.CouponOffer) ? "a treat on us" : c.CouponOffer)}</strong> the next time you visit us.</p>");
         sb.Append($"<div class=\"line\"><span>Date issued</span><span>{Day(c.DateIssued)}</span></div>");
         sb.Append($"<div class=\"line\"><span>Good until</span><span>{Day(c.ExpiresOn)}</span></div>");
-        sb.Append($"<div class=\"line\"><span>Authorized by</span><span>{H(CardSignature.For(c, r))}</span></div>");
+        sb.Append($"<div class=\"line\"><span>Authorized by</span><span>{H(CardSignature.For(c, r, groupSignature))}</span></div>");
         sb.Append($"<p class=\"legal\">This coupon is good for {months} from the date of issue. Please present this card prior to ordering. One order per card. ");
         sb.Append("Cannot be exchanged for gift certificates or cash in whole or part and has no cash value. Not valid with other promotion or discounts. Valid only with authorized signature.</p>");
         sb.Append("</div></body></html>");

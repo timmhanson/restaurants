@@ -43,6 +43,11 @@ public class BillingSettings
     /// for a stamp by hand. Charged once per card, at its first print. On unless the System Administrator switches it off.
     /// </summary>
     public bool ChargeHandPrintFee { get; set; } = true;
+    /// <summary>
+    /// Real or test mailing for the whole site: "live" or "test" for every investment group, or "each" (each group
+    /// decides, and a group may leave it to each restaurant).
+    /// </summary>
+    public string MailMode { get; set; } = MailChoices.Each;
     /// <summary>Who the bills are from.</summary>
     public string BusinessName { get; set; } = "Guest Feedback";
     public string? BusinessEmail { get; set; }
@@ -64,6 +69,7 @@ public class BillingSettings
         DueDays = Math.Clamp(DueDays, 0, 90);
         CardFeePercent = Math.Clamp(Math.Round(CardFeePercent, 2), 0m, 10m);
         BankFeePercent = Math.Clamp(Math.Round(BankFeePercent, 2), 0m, 10m);
+        MailMode = MailMode is MailChoices.Live or MailChoices.Test ? MailMode : MailChoices.Each;
         BusinessName = string.IsNullOrWhiteSpace(BusinessName) ? "Guest Feedback" : Short(BusinessName, 120)!;
         BusinessEmail = Short(BusinessEmail, 200);
         Street = Short(Street, 200); City = Short(City, 100); State = Short(State, 20); Zip = Short(Zip, 20);
@@ -86,6 +92,8 @@ public record GroupTerms(int CostCents, int FeeCents, int LimitCents, bool HasPa
     public bool Enabled { get; init; }
     /// <summary>What the group is billed for a card it prints itself for a stamp by hand: its fee per card, or 0 when that is not charged.</summary>
     public int PrintFeeCents { get; init; }
+    /// <summary>None of the restaurants that can have cards mailed does so for real: every order is a test.</summary>
+    public bool AllTest { get; init; }
     /// <summary>
     /// The group's credit that is free to spend on more cards: what it has, less the cards already mailed that are
     /// not on a bill yet (the credit will be used on those when their bill is made).
@@ -149,9 +157,14 @@ public class MailLedger(AppDbContext db, SiteMailing site)
     {
         var s = site.Billing;
         var b = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
+        // Whether cards can be mailed, and whether for real, can differ from restaurant to restaurant in the group.
+        var rules = (await db.Restaurants.AsNoTracking().Where(r => r.GroupId == groupId && r.IsActive).ToListAsync(ct)).Select(r => GroupPolicy.For(s, b, r)).ToList();
+        var mailSwitch = GroupPolicy.Switch(b);
         return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, b?.RequirePayMethod ?? s.RequirePaymentMethod)
         {
-            Enabled = b?.MailEnabled ?? false, CreditCents = await SpendableCreditAsync(groupId, ct),
+            Enabled = mailSwitch == MailChoices.On || (mailSwitch == MailChoices.Each && rules.Any(x => x.MailOn)),
+            AllTest = !rules.Any(x => x.MailOn && x.MailLive),
+            CreditCents = await SpendableCreditAsync(groupId, ct),
             PrintFeeCents = s.ChargeHandPrintFee ? b?.FeeCents ?? s.FeeCents : 0
         };
     }
@@ -217,7 +230,11 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
     public static string Dollars(int cents) => (cents / 100m).ToString("$#,##0.00", CultureInfo.InvariantCulture);
     public static List<InvoiceLine> Lines(MailInvoice i) => JsonSerializer.Deserialize<List<InvoiceLine>>(i.LinesJson, Json) ?? [];
 
-    /// <summary>Creates the bill for every group that had cards mailed in a finished month and has no bill for it yet.</summary>
+    /// <summary>
+    /// Creates the bills for every group that had cards mailed in a finished month and has no bill for it yet: one
+    /// for everything, one for each restaurant, or one for each set of restaurants, as the group has chosen. A
+    /// group's bills for a month are made together or not at all, so a month is never billed twice or in part.
+    /// </summary>
     public async Task<List<MailInvoice>> IssueAsync(string month, string by, CancellationToken ct = default)
     {
         if (MailLedger.Range(month) is not { } range) throw new InvalidOperationException("Choose a month.");
@@ -226,27 +243,45 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
             .Select(c => new { c.GroupId, c.RestaurantId, c.Restaurant, Cost = c.CostCents, Fee = c.FeeCents, c.Printed }).ToList();
         var have = await db.MailInvoices.Where(i => i.Month == month).Select(i => i.GroupId).ToListAsync(ct);
         var settings = site.Billing;
+        var splits = await db.GroupBilling.AsNoTracking().ToDictionaryAsync(b => b.GroupId, BillSplits.Of, ct);
+        var sets = await db.Restaurants.AsNoTracking().Where(r => r.BillSet != null).ToDictionaryAsync(r => r.Id, r => r.BillSet!.Trim(), ct);
         var created = new List<MailInvoice>();
         foreach (var g in rows.GroupBy(r => r.GroupId).Where(g => !have.Contains(g.Key)))
         {
-            var cost = g.Sum(r => r.Cost);
-            var fee = g.Sum(r => r.Fee);
-            if (cost + fee <= 0) continue;
-            // Cards mailed for the restaurant and cards it printed itself are separate lines, mailed first.
-            var lines = g.GroupBy(r => new { r.RestaurantId, r.Restaurant, r.Printed }).OrderBy(r => r.Key.Restaurant).ThenBy(r => r.Key.Printed)
-                .Select(r => new InvoiceLine(r.Key.RestaurantId, r.Key.Restaurant, r.Count(), r.Sum(x => x.Cost + x.Fee)) { Printed = r.Key.Printed }).ToList();
-            var invoice = new MailInvoice
+            // What each bill covers: everything, one restaurant, or a set of restaurants the group has put together.
+            var split = splits.GetValueOrDefault(g.Key, BillSplits.One);
+            (string Unit, string? Name) UnitOf(int restaurantId, string restaurant) =>
+                split == BillSplits.Restaurant ? ($"r{restaurantId}", restaurant)
+                : split == BillSplits.Sets ? sets.GetValueOrDefault(restaurantId) is { Length: > 0 } set ? ($"s:{set.ToLowerInvariant()}", set) : ("s:", BillSplits.OtherRestaurants)
+                : ("", null);
+            var units = g.GroupBy(r => UnitOf(r.RestaurantId, r.Restaurant).Unit).Where(u => u.Sum(r => r.Cost + r.Fee) > 0).OrderBy(u => u.Key).ToList();
+            // Sets with nothing in any set come to one bill for everything, so it is not called "Other restaurants".
+            var whole = units.Count == 1 && units[0].Key is "" or "s:";
+            var mine = new List<MailInvoice>();
+            foreach (var (u, n) in units.Select((u, n) => (u, n)))
             {
-                GroupId = g.Key, Month = month, Number = $"{month.Replace("-", "")}-{g.Key:000}", Cards = g.Count(), CostCents = cost, FeeCents = fee,
-                TotalCents = cost + fee, LinesJson = JsonSerializer.Serialize(lines, Json), IssuedAt = DateTime.UtcNow,
-                DueOn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(settings.DueDays)
-            };
-            db.MailInvoices.Add(invoice);
+                var cost = u.Sum(r => r.Cost);
+                var fee = u.Sum(r => r.Fee);
+                // Cards mailed for the restaurant and cards it printed itself are separate lines, mailed first.
+                var lines = u.GroupBy(r => new { r.RestaurantId, r.Restaurant, r.Printed }).OrderBy(r => r.Key.Restaurant).ThenBy(r => r.Key.Printed)
+                    .Select(r => new InvoiceLine(r.Key.RestaurantId, r.Key.Restaurant, r.Count(), r.Sum(x => x.Cost + x.Fee)) { Printed = r.Key.Printed }).ToList();
+                var first = u.First();
+                mine.Add(new MailInvoice
+                {
+                    GroupId = g.Key, Month = month, Unit = whole ? "" : u.Key, UnitName = whole ? null : UnitOf(first.RestaurantId, first.Restaurant).Name,
+                    Number = $"{month.Replace("-", "")}-{g.Key:000}" + (whole ? "" : $"-{n + 1:00}"), Cards = u.Count(), CostCents = cost, FeeCents = fee,
+                    TotalCents = cost + fee, LinesJson = JsonSerializer.Serialize(lines, Json), IssuedAt = DateTime.UtcNow,
+                    DueOn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(settings.DueDays)
+                });
+            }
+            if (mine.Count == 0) continue;
+            db.MailInvoices.AddRange(mine);
             await db.SaveChangesAsync(ct);
-            await audit.LogRawAsync(null, by, null, g.Key, "MailBillCreated", "MailInvoice", invoice.Id, new { invoice.Number, invoice.Month, invoice.Cards, invoice.TotalCents, invoice.DueOn });
-            // Any credit the group has comes off the new bill straight away, so the bill it is sent already shows it.
+            foreach (var invoice in mine)
+                await audit.LogRawAsync(null, by, null, g.Key, "MailBillCreated", "MailInvoice", invoice.Id, new { invoice.Number, invoice.Month, For = invoice.UnitName, invoice.Cards, invoice.TotalCents, invoice.DueOn });
+            // Any credit the group has comes off the new bills straight away, so the bills it is sent already show it.
             await ApplyCreditAsync(g.Key, by, ct);
-            created.Add(invoice);
+            created.AddRange(mine);
         }
         return created;
     }
@@ -266,7 +301,7 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
     {
         var left = await CreditBalanceAsync(groupId, ct);
         if (left <= 0) return 0;
-        var waiting = (await db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open).ToListAsync(ct)).OrderBy(i => i.Month).ToList();
+        var waiting = (await db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open).ToListAsync(ct)).OrderBy(i => i.Month).ThenBy(i => i.Number).ToList();
         var used = 0;
         foreach (var invoice in waiting)
         {
@@ -339,7 +374,7 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
             }
         }
 
-        if (settings.PrintBills && invoice.PrintedId is null && site.Account is { } account)
+        if (settings.PrintBills && invoice.PrintedId is null && site.Any is { } account)
         {
             if (billing is null || new[] { billing.Street, billing.City, billing.State, billing.Zip }.Any(string.IsNullOrWhiteSpace))
                 problems.Add("No printed copy was posted: the group has no billing address.");
@@ -513,7 +548,7 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
           .Append("th.n,td.n{text-align:right}h1{font-size:18pt;margin:0 0 4px}.muted{color:#555}.total td{font-weight:bold;border-top:2px solid #333;border-bottom:0}</style></head><body>");
         sb.Append($"<h1>{H(s.BusinessName)}</h1>");
         if (s.HasAddress) sb.Append($"<p class=\"muted\">{H(s.Street)}, {H(s.City)}, {H(s.State)} {H(s.Zip)}</p>");
-        sb.Append($"<p><strong>Bill {H(i.Number)}</strong> for {H(string.IsNullOrWhiteSpace(billing?.BillingName) ? group : billing!.BillingName)}<br>");
+        sb.Append($"<p><strong>Bill {H(i.Number)}</strong> for {H(string.IsNullOrWhiteSpace(billing?.BillingName) ? group : billing!.BillingName)}{(i.UnitName is null ? "" : $": {H(i.UnitName)}")}<br>");
         sb.Append($"Coupon cards for {H(MailLedger.MonthName(i.Month))}<br>");
         sb.Append($"Date {i.IssuedAt.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} &middot; Due {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}</p>");
         sb.Append("<table><tr><th>Restaurant</th><th class=\"n\">Cards</th><th class=\"n\">Amount</th></tr>");
@@ -541,7 +576,7 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
     private static string BillText(MailInvoice i, string group, BillingSettings s)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"{s.BusinessName}: bill {i.Number} for {group}");
+        sb.AppendLine($"{s.BusinessName}: bill {i.Number} for {group}{(i.UnitName is null ? "" : $": {i.UnitName}")}");
         sb.AppendLine($"Coupon cards for {MailLedger.MonthName(i.Month)}");
         foreach (var l in Lines(i)) sb.AppendLine($"  {l.Restaurant}, {(l.Printed ? "printed by you" : "mailed for you")}: {l.Cards} card{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}");
         if (i.CreditCents > 0) sb.AppendLine($"Total: {Dollars(i.TotalCents)}, less your credit of {Dollars(i.CreditCents)}");

@@ -57,12 +57,16 @@ public class CardElement
 public static class CardSignature
 {
     /// <summary>The name a new card gets when none is typed.</summary>
-    public static string? Default(UserRole role, string displayName, Restaurant? r) =>
+    /// <param name="teamSignature">The name set for the team login at the card's restaurant (see GroupPolicy.Signature).</param>
+    public static string? Default(UserRole role, string displayName, string? teamSignature) =>
         role is UserRole.Manager or UserRole.Owner or UserRole.GroupAdmin && !string.IsNullOrWhiteSpace(displayName) ? displayName.Trim()
-        : string.IsNullOrWhiteSpace(r?.SignatureName) ? null : r.SignatureName.Trim();
+        : string.IsNullOrWhiteSpace(teamSignature) ? null : teamSignature.Trim();
 
     /// <summary>The name printed on a mailed card's signature line.</summary>
-    public static string For(GuestComment c, Restaurant r) => !string.IsNullOrWhiteSpace(c.AuthorizedBy) ? c.AuthorizedBy.Trim() : (r.SignatureName ?? "").Trim();
+    /// <param name="groupSignature">The name the group has set for all its restaurants, which comes before the restaurant's own.</param>
+    public static string For(GuestComment c, Restaurant r, string? groupSignature = null) =>
+        !string.IsNullOrWhiteSpace(c.AuthorizedBy) ? c.AuthorizedBy.Trim()
+        : !string.IsNullOrWhiteSpace(groupSignature) ? groupSignature.Trim() : (r.SignatureName ?? "").Trim();
 }
 
 /// <summary>What is filled in on each card, by the name used in braces in the designer.</summary>
@@ -93,7 +97,7 @@ public record CardMerge(Dictionary<string, string> Values)
             ["dateIssued"] = Day(c.DateIssued),
             ["goodUntil"] = Day(c.ExpiresOn),
             ["months"] = $"{validityMonths} month{(validityMonths == 1 ? "" : "s")}",
-            ["authorizedBy"] = CardSignature.For(c, r),
+            ["authorizedBy"] = CardSignature.For(c, r, look.TeamSignature),
             ["guest"] = $"{c.GuestFirstName} {c.GuestLastName}".Trim(),
             ["legal"] = string.IsNullOrWhiteSpace(look.LegalText) ? CardBacks.DefaultLegal : look.LegalText.Trim(),
             ["note"] = (look.BackMessage ?? "").Trim()
