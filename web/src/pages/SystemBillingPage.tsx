@@ -592,6 +592,13 @@ function SettingsPanel({ settings, payReady, busy, onSave }: { settings: Billing
           <span>Also post a printed statement <span className="muted">(through the mail house, about $1 a letter charged to you; needs your address below and the group’s billing address)</span></span>
         </label>
         <label className="check">
+          <input type="checkbox" checked={s.chargeHandPrintFee} onChange={(e) => set('chargeHandPrintFee', e.target.checked)} />
+          <span>
+            Charge your fee for cards a group prints itself for a stamp by hand{' '}
+            <span className="muted">(your fee per card only, once per card at its first print; it goes on the group’s monthly bill)</span>
+          </span>
+        </label>
+        <label className="check">
           <input type="checkbox" checked={s.requirePaymentMethod} onChange={(e) => set('requirePaymentMethod', e.target.checked)} />
           <span>
             A group must save a payment method before any of its cards is sent to be mailed{' '}
@@ -668,7 +675,7 @@ function StatementPanel({ groups }: { groups: GroupBillingRow[] }) {
                 <thead><tr><th>Group</th><th>Restaurant</th><th>Cards</th><th>Mail house cost</th><th>Your fee</th><th>Billed to the group</th></tr></thead>
                 <tbody>
                   {data.rows.map((r) => (
-                    <tr key={r.restaurantId}><td>{r.group}</td><td>{r.restaurant}</td><td>{r.cards}</td><td>{money(r.costCents)}</td><td>{money(r.feeCents)}</td><td>{money(r.totalCents)}</td></tr>
+                    <tr key={r.restaurantId}><td>{r.group}</td><td>{r.restaurant}</td><td>{r.cards}{r.printedCards > 0 ? ` (${r.printedCards} printed by the group)` : ''}</td><td>{money(r.costCents)}</td><td>{money(r.feeCents)}</td><td>{money(r.totalCents)}</td></tr>
                   ))}
                   <tr><td colSpan={2}><strong>Total</strong></td><td><strong>{data.cards}</strong></td><td><strong>{money(data.costCents)}</strong></td><td><strong>{money(data.feeCents)}</strong></td><td><strong>{money(data.totalCents)}</strong></td></tr>
                 </tbody>

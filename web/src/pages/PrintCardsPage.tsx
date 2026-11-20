@@ -22,6 +22,7 @@ export default function PrintCardsPage() {
   const ids = useMemo(() => (params.get('ids') ?? '').split(',').map(Number).filter((n) => n > 0), [params])
   const [cards, setCards] = useState<CommentSummary[] | null>(null)
   const [config, setConfig] = useState<PrintConfig | null>(null)
+  const [confirmFee, setConfirmFee] = useState(false)
   // The Print cards tab passes the choices made there; both can still be changed here.
   const [postage, setPostage] = useState<'stamp' | 'bought'>(params.get('postage') === 'bought' ? 'bought' : 'stamp')
   const [outcomes, setOutcomes] = useState<Record<number, PostageOutcome>>({})
@@ -95,6 +96,10 @@ export default function PrintCardsPage() {
     printing.current = true
     window.print()
   }
+  // A card printed here for a stamp by hand is billed to the group once, the first time it is printed.
+  const feeEach = postage === 'stamp' ? config?.printFeeCents ?? 0 : 0
+  const feeCards = feeEach > 0 ? cards.filter((c) => c.printCount === 0 && c.printFeeCents == null) : []
+  const feeTotal = feeCards.length * feeEach
 
   const recordPrinted = async () => {
     setBusy(true)
@@ -144,7 +149,12 @@ export default function PrintCardsPage() {
                   <label className={postage === 'stamp' ? 'selected' : ''}>
                     <input type="radio" name="postage" checked={postage === 'stamp'} onChange={() => setPostage('stamp')} />
                     <span className="source-label">Stamps by hand</span>
-                    <span className="source-hint">The card prints with the guest's address and a box for the stamp. Nothing is charged.</span>
+                    <span className="source-hint">
+                      The card prints with the guest's address and a box for the stamp.{' '}
+                      {config && config.printFeeCents > 0
+                        ? `Your investment group is billed ${money(config.printFeeCents)} for each card, the first time it is printed.`
+                        : 'Nothing is charged.'}
+                    </span>
                   </label>
                   <label className={postage === 'bought' ? 'selected' : ''} style={config?.canBuyPostage ? undefined : { opacity: 0.6 }}>
                     <input type="radio" name="postage" checked={postage === 'bought'} disabled={!config?.canBuyPostage} onChange={() => setPostage('bought')} />
@@ -190,8 +200,8 @@ export default function PrintCardsPage() {
                     {busy ? 'Buying postage…' : `Buy postage for ${needPostage.length} card${needPostage.length === 1 ? '' : 's'}`}
                   </button>
                 ) : (
-                  <button type="button" className="btn btn-primary" onClick={print} disabled={busy}>
-                    Print {cards.length} card{cards.length === 1 ? '' : 's'}
+                  <button type="button" className="btn btn-primary" onClick={() => (feeTotal > 0 ? setConfirmFee(true) : print())} disabled={busy}>
+                    Print {cards.length} card{cards.length === 1 ? '' : 's'}{feeTotal > 0 ? ` (${money(feeTotal)})` : ''}
                   </button>
                 )}
                 <label className="check">
@@ -230,6 +240,15 @@ export default function PrintCardsPage() {
         })}
       </div>
 
+      {confirmFee && (
+        <Confirm
+          title={`Print ${cards.length} card${cards.length === 1 ? '' : 's'}?`}
+          message={`Your investment group is billed ${money(feeEach)} for each card printed here for a stamp by hand: ${money(feeTotal)} for ${feeCards.length === 1 ? 'this card' : `these ${feeCards.length} cards`}, on next month’s bill.${cards.length > feeCards.length ? ` ${cards.length - feeCards.length} of the cards chosen ${cards.length - feeCards.length === 1 ? 'was' : 'were'} printed before and ${cards.length - feeCards.length === 1 ? 'is' : 'are'} not charged again.` : ''} A card is charged once, however many times it is printed.`}
+          confirmLabel={`Print and bill ${money(feeTotal)}`}
+          onCancel={() => setConfirmFee(false)}
+          onConfirm={() => { setConfirmFee(false); print() }}
+        />
+      )}
       {confirmBuy && (
         <Confirm
           title={`Buy postage for ${needPostage.length} card${needPostage.length === 1 ? '' : 's'}?`}

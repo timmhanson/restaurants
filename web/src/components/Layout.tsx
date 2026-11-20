@@ -80,7 +80,7 @@ export default function Layout() {
             your name.
           </span>
           <button type="button" className="btn btn-sm" onClick={exit}>
-            Exit to System Administration
+            Back to System Administration
           </button>
         </div>
       )}

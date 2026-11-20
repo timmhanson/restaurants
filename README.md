@@ -244,6 +244,12 @@ changes never rewrite history. The System Administrator's **Billing** page (`Sys
 `/api/system/billing`) sets:
 
 - what a card costs the site and **the site's fee per card**, for every group and optionally **per group**;
+- **the fee for cards a group prints itself for a stamp by hand** (`BillingSettings.ChargeHandPrintFee`, on by
+  default): the group's fee per card, without the mail house's cost, charged once per card at its first print
+  (`GuestComment.PrintFeeCents`, audited as `CardPrintFeeCharged`). The print screens say what will be billed
+  and ask before printing; reprints, cards printed before the charge existed and cards with bought postage are
+  not charged. The fees go on the monthly bill as their own lines and count against the group's credit like
+  mailed cards (`MailLedger.ChargesAsync`), but not against its monthly limit, so a group can always print;
 - **whether mailing is switched on** for each group (off until the System Administrator switches it on;
   audited as `GroupMailingSwitchedOn` / `GroupMailingSwitchedOff`);
 - **whether a group needs a payment method before mailing**: the site's setting (required by default) applies

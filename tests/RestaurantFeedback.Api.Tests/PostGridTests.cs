@@ -735,6 +735,7 @@ public class PostGridTests(ApiFactory factory)
         {
             foreach (var i in db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open)) i.Status = InvoiceStatuses.Void;
             db.GroupCredits.RemoveRange(db.GroupCredits.Where(c => c.GroupId == groupId));
+            foreach (var c in db.Comments.Where(c => c.Restaurant.GroupId == groupId && c.PrintFeeCents != null)) { c.PrintFeeCents = null; c.PrintFeeAt = null; }
             return await db.SaveChangesAsync();
         });
         var now = DateTime.UtcNow;
@@ -862,6 +863,76 @@ public class PostGridTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Cards_a_restaurant_prints_itself_for_a_stamp_by_hand_are_charged_the_sites_fee_once()
+    {
+        var (owner, _, site, rid, groupId) = await SetUpAsync();
+        await SaveSettings(site, s => { s.CostCents = 90; s.FeeCents = 10; s.ChargeHandPrintFee = true; s.EmailBills = false; s.PrintBills = false; });
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, 1_000_000))).StatusCode);
+        var now = DateTime.UtcNow;
+        var month = MailLedger.MonthKey(MailLedger.MonthStart(now).AddMonths(-8));
+        var mine = new List<int>();
+        async Task<PrintConfig> Config() => (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!;
+        async Task<CommentSummary> New(string name) { var c = await Create(owner, Card(rid, name)); mine.Add(c.Id); return c; }
+        async Task<List<CommentSummary>> Print(string postage, params int[] ids) =>
+            (await (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest(ids, true, postage))).Content.ReadFromJsonAsync<List<CommentSummary>>())!;
+        try
+        {
+            // The print screens are told the fee before anything is printed: the site's fee per card, not the mail house's cost.
+            Assert.Equal(10, (await Config()).PrintFeeCents);
+            Assert.Equal(10, (await owner.GetFromJsonAsync<GroupBillingDto>("/api/billing"))!.PrintFeeCents);
+
+            // Two cards printed for a stamp by hand: each is charged the fee, once.
+            var a = await New("Hand A");
+            var b = await New("Hand B");
+            Assert.Null(a.PrintFeeCents);
+            Assert.All(await Print("stamp", a.Id, b.Id), c => Assert.Equal(10, c.PrintFeeCents));
+            // Printing them again (a jam, a smudge) charges nothing more.
+            Assert.All(await Print("stamp", a.Id, b.Id), c => Assert.Equal((10, 2), (c.PrintFeeCents, c.PrintCount)));
+            Assert.Equal(20, await Db(db => Task.FromResult(db.Comments.Where(c => mine.Contains(c.Id)).Sum(c => c.PrintFeeCents ?? 0))));
+            var audited = await Db(db => Task.FromResult(db.AuditLogs.Where(x => x.Action == "CardPrintFeeCharged" && x.RestaurantId == rid).OrderByDescending(x => x.Id).First()));
+            Assert.Contains("\"totalCents\":20", audited.Details);
+
+            // A group with its own fee pays that; with the charge switched off, nothing is charged.
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(25, 1_000_000))).StatusCode);
+            Assert.Equal(25, (await Config()).PrintFeeCents);
+            var c3 = await New("Hand C");
+            Assert.Equal(25, (await Print("stamp", c3.Id)).Single().PrintFeeCents);
+            await SaveSettings(site, s => s.ChargeHandPrintFee = false);
+            Assert.Equal(0, (await Config()).PrintFeeCents);
+            var d = await New("Hand D");
+            Assert.Null((await Print("stamp", d.Id)).Single().PrintFeeCents);
+            // Switching it back on does not go back and charge a card that was already printed.
+            await SaveSettings(site, s => s.ChargeHandPrintFee = true);
+            Assert.Null((await Print("stamp", d.Id)).Single().PrintFeeCents);
+
+            // The fees go on the month's bill as their own lines: no mail house cost, only the fee.
+            await Db(async db =>
+            {
+                foreach (var c in db.Comments.Where(c => mine.Contains(c.Id) && c.PrintFeeCents != null)) c.PrintFeeAt = MailLedger.MonthStart(now).AddMonths(-8).AddDays(3);
+                return await db.SaveChangesAsync();
+            });
+            var statement = (await site.GetFromJsonAsync<SiteMailStatement>($"/api/system/billing/statement?month={month}&groupId={groupId}"))!;
+            Assert.Equal((3, 3, 0, 45), (statement.Rows.Single().Cards, statement.Rows.Single().PrintedCards, statement.CostCents, statement.FeeCents));
+            Assert.Equal(HttpStatusCode.OK, (await site.PostAsJsonAsync("/api/system/billing/issue", new IssueBillsRequest(month))).StatusCode);
+            var bill = (await Billing(site)).Invoices.Single(i => i.GroupId == groupId && i.Month == month);
+            Assert.Equal((3, 0, 45, 45), (bill.Cards, bill.CostCents, bill.FeeCents, bill.TotalCents));
+            Assert.All(bill.Lines, l => Assert.True(l.Printed));
+            Assert.Equal(45, bill.Lines.Sum(l => l.Cents));
+        }
+        finally
+        {
+            await Db(async db =>
+            {
+                db.MailInvoices.RemoveRange(db.MailInvoices.Where(i => i.GroupId == groupId && i.Month == month));
+                db.Comments.RemoveRange(db.Comments.Where(c => mine.Contains(c.Id)));
+                return await db.SaveChangesAsync();
+            });
+            await SaveSettings(site, s => s.ChargeHandPrintFee = true);
+            await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, null));
+        }
+    }
+
+    [Fact]
     public async Task A_group_with_credit_but_no_payment_method_can_mail_as_far_as_its_credit_covers()
     {
         var (owner, _, site, rid, groupId) = await SetUpAsync(LiveKey);
@@ -875,6 +946,7 @@ public class PostGridTests(ApiFactory factory)
             b.PayMethodId = null;
             foreach (var i in db.MailInvoices.Where(i => i.GroupId == groupId && i.Status == InvoiceStatuses.Open)) i.Status = InvoiceStatuses.Void;
             db.GroupCredits.RemoveRange(db.GroupCredits.Where(c => c.GroupId == groupId));
+            foreach (var c in db.Comments.Where(c => c.Restaurant.GroupId == groupId && c.PrintFeeCents != null)) { c.PrintFeeCents = null; c.PrintFeeAt = null; }
             return await db.SaveChangesAsync();
         });
         // Cards mailed by earlier tests this month that are not on a bill yet would count against the credit; they are moved out of the way.

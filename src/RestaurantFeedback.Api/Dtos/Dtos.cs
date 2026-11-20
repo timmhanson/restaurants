@@ -167,6 +167,8 @@ public record CommentSummary(
     public string? PrintedByName { get; init; }
     public int PrintCount { get; init; }
     public int? PostageCents { get; init; }
+    /// <summary>The fee the group was charged because this card was printed in the restaurant for a stamp by hand; null when none was.</summary>
+    public int? PrintFeeCents { get; init; }
     public string? PostageLabelUrl { get; init; }
     public string? PostageTrackingCode { get; init; }
     public bool PostageTest { get; init; }
@@ -199,7 +201,7 @@ public record CommentSummary(
     {
         Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
         PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest,
-        CardId = c.PublicId, MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
+        PrintFeeCents = c.PrintFeeCents, CardId = c.PublicId, MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
         RedeemedByName = c.RedeemedByName, FollowedUpOn = c.FollowedUpOn, FollowedUpByName = c.FollowedUpByName,
         ReplyMethod = c.ReplyMethod, RepliedOn = c.RepliedOn, LastActivityAt = c.LastActivityAt
     };
@@ -382,6 +384,11 @@ public record PrintConfig(bool PostageAvailable, string PostageProvider, bool Ca
     public bool MailOnCredit { get; init; }
     /// <summary>The group's credit that is free to spend on more cards, in cents.</summary>
     public int MailCreditCents { get; init; }
+    /// <summary>
+    /// What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is).
+    /// Charged once per card, at its first print.
+    /// </summary>
+    public int PrintFeeCents { get; init; }
     /// <summary>MailAvailable, and this person may spend money (the BuyPostage permission).</summary>
     public bool CanMail { get; init; }
     /// <summary>Mailing is on, but the group must first save a payment method on Billing.</summary>
@@ -462,6 +469,8 @@ public record GroupBillingDto(bool CanManage, bool MailAvailable, bool Test, int
     /// <summary>The group's unused credit, which comes off its next bills by itself.</summary>
     public int CreditCents { get; init; }
     public List<GroupCreditLine> Credits { get; init; } = [];
+    /// <summary>What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is).</summary>
+    public int PrintFeeCents { get; init; }
 }
 /// <param name="ConfirmCents">The amount the person was shown and agreed to; the payment is refused if it no longer matches.</param>
 public record PayInvoiceRequest(int ConfirmCents);
@@ -571,5 +580,9 @@ public record PostGridSiteDto(bool Configured, string Source, string? KeyEnding,
     PostGridMailAccountDto Mail, int CardsMailed, int TestCardsMailed, int CardsThisMonth);
 
 /// <param name="Month">yyyy-MM.</param>
-public record SiteMailStatementRow(int GroupId, string Group, int RestaurantId, string Restaurant, int Cards, int CostCents, int FeeCents, int TotalCents);
+public record SiteMailStatementRow(int GroupId, string Group, int RestaurantId, string Restaurant, int Cards, int CostCents, int FeeCents, int TotalCents)
+{
+    /// <summary>How many of the cards the restaurant printed itself (the site's fee only, no cost to the site).</summary>
+    public int PrintedCards { get; init; }
+}
 public record SiteMailStatement(string Month, List<string> Months, List<SiteMailStatementRow> Rows, int Cards, int CostCents, int FeeCents, int TotalCents);

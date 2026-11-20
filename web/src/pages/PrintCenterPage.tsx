@@ -201,7 +201,12 @@ export default function PrintCenterPage() {
             <label className={postage === 'stamp' ? 'selected' : ''}>
               <input type="radio" name="postage" checked={postage === 'stamp'} onChange={() => pick('stamp')} />
               <span className="source-label">Stamps by hand</span>
-              <span className="source-hint">Cards print with the guest's address and a box for the stamp. Nothing is charged.</span>
+              <span className="source-hint">
+                Cards print with the guest's address and a box for the stamp.{' '}
+                {config && config.printFeeCents > 0
+                  ? `Your investment group is billed $${(config.printFeeCents / 100).toFixed(2)} for each card, the first time it is printed.`
+                  : 'Nothing is charged.'}
+              </span>
             </label>
             <label className={postage === 'bought' ? 'selected' : ''} style={config?.canBuyPostage ? undefined : { opacity: 0.6 }}>
               <input type="radio" name="postage" checked={postage === 'bought'} disabled={!config?.canBuyPostage} onChange={() => pick('bought')} />

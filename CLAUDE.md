@@ -32,6 +32,10 @@ See README.md for the architecture, roles and deployment.
   entries, exports and audit rows a group can read say "mailed for you" or "the mailing service"
   (`MailStatuses.ForClients`); the names appear only in the System Administrator's area. Groups also see one
   price per card, never the split between the mail house's cost and the site's fee.
+- **Cards a group prints itself for a stamp by hand are charged the site's fee** (once per card, at its first
+  print; the System Administrator can switch this off). Anyone who can print can incur it, so it has no separate
+  permission; it still needs the amount shown and confirmed before printing, and an audit row. To the group it is
+  "what a card you print yourself costs", never "the site's fee".
 - **Credit given to a group is a ledger, not a number.** A credit (`GroupCredit`) needs a reason and details, a
   confirmation naming the amount, a key so it cannot be recorded twice, and an audit row. Lines are never edited
   or removed: a mistake is put right with a new line (take back, or cancel the bill to return it). Only System

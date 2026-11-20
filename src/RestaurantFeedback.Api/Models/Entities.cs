@@ -169,6 +169,12 @@ public class GuestComment
     /// <summary>Coupon is good for 3 months from date of issue.</summary>
     public DateOnly ExpiresOn { get; set; }
     public string? AuthorizedBy { get; set; }
+    /// <summary>
+    /// The site's fee charged to the group because the restaurant printed this card itself for a stamp by hand, in
+    /// cents, and when. Charged once, at the card's first print; null when no fee was charged.
+    /// </summary>
+    public int? PrintFeeCents { get; set; }
+    public DateTime? PrintFeeAt { get; set; }
 
     /// <summary>How the comment reached the restaurant: one of <see cref="CommentSources.All"/>. Null on cards entered before it was asked.</summary>
     public string? Source { get; set; }

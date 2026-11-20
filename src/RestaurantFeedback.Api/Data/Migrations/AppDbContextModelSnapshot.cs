@@ -560,6 +560,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("PrintCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("PrintFeeAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PrintFeeCents")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime?>("PrintedAt")
                         .HasColumnType("TEXT");
 

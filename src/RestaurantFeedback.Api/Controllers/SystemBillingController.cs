@@ -42,8 +42,8 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         var after = site.Billing;
         await audit.LogAsync(me, "BillingSettingsChanged", details: new
         {
-            Before = new { before.CostCents, before.FeeCents, before.MonthlyLimitCents, before.BillDay, before.DueDays, before.EmailBills, before.PrintBills, before.CardFeePercent, before.BankFeePercent, before.RequirePaymentMethod },
-            After = new { after.CostCents, after.FeeCents, after.MonthlyLimitCents, after.BillDay, after.DueDays, after.EmailBills, after.PrintBills, after.CardFeePercent, after.BankFeePercent, after.RequirePaymentMethod }
+            Before = new { before.CostCents, before.FeeCents, before.MonthlyLimitCents, before.BillDay, before.DueDays, before.EmailBills, before.PrintBills, before.CardFeePercent, before.BankFeePercent, before.RequirePaymentMethod, before.ChargeHandPrintFee },
+            After = new { after.CostCents, after.FeeCents, after.MonthlyLimitCents, after.BillDay, after.DueDays, after.EmailBills, after.PrintBills, after.CardFeePercent, after.BankFeePercent, after.RequirePaymentMethod, after.ChargeHandPrintFee }
         });
         return await Dto(null, null, null, ct);
     }
@@ -246,16 +246,17 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
     [HttpGet("statement")]
     public async Task<SiteMailStatement> Statement(string? month, int? groupId, int? restaurantId, CancellationToken ct)
     {
-        var all = await ledger.Billed().Select(c => c.MailedAt!.Value).ToListAsync(ct);
-        var months = all.Select(MailLedger.MonthKey).Append(MailLedger.MonthKey(DateTime.UtcNow)).Distinct().OrderByDescending(m => m).ToList();
+        // Cards mailed for groups, and cards they printed themselves where the fee is charged for that.
+        var all = await ledger.ChargesAsync(null, ct);
+        var months = all.Select(c => MailLedger.MonthKey(c.At)).Append(MailLedger.MonthKey(DateTime.UtcNow)).Distinct().OrderByDescending(m => m).ToList();
         var chosen = MailLedger.Range(month) is null ? months[0] : month!;
         var (from, to) = MailLedger.Range(chosen)!.Value;
-        var q = ledger.Billed().Where(c => c.MailedAt >= from && c.MailedAt < to);
-        if (groupId is int g) q = q.Where(c => c.Restaurant.GroupId == g);
-        if (restaurantId is int r) q = q.Where(c => c.RestaurantId == r);
-        var cards = await q.Select(c => new { c.Restaurant.GroupId, Group = c.Restaurant.Group.Name, c.RestaurantId, Restaurant = c.Restaurant.Name, Cost = c.MailEstimateCents ?? 0, Fee = c.MailFeeCents ?? 0 }).ToListAsync(ct);
+        var cards = all.Where(c => c.At >= from && c.At < to && (groupId is null || c.GroupId == groupId) && (restaurantId is null || c.RestaurantId == restaurantId)).ToList();
         var rows = cards.GroupBy(c => new { c.GroupId, c.Group, c.RestaurantId, c.Restaurant }).OrderBy(x => x.Key.Group).ThenBy(x => x.Key.Restaurant)
-            .Select(x => new SiteMailStatementRow(x.Key.GroupId, x.Key.Group, x.Key.RestaurantId, x.Key.Restaurant, x.Count(), x.Sum(c => c.Cost), x.Sum(c => c.Fee), x.Sum(c => c.Cost + c.Fee))).ToList();
+            .Select(x => new SiteMailStatementRow(x.Key.GroupId, x.Key.Group, x.Key.RestaurantId, x.Key.Restaurant, x.Count(), x.Sum(c => c.CostCents), x.Sum(c => c.FeeCents), x.Sum(c => c.Cents))
+            {
+                PrintedCards = x.Count(c => c.Printed)
+            }).ToList();
         return new SiteMailStatement(chosen, months, rows, rows.Sum(x => x.Cards), rows.Sum(x => x.CostCents), rows.Sum(x => x.FeeCents), rows.Sum(x => x.TotalCents));
     }
 
@@ -267,7 +268,7 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
         var groups = await db.Groups.AsNoTracking().OrderBy(g => g.Name).Select(g => new { g.Id, g.Name, g.IsActive }).ToListAsync(ct);
         var names = groups.ToDictionary(g => g.Id, g => g.Name);
         var rows = await db.GroupBilling.AsNoTracking().ToListAsync(ct);
-        var billed = await ledger.Billed().Select(c => new { c.Restaurant.GroupId, At = c.MailedAt!.Value, Cents = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0) }).ToListAsync(ct);
+        var billed = (await ledger.ChargesAsync(null, ct)).Select(c => new { c.GroupId, c.At, c.Cents }).ToList();
         var allInvoices = await db.MailInvoices.AsNoTracking().OrderByDescending(i => i.Month).ThenBy(i => i.GroupId).ToListAsync(ct);
         bool Overdue(MailInvoice i) => i.Status == InvoiceStatuses.Open && i.DueOn < today;
         var credits = await db.GroupCredits.AsNoTracking().ToListAsync(ct);

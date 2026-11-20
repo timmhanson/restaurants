@@ -165,6 +165,8 @@ export interface PrintConfig {
   mailOnCredit: boolean
   /** The group's credit that is free to spend on more cards, in cents. */
   mailCreditCents: number
+  /** What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is). Charged once per card, at its first print. */
+  printFeeCents: number
   /** The site is in test mode for mailing: nothing is printed, mailed or charged. */
   mailTest: boolean
   /** What the group is billed for each mailed card, in cents. */
@@ -260,6 +262,8 @@ export interface GroupCredit { id: number; groupId: number; group: string; at: s
 export interface GroupBilling {
   /** The group's unused credit, which comes off its next bills by itself, and the lines that make it up. */
   creditCents: number; credits: GroupCreditLine[]
+  /** What the group is billed for each card it prints itself for a stamp by hand, in cents (0 when nothing is). */
+  printFeeCents: number
   /** A group administrator: may save a payment method, pay bills and change where bills go. Owners only see usage. */
   canManage: boolean
   mailAvailable: boolean; test: boolean; centsPerCard: number; limitCents: number; usedCents: number; cardsThisMonth: number
@@ -271,7 +275,9 @@ export interface BillingActionResult { ok: boolean; message: string; billing: Gr
 
 export interface BillingSettings {
   costCents: number; feeCents: number; monthlyLimitCents: number; billDay: number; dueDays: number; emailBills: boolean; printBills: boolean
-  cardFeePercent: number; bankFeePercent: number; requirePaymentMethod: boolean; businessName: string; businessEmail?: string | null
+  cardFeePercent: number; bankFeePercent: number; requirePaymentMethod: boolean
+  /** Groups are also charged the site's fee for each card they print themselves for a stamp by hand. */
+  chargeHandPrintFee: boolean; businessName: string; businessEmail?: string | null
   street?: string | null; city?: string | null; state?: string | null; zip?: string | null; payInstructions?: string | null; siteUrl?: string | null
 }
 export interface SystemInvoice extends Omit<Invoice, 'payFeeCents'> {
@@ -294,7 +300,7 @@ export interface SystemBilling {
   /** The credit log (newest first, for the group chosen), unused credit across every group, and the most one credit can be. */
   credits: GroupCredit[]; creditCents: number; maxCreditCents: number
 }
-export interface SiteMailStatementRow { groupId: number; group: string; restaurantId: number; restaurant: string; cards: number; costCents: number; feeCents: number; totalCents: number }
+export interface SiteMailStatementRow { groupId: number; group: string; restaurantId: number; restaurant: string; cards: number; costCents: number; feeCents: number; totalCents: number ; printedCards: number }
 export interface SiteMailStatement { month: string; months: string[]; rows: SiteMailStatementRow[]; cards: number; costCents: number; feeCents: number; totalCents: number }
 /** A key saved on Connected Systems: never sent to the browser, only its last four characters. */
 export interface SiteKeyInfo { configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; test: boolean; savedAt?: string | null; savedBy?: string | null }
@@ -397,6 +403,8 @@ export interface CommentSummary {
   postageLabelUrl?: string | null
   postageTrackingCode?: string | null
   postageTest: boolean
+  /** The fee the group was charged because this card was printed in the restaurant for a stamp by hand; null when none was. */
+  printFeeCents?: number | null
   /** The card's own identifier, carried (signed) by the QR code printed on it. */
   cardId: string
   mailStatus?: MailStatus | null

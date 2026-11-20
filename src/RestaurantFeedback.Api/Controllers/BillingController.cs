@@ -197,8 +197,9 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
         var manage = me.IsGroupWide;
         var mine = me.RestaurantIds.ToList();
         var since = MailLedger.MonthStart(DateTime.UtcNow).AddMonths(-11);
-        var cards = await ledger.Billed().Where(c => c.Restaurant.GroupId == groupId && mine.Contains(c.RestaurantId) && c.MailedAt >= since)
-            .Select(c => new { At = c.MailedAt!.Value, c.RestaurantId, Restaurant = c.Restaurant.Name, Cents = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0) }).ToListAsync(ct);
+        // Cards mailed for the group, and cards its restaurants printed themselves where that is charged for.
+        var charges = (await ledger.ChargesAsync(groupId, ct)).Where(c => mine.Contains(c.RestaurantId) && c.At >= since).ToList();
+        var cards = charges.Select(c => new { c.At, c.RestaurantId, c.Restaurant, c.Cents }).ToList();
         var months = cards.GroupBy(c => MailLedger.MonthKey(c.At)).OrderByDescending(g => g.Key)
             .Select(g => new MailMonth(g.Key, MailLedger.MonthName(g.Key), g.Count(), g.Sum(c => c.Cents),
                 g.GroupBy(c => new { c.RestaurantId, c.Restaurant }).OrderBy(r => r.Key.Restaurant)
@@ -221,12 +222,14 @@ public class BillingController(AppDbContext db, AuditService audit, CurrentUserP
             : null;
         var account = site.Account;
         return new GroupBillingDto(manage, account is not null && terms.Enabled && terms.LimitCents > 0, account?.Test ?? false, terms.PriceCents, terms.LimitCents,
-            current?.TotalCents ?? 0, current?.Cards ?? 0, payAccount.Current is not null, terms.PayRequired, payAccount.Current?.Test ?? false, s.CardFeePercent, s.BankFeePercent, method, b?.AutoPay ?? false,
+            // The monthly limit is about cards mailed for the group, so what counts against it leaves out the cards it printed itself.
+            charges.Where(c => !c.Printed && MailLedger.MonthKey(c.At) == thisMonth).Sum(c => c.Cents), current?.Cards ?? 0, payAccount.Current is not null, terms.PayRequired, payAccount.Current?.Test ?? false, s.CardFeePercent, s.BankFeePercent, method, b?.AutoPay ?? false,
             manage ? new BillingContact(b?.BillingName, b?.BillingEmail, b?.Street, b?.City, b?.State, b?.Zip) : new BillingContact(null, null, null, null, null, null),
             s.BusinessName, s.BusinessEmail, s.PayInstructions, s.BillDay, s.DueDays, months, invoices,
             invoices.Where(i => i.Status == InvoiceStatuses.Open).Sum(i => i.DueCents))
         {
             CreditCents = creditBalance,
+            PrintFeeCents = terms.PrintFeeCents,
             Credits = creditRows.Select(c => new GroupCreditLine(DateTime.SpecifyKind(c.CreatedAt, DateTimeKind.Utc), c.Kind, CreditKinds.Label(c.Kind), c.AmountCents,
                 c.InvoiceId is int id ? billNumbers.GetValueOrDefault(id) : null)).ToList()
         };

@@ -79,7 +79,9 @@ export default function BillingPage() {
       </div>
       <p className="muted">
         Cards chosen as <strong>Mailed for you</strong> on <Link to="/print">Print cards</Link> are printed and mailed by {d.businessName}, and billed to your
-        investment group once a month. Cards you print yourself cost nothing here.
+        investment group once a month. {d.printFeeCents > 0
+          ? `Cards you print yourself for a stamp by hand are billed ${money(d.printFeeCents)} each, the first time each is printed.`
+          : 'Cards you print yourself cost nothing here.'}
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind={notice.ok ? 'success' : 'warn'} onClose={() => setNotice(null)}>{notice.message}</Alert>}

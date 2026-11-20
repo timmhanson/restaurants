@@ -38,6 +38,11 @@ public class BillingSettings
     /// way to collect on.
     /// </summary>
     public bool RequirePaymentMethod { get; set; } = true;
+    /// <summary>
+    /// A group is also charged the site's fee per card (not the mail house's cost) for each card it prints itself
+    /// for a stamp by hand. Charged once per card, at its first print. On unless the System Administrator switches it off.
+    /// </summary>
+    public bool ChargeHandPrintFee { get; set; } = true;
     /// <summary>Who the bills are from.</summary>
     public string BusinessName { get; set; } = "Guest Feedback";
     public string? BusinessEmail { get; set; }
@@ -79,6 +84,8 @@ public record GroupTerms(int CostCents, int FeeCents, int LimitCents, bool HasPa
     public int PriceCents => CostCents + FeeCents;
     /// <summary>The System Administrator has switched mailing on for this group.</summary>
     public bool Enabled { get; init; }
+    /// <summary>What the group is billed for a card it prints itself for a stamp by hand: its fee per card, or 0 when that is not charged.</summary>
+    public int PrintFeeCents { get; init; }
     /// <summary>
     /// The group's credit that is free to spend on more cards: what it has, less the cards already mailed that are
     /// not on a bill yet (the credit will be used on those when their bill is made).
@@ -95,7 +102,20 @@ public record GroupTerms(int CostCents, int FeeCents, int LimitCents, bool HasPa
     public int CardsOnCredit => PriceCents > 0 ? CreditCents / PriceCents : 0;
 }
 
-public record InvoiceLine(int RestaurantId, string Restaurant, int Cards, int Cents);
+public record InvoiceLine(int RestaurantId, string Restaurant, int Cards, int Cents)
+{
+    /// <summary>Cards the restaurant printed itself for a stamp by hand (the site's fee only), not cards mailed for it.</summary>
+    public bool Printed { get; init; }
+}
+
+/// <summary>
+/// One thing a group is billed for: a card mailed for it (the mail house's cost plus the site's fee), or a card it
+/// printed itself for a stamp by hand (the site's fee only).
+/// </summary>
+public record Charge(int GroupId, string Group, int RestaurantId, string Restaurant, DateTime At, int CostCents, int FeeCents, bool Printed)
+{
+    public int Cents => CostCents + FeeCents;
+}
 
 /// <summary>
 /// What each investment group has been billed for mailed cards. A card counts in the calendar month (UTC) it was
@@ -131,8 +151,28 @@ public class MailLedger(AppDbContext db, SiteMailing site)
         var b = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(x => x.GroupId == groupId, ct);
         return new GroupTerms(s.CostCents, b?.FeeCents ?? s.FeeCents, b?.MonthlyLimitCents ?? s.MonthlyLimitCents, b?.PayMethodId is not null, b?.RequirePayMethod ?? s.RequirePaymentMethod)
         {
-            Enabled = b?.MailEnabled ?? false, CreditCents = await SpendableCreditAsync(groupId, ct)
+            Enabled = b?.MailEnabled ?? false, CreditCents = await SpendableCreditAsync(groupId, ct),
+            PrintFeeCents = s.ChargeHandPrintFee ? b?.FeeCents ?? s.FeeCents : 0
         };
+    }
+
+    /// <summary>
+    /// Everything billed to groups: cards mailed for them, and cards they printed themselves where the site's fee
+    /// is charged for that. For one group, or every group.
+    /// </summary>
+    public async Task<List<Charge>> ChargesAsync(int? groupId = null, CancellationToken ct = default)
+    {
+        var mailed = Billed();
+        var printed = db.Comments.AsNoTracking().Where(c => c.PrintFeeCents != null && c.PrintFeeCents > 0 && c.PrintFeeAt != null);
+        if (groupId is int g)
+        {
+            mailed = mailed.Where(c => c.Restaurant.GroupId == g);
+            printed = printed.Where(c => c.Restaurant.GroupId == g);
+        }
+        var a = await mailed.Select(c => new { c.Restaurant.GroupId, Group = c.Restaurant.Group.Name, c.RestaurantId, Restaurant = c.Restaurant.Name, At = c.MailedAt!.Value, Cost = c.MailEstimateCents ?? 0, Fee = c.MailFeeCents ?? 0 }).ToListAsync(ct);
+        var b = await printed.Select(c => new { c.Restaurant.GroupId, Group = c.Restaurant.Group.Name, c.RestaurantId, Restaurant = c.Restaurant.Name, At = c.PrintFeeAt!.Value, Fee = c.PrintFeeCents!.Value }).ToListAsync(ct);
+        return [.. a.Select(c => new Charge(c.GroupId, c.Group, c.RestaurantId, c.Restaurant, c.At, c.Cost, c.Fee, false)),
+                .. b.Select(c => new Charge(c.GroupId, c.Group, c.RestaurantId, c.Restaurant, c.At, 0, c.Fee, true))];
     }
 
     /// <summary>
@@ -145,9 +185,8 @@ public class MailLedger(AppDbContext db, SiteMailing site)
         var balance = await db.GroupCredits.Where(c => c.GroupId == groupId).SumAsync(c => (int?)c.AmountCents, ct) ?? 0;
         if (balance <= 0) return 0;
         var billedMonths = await db.MailInvoices.AsNoTracking().Where(i => i.GroupId == groupId).Select(i => i.Month).ToListAsync(ct);
-        var cards = await Billed().Where(c => c.Restaurant.GroupId == groupId)
-            .Select(c => new { At = c.MailedAt!.Value, Cents = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0) }).ToListAsync(ct);
-        var notBilledYet = cards.Where(c => !billedMonths.Contains(MonthKey(c.At))).Sum(c => c.Cents);
+        var charges = await ChargesAsync(groupId, ct);
+        var notBilledYet = charges.Where(c => !billedMonths.Contains(MonthKey(c.At))).Sum(c => c.Cents);
         return Math.Max(0, balance - notBilledYet);
     }
 
@@ -183,8 +222,8 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
     {
         if (MailLedger.Range(month) is not { } range) throw new InvalidOperationException("Choose a month.");
         if (range.To > DateTime.UtcNow) throw new InvalidOperationException($"{MailLedger.MonthName(month)} is not over yet. Bills are created once the month has ended.");
-        var rows = await ledger.Billed().Where(c => c.MailedAt >= range.From && c.MailedAt < range.To)
-            .Select(c => new { c.Restaurant.GroupId, c.RestaurantId, Restaurant = c.Restaurant.Name, Cost = c.MailEstimateCents ?? 0, Fee = c.MailFeeCents ?? 0 }).ToListAsync(ct);
+        var rows = (await ledger.ChargesAsync(null, ct)).Where(c => c.At >= range.From && c.At < range.To)
+            .Select(c => new { c.GroupId, c.RestaurantId, c.Restaurant, Cost = c.CostCents, Fee = c.FeeCents, c.Printed }).ToList();
         var have = await db.MailInvoices.Where(i => i.Month == month).Select(i => i.GroupId).ToListAsync(ct);
         var settings = site.Billing;
         var created = new List<MailInvoice>();
@@ -193,8 +232,9 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
             var cost = g.Sum(r => r.Cost);
             var fee = g.Sum(r => r.Fee);
             if (cost + fee <= 0) continue;
-            var lines = g.GroupBy(r => new { r.RestaurantId, r.Restaurant }).OrderBy(r => r.Key.Restaurant)
-                .Select(r => new InvoiceLine(r.Key.RestaurantId, r.Key.Restaurant, r.Count(), r.Sum(x => x.Cost + x.Fee))).ToList();
+            // Cards mailed for the restaurant and cards it printed itself are separate lines, mailed first.
+            var lines = g.GroupBy(r => new { r.RestaurantId, r.Restaurant, r.Printed }).OrderBy(r => r.Key.Restaurant).ThenBy(r => r.Key.Printed)
+                .Select(r => new InvoiceLine(r.Key.RestaurantId, r.Key.Restaurant, r.Count(), r.Sum(x => x.Cost + x.Fee)) { Printed = r.Key.Printed }).ToList();
             var invoice = new MailInvoice
             {
                 GroupId = g.Key, Month = month, Number = $"{month.Replace("-", "")}-{g.Key:000}", Cards = g.Count(), CostCents = cost, FeeCents = fee,
@@ -474,10 +514,10 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         sb.Append($"<h1>{H(s.BusinessName)}</h1>");
         if (s.HasAddress) sb.Append($"<p class=\"muted\">{H(s.Street)}, {H(s.City)}, {H(s.State)} {H(s.Zip)}</p>");
         sb.Append($"<p><strong>Bill {H(i.Number)}</strong> for {H(string.IsNullOrWhiteSpace(billing?.BillingName) ? group : billing!.BillingName)}<br>");
-        sb.Append($"Coupon cards printed and mailed in {H(MailLedger.MonthName(i.Month))}<br>");
+        sb.Append($"Coupon cards for {H(MailLedger.MonthName(i.Month))}<br>");
         sb.Append($"Date {i.IssuedAt.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} &middot; Due {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}</p>");
         sb.Append("<table><tr><th>Restaurant</th><th class=\"n\">Cards</th><th class=\"n\">Amount</th></tr>");
-        foreach (var l in Lines(i)) sb.Append($"<tr><td>{H(l.Restaurant)}</td><td class=\"n\">{l.Cards}</td><td class=\"n\">{Dollars(l.Cents)}</td></tr>");
+        foreach (var l in Lines(i)) sb.Append($"<tr><td>{H(l.Restaurant)}<br><span class=\"muted\">{(l.Printed ? "Printed by you, stamped by hand" : "Printed and mailed for you")}</span></td><td class=\"n\">{l.Cards}</td><td class=\"n\">{Dollars(l.Cents)}</td></tr>");
         if (i.CreditCents > 0)
         {
             sb.Append($"<tr class=\"total\"><td>Total</td><td class=\"n\">{i.Cards}</td><td class=\"n\">{Dollars(i.TotalCents)}</td></tr>");
@@ -502,8 +542,8 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
     {
         var sb = new StringBuilder();
         sb.AppendLine($"{s.BusinessName}: bill {i.Number} for {group}");
-        sb.AppendLine($"Coupon cards printed and mailed in {MailLedger.MonthName(i.Month)}");
-        foreach (var l in Lines(i)) sb.AppendLine($"  {l.Restaurant}: {l.Cards} card{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}");
+        sb.AppendLine($"Coupon cards for {MailLedger.MonthName(i.Month)}");
+        foreach (var l in Lines(i)) sb.AppendLine($"  {l.Restaurant}, {(l.Printed ? "printed by you" : "mailed for you")}: {l.Cards} card{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}");
         if (i.CreditCents > 0) sb.AppendLine($"Total: {Dollars(i.TotalCents)}, less your credit of {Dollars(i.CreditCents)}");
         sb.AppendLine(Due(i) == 0 && i.CreditCents > 0 ? "Nothing to pay: your credit covered this bill."
             : $"Total due: {Dollars(Due(i))} by {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}");

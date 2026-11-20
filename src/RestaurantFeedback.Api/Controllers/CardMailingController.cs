@@ -50,6 +50,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             MailBlockedBy = blockedBy,
             MailOnCredit = mailOn && terms.OnCredit && !needsPayMethod,
             MailCreditCents = terms.CreditCents,
+            PrintFeeCents = me.GroupId is null ? 0 : terms.PrintFeeCents,
             MailTest = test,
             MailCentsPerCard = terms.PriceCents,
             MailMaxCards = mailOptions.MaxCardsPerMailing,
@@ -431,10 +432,19 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var method = MailedMethod(settings);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var now = DateTime.UtcNow;
+        // A card the restaurant prints itself for a stamp by hand carries the site's fee, once, at its first print.
+        var printFee = me.GroupId is int feeGroup ? (await ledger.TermsAsync(feeGroup, ct)).PrintFeeCents : 0;
+        var charged = new List<GuestComment>();
 
         foreach (var c in cards)
         {
             var bought = req.Postage == "bought" && c.PostageId is not null;
+            if (!bought && printFee > 0 && c.PrintCount == 0 && c.PrintFeeCents is null)
+            {
+                c.PrintFeeCents = printFee;
+                c.PrintFeeAt = now;
+                charged.Add(c);
+            }
             var how = bought ? (c.PostageTest ? "test postage printed" : "postage printed on the card") : "stamp added by hand";
             c.PrintedAt = now;
             c.PrintedByName = me.DisplayName;
@@ -454,7 +464,10 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         }
         await db.SaveChangesAsync(ct);
         foreach (var c in cards)
-            await audit.LogAsync(me, "CardPrinted", "Comment", c.Id, new { c.PrintCount, req.Postage, MarkedSent = req.MarkSent && c.RespondedAt == now }, c.RestaurantId);
+            await audit.LogAsync(me, "CardPrinted", "Comment", c.Id, new { c.PrintCount, req.Postage, MarkedSent = req.MarkSent && c.RespondedAt == now, PrintFeeCents = charged.Contains(c) ? c.PrintFeeCents : null }, c.RestaurantId);
+        foreach (var byRestaurant in charged.GroupBy(c => c.RestaurantId))
+            await audit.LogAsync(me, "CardPrintFeeCharged", "Restaurant", byRestaurant.Key,
+                new { Cards = byRestaurant.Count(), CentsPerCard = printFee, TotalCents = byRestaurant.Count() * printFee, CardIds = byRestaurant.Select(c => c.Id).ToArray() }, byRestaurant.Key);
         return await summaries.BuildAsync(me.GroupId, cards, _ => 0, ct);
     }
 
