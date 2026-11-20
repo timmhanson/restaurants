@@ -40,7 +40,7 @@ public class CardCheckController(AppDbContext db, AuditService audit, CurrentUse
             // Genuine, but not this person's restaurant: say so without showing the guest or the offer.
             await audit.LogAsync(me, "CardCodeChecked", "Comment", c.Id, new { CardId = cardId, Shown = false }, c.RestaurantId, c.Restaurant.GroupId);
             return new CardCheck(true, me.IsSuperAdmin
-                ? $"This is a genuine card from {c.Restaurant.Name} ({c.Restaurant.Group.Name}). Open that investment group with View as admin to see it."
+                ? $"This is a genuine card from {c.Restaurant.Name} ({c.Restaurant.Group.Name}). Open that investment group with Impersonate to see it."
                 : "This is a genuine card from this site, but it belongs to a restaurant you do not work at, so its details are not shown.", null, false);
         }
         var today = DateOnly.FromDateTime(DateTime.UtcNow);

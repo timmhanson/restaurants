@@ -96,7 +96,7 @@ export default function SettingsPage() {
         <h1>Group settings</h1>
         {groupName && <span className="muted">{groupName}</span>}
       </div>
-      {isSuperAdmin && !groupId && <Alert kind="warn">Open a group with "View as admin" on Investment groups first.</Alert>}
+      {isSuperAdmin && !groupId && <Alert kind="warn">Open a group with "Impersonate" on Investment Groups first.</Alert>}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {s && (
         <p className="muted small" role="status" style={{ marginTop: 0 }}>

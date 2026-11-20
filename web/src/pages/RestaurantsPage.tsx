@@ -71,7 +71,7 @@ export default function RestaurantsPage() {
         {has('EditRestaurants') && <button type="button" className="btn btn-primary" onClick={() => setEditing('new')} disabled={needsGroup}>+ Add restaurant</button>}
       </div>
       {needsGroup ? (
-        <Alert kind="warn">Open a group with "View as admin" on Investment groups to manage its restaurants.</Alert>
+        <Alert kind="warn">Open a group with "Impersonate" on Investment Groups to manage its restaurants.</Alert>
       ) : isGroupWide ? (
         <p className="muted">
           As {isSuperAdmin ? 'System Administrator' : 'Investment Group Administrator'} you can edit and staff every restaurant in this group. Use <strong>Staff</strong> to

@@ -694,7 +694,7 @@ public class InteractionLog
     public UserRole? Role { get; set; }
     public int? GroupId { get; set; }
     public int? RestaurantId { get; set; }
-    /// <summary>A System Administrator acting inside a group ("View as admin").</summary>
+    /// <summary>A System Administrator acting inside a group ("Impersonate").</summary>
     public bool ViewingAs { get; set; }
     public string? Method { get; set; }
     /// <summary>API path with its query string, or the page the browser was on.</summary>

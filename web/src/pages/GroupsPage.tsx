@@ -45,7 +45,7 @@ export default function GroupsPage() {
       </div>
       <p className="muted">
         Each investment group has its own administrators, restaurant owners, managers, team logins and settings. Create a group with its
-        administrators, owners and restaurants in one step. <strong>View as admin</strong> opens the group just as its Investment Group Administrator sees
+        administrators, owners and restaurants in one step. <strong>Impersonate</strong> opens the group just as its Investment Group Administrator sees
         it (starting on Enter card). A yellow bar at the top takes you back here.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
@@ -61,14 +61,7 @@ export default function GroupsPage() {
             <tbody>
               {list.map((g) => (
                 <tr key={g.id} className={g.isActive ? '' : 'inactive'}>
-                  <td>
-                    <div className="group-name">
-                      <strong>{g.name}</strong>
-                      <button type="button" className="btn btn-sm btn-primary view-as" onClick={() => viewAs(g)} title="See this group as its Investment Group Administrator does" aria-label={`View ${g.name} as admin`}>
-                        View as admin
-                      </button>
-                    </div>
-                  </td>
+                  <td><strong>{g.name}</strong></td>
                   <td>{g.adminNames.length ? <div className="people">{g.adminNames.map((n) => <Badge key={n} kind="accent">{n}</Badge>)}</div> : <Badge kind="warn">None yet</Badge>}</td>
                   <td>{g.ownerNames.length ? <div className="people">{g.ownerNames.map((n) => <Badge key={n}>{n}</Badge>)}</div> : <span className="muted">none</span>}</td>
                   <td className="num">{g.restaurantCount}</td>
@@ -77,11 +70,14 @@ export default function GroupsPage() {
                   <td>{fmtDate(g.createdAt)}</td>
                   <td>{g.isActive ? <Badge kind="ok">Active</Badge> : <Badge kind="neutral">Inactive</Badge>}</td>
                   <td>
-                    <div className="row-actions">
-                      <button type="button" className="btn btn-sm" aria-expanded={showPeople === g.id} onClick={() => setShowPeople(showPeople === g.id ? null : g.id)}>
+                    <div className="row-actions" style={{ flexWrap: 'nowrap' }}>
+                      <button type="button" className="btn btn-sm" style={{ whiteSpace: 'nowrap' }} aria-expanded={showPeople === g.id} onClick={() => setShowPeople(showPeople === g.id ? null : g.id)}>
                         {showPeople === g.id ? 'Hide users' : 'Users'}
                       </button>
                       <button type="button" className="btn btn-sm" onClick={() => setEditing(g)}>Edit</button>
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => viewAs(g)} title="See and use this group just as its Investment Group Administrator does" aria-label={`Impersonate an administrator of ${g.name}`}>
+                        Impersonate
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -259,7 +255,7 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
               <PermissionRulesEditor value={permissions} onChange={changePermission} />
             </>
           )}
-          <p className="muted" style={{ margin: 0 }}>To add administrators, owners or restaurants, close this and use <strong>View as admin</strong> on the group.</p>
+          <p className="muted" style={{ margin: 0 }}>To add administrators, owners or restaurants, close this and use <strong>Impersonate</strong> on the group.</p>
           <div className="actions">
             <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>

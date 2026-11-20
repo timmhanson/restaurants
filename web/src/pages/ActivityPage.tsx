@@ -220,7 +220,7 @@ function ActivityRow({ i, open, onToggle, onSession }: { i: InteractionDto; open
         <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(i.at)}</td>
         <td>
           {i.displayName ?? i.userName ?? <span className="muted">not signed in</span>}
-          {i.roleTitle && <div className="muted small">{i.roleTitle}{i.viewingAs ? ' · viewing as admin' : ''}</div>}
+          {i.roleTitle && <div className="muted small">{i.roleTitle}{i.viewingAs ? ' · impersonating a group administrator' : ''}</div>}
         </td>
         <td>
           {i.groupName ?? <span className="muted">—</span>}

@@ -19,7 +19,7 @@ See README.md for the architecture, roles and deployment.
 - **System Administrators oversee the site, not restaurants.** Their menu (Overview, Investment groups,
   Restaurants, People, Reports, Billing, Activity log, Audit log, Security, Connected Systems, System status) is entirely
   their own. Accounts for outside services the whole site uses are entered on Connected Systems. Never
-  show them restaurant-level screens unless they chose "View as admin". Put new site-wide features in that area
+  show them restaurant-level screens unless they chose "Impersonate" (once called "View as admin"). Put new site-wide features in that area
   (`SystemAdminController`, `/api/system/*`, `SuperAdmin` only) and surface anything needing action in the
   Overview's "Needs your attention" list.
 - **Permissions and settings are handed down level by level, and the higher level wins.** System Administrator

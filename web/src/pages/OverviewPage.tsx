@@ -92,7 +92,7 @@ export default function OverviewPage() {
               { key: 'last', label: 'Last activity', value: (g) => g.lastActivity ?? null, render: (g) => (g.lastActivity ? fmtDateTime(g.lastActivity) : <span className="muted">none this week</span>) },
               {
                 key: 'open', label: '', noCsv: true, noSort: true, value: () => null,
-                render: (g) => <button type="button" className="btn btn-sm" onClick={() => viewAs(g.id)}>View as admin</button>,
+                render: (g) => <button type="button" className="btn btn-sm" onClick={() => viewAs(g.id)}>Impersonate</button>,
               },
             ]}
           />

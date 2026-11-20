@@ -13,7 +13,7 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 
 | Title (internal role) | Scope | Can |
 | --- | --- | --- |
-| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **View as admin** opens one group exactly as its Investment Group Administrator sees it, under a yellow bar with **Back to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
+| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **Impersonate** opens one group exactly as its Investment Group Administrator sees it, under a yellow bar with **Back to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
 | **Investment Group Administrator** (`GroupAdmin`) | one investment group | everything: every restaurant, every user account (owners and other administrators included), the group settings, and what owners and managers may do. Can also be ticked as an owner of particular restaurants (two roles at once) |
 | **Restaurant Owner** (`Owner`) | the restaurants they own | what the levels above leave to owners, by default everything at those restaurants: cards, analytics, export, audit, staffing and co-owners, the restaurant's details and card design. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
 | **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus what all managers in the group were given and what was ticked for them: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin, BuyPostage, SetFollowUpDays. Permissions apply at every restaurant they work at |
@@ -64,7 +64,7 @@ Rules worth knowing:
 
 1. A System Administrator creates the investment group on **Groups** with at least one Group
    Administrator, optional Restaurant Owners and the group's restaurants, ticking who owns each restaurant.
-2. **View as admin** opens the group; its **Restaurants & Staff** page has each restaurant's **Staff** screen, which lists the
+2. **Impersonate** opens the group; its **Restaurants & Staff** page has each restaurant's **Staff** screen, which lists the
    group's owners, managers and team logins as checkboxes, with quick-add for new people.
 3. Owners staff only the restaurants they own; managers can be added at several owners' restaurants.
 
@@ -366,7 +366,7 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | Page | What it is for |
 | --- | --- |
 | **Overview** (home) | "Needs your attention" (server errors, bursts of failed sign-ins, groups with no administrator or restaurants, cards waiting over a week, people who never signed in, email not set up), headline numbers for the whole site, every investment group at a glance and the latest sign-ins |
-| **Investment groups** | create and rename groups; **View as admin** |
+| **Investment groups** | create and rename groups; **Impersonate** |
 | **Restaurants** | directory of every restaurant in every group: owners, staff counts, cards, waiting; **Open in group** |
 | **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
 | **Reports**, **Activity log**, **Audit log** | see below |
@@ -376,7 +376,7 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
 Restaurant-level screens (Enter card, Comments, Analytics, All Staff, Permissions, Restaurants & Staff, Settings) never appear
-for a System Administrator unless they choose **View as admin** / **Open in group**, which shows one group as
+for a System Administrator unless they choose **Impersonate** / **Open in group**, which shows one group as
 its Investment Group Administrator sees it under a yellow bar. That choice lasts for the browser tab only.
 All of `/api/system/*` is `SuperAdmin` only.
 

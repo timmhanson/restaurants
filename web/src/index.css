@@ -39,9 +39,6 @@ pre { background: #f0f2f5; padding: 0.6rem; border-radius: 6px; overflow: auto; 
 .viewing-bar { grid-column: 1 / -1; position: sticky; top: 0; z-index: 25; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
   padding: 0.5rem 1rem; background: #ffd23f; color: #3d2e00; border-bottom: 1px solid #e0b400; font-size: 0.95rem; }
 .viewing-bar strong { font-weight: 700; }
-.btn.view-as { white-space: nowrap; }
-.group-name { display: flex; align-items: center; gap: 0.6rem; }
-.group-name .btn { flex: none; }
 .viewing-bar .btn { margin-left: auto; background: #3d2e00; color: #fff; border-color: #3d2e00; }
 .viewing-bar .btn:hover { background: #241b00; }
 .app.viewing-as .topbar { top: var(--viewing-bar-h, 41px); }

@@ -113,7 +113,7 @@ export default function UsersPage() {
           other owners' restaurants. Other owners and investment group administrators are managed by your investment group administrators.
         </Alert>
       )}
-      {isSuperAdmin && !groupId && <Alert kind="info">Everyone in every group. To add or change people in a group, open it with "View as admin" on Investment groups.</Alert>}
+      {isSuperAdmin && !groupId && <Alert kind="info">Everyone in every group. To add or change people in a group, open it with "Impersonate" on Investment Groups.</Alert>}
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind="success" onClose={() => setNotice(null)}>{notice}</Alert>}
       {users === null ? (

@@ -36,7 +36,7 @@ export default function ConnectedSystemsPage() {
         <h2>EasyPost (postage)</h2>
         <p className="muted">
           Buys USPS postage when coupon cards are printed. Each investment group adds its own EasyPost account in its own Settings, so each pays for its
-          own postage. To add or change one for a group, open the group with <strong>View as admin</strong> on <Link to="/groups">Investment groups</Link>,
+          own postage. To add or change one for a group, open the group with <strong>Impersonate</strong> on <Link to="/groups">Investment groups</Link>,
           then go to Settings.
         </p>
         {status && (
