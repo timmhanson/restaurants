@@ -1789,6 +1789,9 @@ public class PostGridTests(ApiFactory factory)
         Assert.True(made.Last!.Ok, made.Last.Problem);
         Assert.Matches(@"^restaurant-feedback-\d{8}-\d{6}\.db\.gz$", made.Last.Name);
         Assert.True(made.Last.Bytes > 1000);
+        // Nothing but the copies themselves is left in the folder.
+        using (var scope = factory.Services.CreateScope())
+            Assert.All(Directory.GetFiles(scope.ServiceProvider.GetRequiredService<DatabaseBackups>().Folder), f => Assert.EndsWith(".db.gz", f));
         var listed = made.Files.Single(f => f.Name == made.Last.Name);
         Assert.Equal((true, false, made.Last.Bytes), (listed.OnSite, listed.OffSite, listed.Bytes));
 
@@ -1811,6 +1814,8 @@ public class PostGridTests(ApiFactory factory)
             var parts = ((string)(await ask.ExecuteScalarAsync())!).Split('|');
             Assert.True(int.Parse(parts[0]) >= 2 && int.Parse(parts[1]) >= 1);
             Assert.Equal("ok", parts[2]);
+            ask.CommandText = "pragma journal_mode";
+            Assert.Equal("delete", (string)(await ask.ExecuteScalarAsync())!);
         }
         finally { if (File.Exists(restored)) File.Delete(restored); }
 

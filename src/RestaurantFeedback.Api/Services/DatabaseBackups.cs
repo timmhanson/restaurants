@@ -94,6 +94,8 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
             try
             {
                 Directory.CreateDirectory(Folder);
+                // Anything a copy that was cut short left behind.
+                foreach (var left in Directory.GetFiles(Folder, "*.tmp*")) File.Delete(left);
                 var file = Path.Combine(Folder, name);
                 await CopyAsync(file, ct);
                 var bytes = new FileInfo(file).Length;
@@ -144,6 +146,10 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
                 await source.OpenAsync(ct);
                 await target.OpenAsync(ct);
                 source.BackupDatabase(target);
+                // The copy is one file that stands on its own: no write-ahead log beside it.
+                await using var single = target.CreateCommand();
+                single.CommandText = "PRAGMA journal_mode=DELETE;";
+                await single.ExecuteScalarAsync(ct);
             }
             await using (var check = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = raw, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
             {
@@ -158,7 +164,8 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
         }
         finally
         {
-            if (File.Exists(raw)) File.Delete(raw);
+            foreach (var left in new[] { raw, raw + "-wal", raw + "-shm" })
+                if (File.Exists(left)) File.Delete(left);
         }
     }
 
