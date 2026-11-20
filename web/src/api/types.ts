@@ -720,6 +720,13 @@ export interface DirectoryRestaurant {
   id: number; name: string; city?: string | null; state?: string | null; isActive: boolean; groupId: number; groupName: string; groupIsActive: boolean
   owners: string[]; managers: number; teamLogins: number; cards: number; waiting: number; waitingOverAWeek: number; lastVisit?: string | null; createdAt: string
 }
+/** The copies of the site's database. offSite: copies are also sent to the site's storage account. */
+export interface Backups {
+  enabled: boolean
+  last?: { at: string; ok: boolean; name?: string | null; bytes: number; offSite: boolean; problem?: string | null; by: string } | null
+  files: { name: string; at: string; bytes: number; onSite: boolean; offSite: boolean }[]
+  offSite: boolean; hourUtc: number; keepOnSite: number; keepDaily: number; keepMonthly: number
+}
 export interface SystemPerson { user: UserDto; restaurants: string[]; lastSeen?: string | null; interactions30d: number }
 
 // ---- Checking a mailing address with USPS ----

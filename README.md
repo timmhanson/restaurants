@@ -495,6 +495,18 @@ Tests: `dotnet test` (unit tests for guest matching plus end-to-end API tests on
   even when the deploy step fails, so the site is never left off. Replacing the files under a running copy once
   left it half-loaded and answering every request with an error although the run was green (2026-11-19). Expect
   about a minute of downtime per deploy.
+- **The database is backed up every night** (`Services/DatabaseBackups.cs`, `BackupWorker`), at about 08:00 UTC
+  (`Backups__HourUtc`), and whenever the System Administrator presses **Back up now** on System Status. A copy is
+  made with SQLite's online backup, so it is consistent while the site is in use, then checked
+  (`PRAGMA integrity_check`), compressed (`restaurant-feedback-yyyyMMdd-HHmmss.db.gz`) and kept in two places:
+  the last 7 on the site's own disk (`/home/data/backups`), and in the storage account's `database-backups`
+  container the last 30 days plus the first copy of each month for a year. System Status lists the copies with
+  Download (SuperAdmin only, asked for and audited: `DatabaseBackedUp`, `DatabaseBackupFailed`,
+  `DatabaseBackupDownloaded`). The Overview says so when the last backup failed or is more than 36 hours old.
+  **To restore:** stop the site, replace `/home/data/restaurant-feedback.db` with the unzipped copy (remove any
+  `-wal` and `-shm` files beside it), start the site. The Data Protection key ring (`/home/data/keys`) is
+  deliberately not in a copy; restored onto a new site, the outside services' keys are entered again on
+  Connected Systems. Group settings are in Blob Storage already and are not part of the database.
 - **The database is checked at every start** (`Data/DatabaseCare.cs`, after migrations): SQLite's own integrity
   check runs, and if the only damage is an index out of step with its table, the indexes are rebuilt (an index is
   made from its table, so nothing is lost) and an audit row `DatabaseIndexesRebuilt` records what was found. Two

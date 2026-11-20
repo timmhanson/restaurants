@@ -20,7 +20,7 @@ namespace RestaurantFeedback.Api.Controllers;
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
     IAddressVerifier addressVerifier, DatabaseHealth databaseHealth, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
-    MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments, PaymentOptions paymentOptions) : ControllerBase
+    MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments, PaymentOptions paymentOptions, DatabaseBackups backups) : ControllerBase
 {
     private const string SignIn = "Login";
     private const string SignInFailed = "LoginFailed";
@@ -69,6 +69,14 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var undelivered = openBills.Count(i => i.DeliveryError != null);
         if (undelivered > 0)
             attention.Add(new("medium", $"{undelivered} mailing bill{(undelivered == 1 ? " was" : "s were")} not sent", "Billing shows why for each one, with Send again.", "/system-billing"));
+        // The database is copied every night; say so when the last copy failed or is more than a day and a half old.
+        if (await backups.StateAsync() is { } lastBackup)
+        {
+            if (!lastBackup.Ok)
+                attention.Add(new("high", "The last backup of the database did not finish", lastBackup.Problem ?? "System Status shows what happened, with Back up now.", "/system"));
+            else if (DateTime.UtcNow - lastBackup.At > TimeSpan.FromHours(36))
+                attention.Add(new("high", $"The database has not been backed up since {lastBackup.At:MMM d}", "A copy is made every night. System Status shows the copies, with Back up now.", "/system"));
+        }
         var since = DateTime.UtcNow.AddDays(-30);
         var moneyBack = await db.StripeEvents.AsNoTracking().CountAsync(e => e.ReceivedAt >= since && (e.Type == "charge.refunded" || e.Type == "charge.dispute.created"));
         if (moneyBack > 0)

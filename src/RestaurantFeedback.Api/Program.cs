@@ -91,6 +91,11 @@ builder.Services.AddScoped<SiteAddress>();
 builder.Services.AddScoped<MailLedger>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddHostedService<BillingWorker>();
+// Copies of the database: every night, and when the System Administrator asks.
+var backup = config.GetSection("Backups").Get<BackupOptions>() ?? new BackupOptions();
+builder.Services.AddSingleton(backup);
+builder.Services.AddScoped<DatabaseBackups>();
+builder.Services.AddHostedService<BackupWorker>();
 // Stripe takes payment for the monthly mailing bills, on the site's own Stripe account (Connected Systems).
 var payments = config.GetSection("Payments").Get<PaymentOptions>() ?? new PaymentOptions();
 builder.Services.AddSingleton(payments);

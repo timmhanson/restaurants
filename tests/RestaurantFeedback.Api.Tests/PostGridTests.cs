@@ -1776,4 +1776,57 @@ public class PostGridTests(ApiFactory factory)
         // A state that was asked for is the state of every answer.
         Assert.Equal("IL", PostGridAddressVerifier.ReadPreviews(System.Text.Json.JsonDocument.Parse("{\"data\":[{\"preview\":{\"address\":\"1 Main St\",\"city\":\"Joliet\",\"pc\":\"60431\"}}]}").RootElement, "IL").Single().State);
     }
+
+    [Fact]
+    public async Task The_database_is_backed_up_and_only_the_system_administrator_can_get_a_copy()
+    {
+        var (owner, _, site, _, _) = await SetUpAsync();
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync("/api/system/backups")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.PostAsync("/api/system/backups", null)).StatusCode);
+
+        // Asked for now: a copy is made, checked, and listed. With no storage account set up (as here), it is kept on the site's disk.
+        var made = (await (await site.PostAsync("/api/system/backups", null)).Content.ReadFromJsonAsync<BackupsDto>())!;
+        Assert.True(made.Last!.Ok, made.Last.Problem);
+        Assert.Matches(@"^restaurant-feedback-\d{8}-\d{6}\.db\.gz$", made.Last.Name);
+        Assert.True(made.Last.Bytes > 1000);
+        var listed = made.Files.Single(f => f.Name == made.Last.Name);
+        Assert.Equal((true, false, made.Last.Bytes), (listed.OnSite, listed.OffSite, listed.Bytes));
+
+        // The copy opens as a database of its own, sound, with the site's people in it.
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync($"/api/system/backups/{made.Last.Name}/download")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await site.GetAsync("/api/system/backups/restaurant-feedback-19990101-000000.db.gz/download")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await site.GetAsync("/api/system/backups/keys.xml/download")).StatusCode);
+        var download = await site.GetAsync($"/api/system/backups/{made.Last.Name}/download");
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        var restored = Path.Combine(Path.GetTempPath(), $"restored-{Guid.NewGuid():N}.db");
+        try
+        {
+            await using (var zipped = new System.IO.Compression.GZipStream(await download.Content.ReadAsStreamAsync(), System.IO.Compression.CompressionMode.Decompress))
+            await using (var file = File.Create(restored))
+                await zipped.CopyToAsync(file);
+            await using var copy = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = restored, Pooling = false }.ToString());
+            await copy.OpenAsync();
+            await using var ask = copy.CreateCommand();
+            ask.CommandText = "select (select count(*) from Users) || '|' || (select count(*) from Restaurants) || '|' || (select * from pragma_integrity_check limit 1)";
+            var parts = ((string)(await ask.ExecuteScalarAsync())!).Split('|');
+            Assert.True(int.Parse(parts[0]) >= 2 && int.Parse(parts[1]) >= 1);
+            Assert.Equal("ok", parts[2]);
+        }
+        finally { if (File.Exists(restored)) File.Delete(restored); }
+
+        // Making a copy and taking one are both audited; a good copy tonight means none is due until tomorrow night.
+        Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "DatabaseBackedUp") && db.AuditLogs.Any(a => a.Action == "DatabaseBackupDownloaded"))));
+        using (var scope = factory.Services.CreateScope())
+        {
+            var backups = scope.ServiceProvider.GetRequiredService<DatabaseBackups>();
+            Assert.False(await backups.DueAsync(made.Last.At.AddMinutes(5)));
+            Assert.True(await backups.DueAsync(made.Last.At.AddDays(1).AddHours(1)));
+        }
+        Assert.DoesNotContain((await site.GetFromJsonAsync<SystemOverview>("/api/system/overview"))!.Attention, a => a.Title.Contains("back", StringComparison.OrdinalIgnoreCase));
+
+        // In storage, the newest copies are kept, and the first copy of each month for longer.
+        string N(string stamp) => $"restaurant-feedback-{stamp}.db.gz";
+        var kept = DatabaseBackups.Kept([N("20261120-080000"), N("20261119-080000"), N("20261118-080000"), N("20261101-080000"), N("20261015-080000"), N("20261001-080000"), N("20260901-080000"), "notes.txt"], daily: 2, monthly: 2);
+        Assert.Equal(new[] { N("20261001-080000"), N("20261101-080000"), N("20261119-080000"), N("20261120-080000") }, kept.Order());
+    }
 }

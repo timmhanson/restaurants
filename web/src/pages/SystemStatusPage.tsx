@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { EndpointStat, ErrorRow, SystemStatus } from '../api/types'
+import BackupsPanel from '../components/BackupsPanel'
 import DataTable from '../components/DataTable'
 import Stat from '../components/Stat'
 import { Alert, Badge, Spinner, fmtDateTime } from '../components/ui'
@@ -61,6 +62,8 @@ export default function SystemStatusPage() {
             <Stat value={`${data.avgMs24h} ms`} label={`average response (19 in 20 under ${data.p95Ms24h} ms)`} warn={data.p95Ms24h > 3000} />
             <Stat value={since(data.startedAt)} label="since the site last restarted" />
           </div>
+
+          <BackupsPanel />
 
           <div className="grid grid-2">
             <div className="panel">
