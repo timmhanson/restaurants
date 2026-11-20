@@ -69,6 +69,11 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var undelivered = openBills.Count(i => i.DeliveryError != null);
         if (undelivered > 0)
             attention.Add(new("medium", $"{undelivered} mailing bill{(undelivered == 1 ? " was" : "s were")} not sent", "Billing shows why for each one, with Send again.", "/system-billing"));
+        var since = DateTime.UtcNow.AddDays(-30);
+        var moneyBack = await db.StripeEvents.AsNoTracking().CountAsync(e => e.ReceivedAt >= since && (e.Type == "charge.refunded" || e.Type == "charge.dispute.created"));
+        if (moneyBack > 0)
+            attention.Add(new("high", $"Stripe reported {moneyBack} refund{(moneyBack == 1 ? "" : "s")} or dispute{(moneyBack == 1 ? "" : "s")} in the last 30 days",
+                "Money that came in has gone back out, or may. Billing lists each one under Payment notifications, with the bill it belongs to.", "/system-billing"));
         var failedPayments = openBills.Count(i => i.PaymentError != null);
         if (failedPayments > 0)
             attention.Add(new("medium", $"{failedPayments} mailing bill payment{(failedPayments == 1 ? "" : "s")} did not go through", "The group has been shown why on its Billing page. Billing lists them.", "/system-billing"));

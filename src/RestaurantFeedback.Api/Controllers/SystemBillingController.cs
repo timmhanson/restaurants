@@ -244,6 +244,45 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
     /// One month's mailed cards by investment group and restaurant, split into what the mail house cost and the site's
     /// fee. Filters by investment group and restaurant.
     /// </summary>
+    /// <summary>
+    /// What Stripe has told the site, newest first: every notification its webhook has received.
+    /// </summary>
+    /// <param name="groupId">Only notifications about this investment group's bills.</param>
+    /// <param name="kind">all, bills (about a bill on this site) or look (refunds and disputes).</param>
+    [HttpGet("notifications")]
+    public async Task<List<PaymentNotificationDto>> Notifications(int? groupId, string? kind, int take = 100, CancellationToken ct = default)
+    {
+        var q = db.StripeEvents.AsNoTracking().AsQueryable();
+        if (groupId is not null) q = q.Where(e => e.GroupId == groupId);
+        if (kind == "bills") q = q.Where(e => e.InvoiceId != null);
+        if (kind == "look") q = q.Where(e => e.Type == "charge.refunded" || e.Type == "charge.dispute.created");
+        var rows = await q.OrderByDescending(e => e.Id).Take(Math.Clamp(take, 1, 500)).ToListAsync(ct);
+        return await ToDtos(rows, ct);
+    }
+
+    /// <summary>One notification with every data point in it. Read by System Administrators only; reading it is audited.</summary>
+    [HttpGet("notifications/{id:int}")]
+    public async Task<ActionResult<PaymentNotificationDetail>> Notification(int id, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var row = await db.StripeEvents.AsNoTracking().FirstOrDefaultAsync(e => e.Id == id, ct);
+        if (row is null) return NotFound();
+        await audit.LogAsync(me, "PaymentNotificationRead", "StripeEvent", row.Id, new { row.Type, row.EventId }, groupId: row.GroupId);
+        return new PaymentNotificationDetail((await ToDtos([row], ct))[0], PaymentNotifications.DataPoints(row.Payload));
+    }
+
+    private async Task<List<PaymentNotificationDto>> ToDtos(List<StripeEvent> rows, CancellationToken ct)
+    {
+        var invoiceIds = rows.Where(r => r.InvoiceId != null).Select(r => r.InvoiceId!.Value).Distinct().ToList();
+        var bills = await db.MailInvoices.AsNoTracking().Where(i => invoiceIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Number, ct);
+        var groupIds = rows.Where(r => r.GroupId != null).Select(r => r.GroupId!.Value).Distinct().ToList();
+        var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id)).ToDictionaryAsync(g => g.Id, g => g.Name, ct);
+        return rows.Select(e => new PaymentNotificationDto(e.Id, e.EventId, e.Type, PaymentNotifications.Label(e.Type), DateTime.SpecifyKind(e.ReceivedAt, DateTimeKind.Utc),
+            e.CreatedAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null, !e.LiveMode, e.Deliveries, e.ObjectType, e.ObjectId, e.PaymentId, e.InvoiceId,
+            e.InvoiceId is int i ? bills.GetValueOrDefault(i) : null, e.GroupId, e.GroupId is int g ? groups.GetValueOrDefault(g) : null, e.AmountCents, e.Currency, e.Status, e.Reason, e.Outcome,
+            PaymentNotifications.NeedsALook(e.Type))).ToList();
+    }
+
     [HttpGet("statement")]
     public async Task<SiteMailStatement> Statement(string? month, int? groupId, int? restaurantId, CancellationToken ct)
     {
@@ -299,6 +338,11 @@ public class SystemBillingController(AppDbContext db, AuditService audit, Curren
             i.FeeCents, i.TotalCents, DateTime.SpecifyKind(i.IssuedAt, DateTimeKind.Utc), i.DueOn, i.Status, Overdue(i), i.PaidAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null, i.PaidHow,
             i.PaidNote, i.PaidBy, i.SurchargeCents, i.PaymentRef, i.PaymentError, i.EmailedAt is { } e ? DateTime.SpecifyKind(e, DateTimeKind.Utc) : null, i.EmailedTo,
             i.PrintedAt is { } p ? DateTime.SpecifyKind(p, DateTimeKind.Utc) : null, i.DeliveryError, BillingService.Lines(i)) { CreditCents = i.CreditCents, DueCents = BillingService.Due(i), For = i.UnitName }).ToList();
+        // What Stripe has said about each of the bills shown.
+        var shownIds = shown.Select(i => i.Id).ToList();
+        var said = (await ToDtos(await db.StripeEvents.AsNoTracking().Where(e => e.InvoiceId != null && shownIds.Contains(e.InvoiceId.Value)).OrderByDescending(e => e.Id).ToListAsync(ct), ct))
+            .ToLookup(n => n.InvoiceId!.Value);
+        shown = shown.Select(i => i with { Notifications = said[i.Id].ToList() }).ToList();
 
         var have = allInvoices.Select(i => (i.GroupId, i.Month)).ToHashSet();
         var unbilled = billed.Where(c => c.At < monthStart && c.Cents > 0).Select(c => (c.GroupId, Month: MailLedger.MonthKey(c.At))).Distinct()

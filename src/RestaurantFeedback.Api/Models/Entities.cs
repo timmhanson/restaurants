@@ -411,6 +411,39 @@ public class GroupBilling
     public bool AutoPay { get; set; }
 }
 
+/// <summary>
+/// One notification from Stripe (its webhook), kept whole after its signature was checked. Payload is everything
+/// Stripe sent; the other columns are read out of it so the list can be searched and shown. See PaymentNotifications.
+/// </summary>
+public class StripeEvent
+{
+    public int Id { get; set; }
+    /// <summary>Stripe's own id for the notification (evt_…). The same one sent again is counted, not kept twice.</summary>
+    public string EventId { get; set; } = "";
+    public string Type { get; set; } = "";
+    /// <summary>When Stripe says it happened.</summary>
+    public DateTime? CreatedAt { get; set; }
+    public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastReceivedAt { get; set; }
+    public int Deliveries { get; set; } = 1;
+    public bool LiveMode { get; set; }
+    public string? ApiVersion { get; set; }
+    public string? ObjectType { get; set; }
+    public string? ObjectId { get; set; }
+    /// <summary>The payment it is about (pi_…), which ties it to a bill.</summary>
+    public string? PaymentId { get; set; }
+    public int? InvoiceId { get; set; }
+    public int? GroupId { get; set; }
+    public int? AmountCents { get; set; }
+    public string? Currency { get; set; }
+    public string? Status { get; set; }
+    /// <summary>Why a payment failed or was cancelled, or what a dispute is about, in Stripe's words.</summary>
+    public string? Reason { get; set; }
+    /// <summary>What the site did about it.</summary>
+    public string? Outcome { get; set; }
+    public string Payload { get; set; } = "";
+}
+
 public static class BillSplits
 {
     public const string One = "one", Restaurant = "restaurant", Sets = "sets";

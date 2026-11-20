@@ -535,6 +535,8 @@ public record SystemInvoiceDto(int Id, int GroupId, string Group, string Number,
     public int CreditCents { get; init; }
     public int DueCents { get; init; }
     public string? For { get; init; }
+    /// <summary>What Stripe has told the site about this bill's payment, newest first.</summary>
+    public List<PaymentNotificationDto> Notifications { get; init; } = [];
 }
 /// <summary>One line of the credit log, with the System Administrator's details.</summary>
 public record GroupCreditDto(int Id, int GroupId, string Group, DateTime At, string Kind, string Label, int AmountCents, string Details, string By, string? InvoiceNumber);
@@ -560,6 +562,14 @@ public record GroupBillingRow(int GroupId, string Group, bool Active, int? FeeCe
     public int CreditCents { get; init; }
 }
 /// <param name="UnbilledMonths">Finished months that have mailed cards with no bill yet.</param>
+/// <summary>
+/// One notification from Stripe, for the System Administrator's Billing page. Label says it in plain words; Type is
+/// Stripe's own name for it. NeedsALook: a refund or a dispute.
+/// </summary>
+public record PaymentNotificationDto(int Id, string EventId, string Type, string Label, DateTime ReceivedAt, DateTime? HappenedAt, bool Test, int Deliveries, string? ObjectType, string? ObjectId,
+    string? PaymentId, int? InvoiceId, string? Bill, int? GroupId, string? Group, int? AmountCents, string? Currency, string? Status, string? Reason, string? Outcome, bool NeedsALook);
+/// <summary>A notification with every data point Stripe sent in it, one to a line.</summary>
+public record PaymentNotificationDetail(PaymentNotificationDto Notification, List<Services.DataPoint> DataPoints);
 public record SystemBillingDto(Services.BillingSettings Settings, bool MailReady, bool MailTest, bool PayReady, bool PayTest, bool EmailReady, List<GroupBillingRow> Groups,
     List<SystemInvoiceDto> Invoices, List<string> UnbilledMonths, int OwedCents, int OverdueCents)
 {

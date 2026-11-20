@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode, useRef } from 'react'
 import { api, groupStore, onAuthEvent, tokenStore } from '../api/client'
 import { flush } from '../api/tracker'
 import type { GroupDto, GroupSettings, LoginResponse, Permission, RestaurantDto, UserDto } from '../api/types'
@@ -8,6 +8,10 @@ interface AuthState {
   loading: boolean
   mustChangePassword: boolean
   restaurants: RestaurantDto[]
+  /** True once the restaurants and settings for the current user / group have come back (even if empty). */
+  contextLoaded: boolean
+  /** The last attempt to load the restaurants failed, so an empty list means "unknown", not "none". */
+  contextFailed: boolean
   settings: GroupSettings | null
   groups: GroupDto[]
   groupId: number | null
@@ -61,6 +65,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [mustChangePassword, setMustChange] = useState(false)
   const [restaurants, setRestaurants] = useState<RestaurantDto[]>([])
+  const [contextLoaded, setContextLoaded] = useState(false)
+  const [contextFailed, setContextFailed] = useState(false)
+  /** The person and group the restaurants on screen were loaded for. */
+  const contextFor = useRef<string | null>(null)
   const [settings, setSettings] = useState<GroupSettings | null>(null)
   const [groups, setGroups] = useState<GroupDto[]>([])
   const [groupId, setGroupId] = useState<number | null>(groupStore.get())
@@ -70,6 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStore.set(null)
     setUser(null)
     setRestaurants([])
+    setContextLoaded(false)
+    contextFor.current = null
     setSettings(null)
     setGroups([])
     setMustChange(false)
@@ -91,12 +101,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshContext = useCallback(async () => {
+    let failed = false
     const [r, s] = await Promise.all([
-      api.get<RestaurantDto[]>('/restaurants').catch(() => [] as RestaurantDto[]),
+      api.get<RestaurantDto[]>('/restaurants').catch(() => {
+        failed = true
+        return [] as RestaurantDto[]
+      }),
       api.get<GroupSettings>('/settings').catch(() => defaultSettings),
     ])
     setRestaurants(r)
     setSettings(s)
+    setContextFailed(failed)
+    setContextLoaded(true)
   }, [])
 
   const applyLogin = useCallback(
@@ -123,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const selectGroup = useCallback((id: number | null) => {
     groupStore.set(id)
     setGroupId(id)
+    // "Loading" is shown by the effect below once the group has really changed; choosing the same group again changes nothing.
     if (id === null) {
       setRestaurants([])
       setSettings(null)
@@ -160,6 +177,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user || mustChangePassword) return
     if (user.role === 'SuperAdmin') void refreshGroups()
+    // A different person or group: say "Loading" rather than show the last one's restaurants, or "not assigned"
+  // before the answer is in. The same person checked again (the sign-in being confirmed) keeps what is on screen.
+    const whose = `${user.id}:${groupId ?? ''}`
+    if (contextFor.current !== whose) {
+      contextFor.current = whose
+      setContextLoaded(false)
+    }
     void refreshContext()
   }, [user, groupId, mustChangePassword, refreshContext, refreshGroups])
 
@@ -177,6 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       mustChangePassword,
       restaurants,
+      contextLoaded,
+      contextFailed,
       settings,
       groups,
       groupId,
@@ -196,7 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       overseeing: user?.role === 'SuperAdmin' && groupId === null,
       exitGroup,
     }
-  }, [user, loading, mustChangePassword, restaurants, settings, groups, groupId, login, logout, applyLogin, selectGroup, exitGroup, refreshContext, refreshGroups])
+  }, [user, loading, mustChangePassword, restaurants, contextLoaded, contextFailed, settings, groups, groupId, login, logout, applyLogin, selectGroup, exitGroup, refreshContext, refreshGroups])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

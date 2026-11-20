@@ -349,7 +349,17 @@ export interface BillingSettings {
   mailMode: 'live' | 'test' | 'each'; businessName: string; businessEmail?: string | null
   street?: string | null; city?: string | null; state?: string | null; zip?: string | null; payInstructions?: string | null; siteUrl?: string | null
 }
+/** One notification from Stripe's webhook. label says it in plain words; needsALook marks a refund or a dispute. */
+export interface PaymentNotification {
+  id: number; eventId: string; type: string; label: string; receivedAt: string; happenedAt?: string | null; test: boolean; deliveries: number
+  objectType?: string | null; objectId?: string | null; paymentId?: string | null; invoiceId?: number | null; bill?: string | null
+  groupId?: number | null; group?: string | null; amountCents?: number | null; currency?: string | null; status?: string | null; reason?: string | null
+  outcome?: string | null; needsALook: boolean
+}
+export interface PaymentNotificationDetail { notification: PaymentNotification; dataPoints: { name: string; value: string }[] }
 export interface SystemInvoice extends Omit<Invoice, 'payFeeCents'> {
+  /** What Stripe has told the site about this bill's payment, newest first. */
+  notifications: PaymentNotification[]
   groupId: number; group: string; costCents: number; feeCents: number; paidNote?: string | null; paidBy?: string | null; paymentRef?: string | null
   emailedAt?: string | null; emailedTo?: string | null; printedAt?: string | null; deliveryError?: string | null
 }

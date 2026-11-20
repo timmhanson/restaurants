@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GroupBilling> GroupBilling => Set<GroupBilling>();
     public DbSet<MailInvoice> MailInvoices => Set<MailInvoice>();
     public DbSet<GroupCredit> GroupCredits => Set<GroupCredit>();
+    public DbSet<StripeEvent> StripeEvents => Set<StripeEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -85,6 +86,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         invoice.Property(i => i.Month).HasMaxLength(7);
         invoice.Property(i => i.Number).HasMaxLength(40);
         invoice.Property(i => i.Status).HasMaxLength(20);
+        var stripeEvent = b.Entity<StripeEvent>();
+        stripeEvent.HasIndex(e => e.EventId).IsUnique();
+        stripeEvent.HasIndex(e => e.InvoiceId);
+        stripeEvent.HasIndex(e => e.ReceivedAt);
+        stripeEvent.Property(e => e.EventId).HasMaxLength(120);
+        stripeEvent.Property(e => e.Type).HasMaxLength(120);
+        stripeEvent.Property(e => e.ObjectId).HasMaxLength(120);
+        stripeEvent.Property(e => e.PaymentId).HasMaxLength(120);
         var credit = b.Entity<GroupCredit>();
         credit.HasIndex(c => c.GroupId);
         credit.HasIndex(c => c.Key).IsUnique();

@@ -380,6 +380,26 @@ for a System Administrator unless they choose **View as admin** / **Open in grou
 its Investment Group Administrator sees it under a yellow bar. That choice lasts for the browser tab only.
 All of `/api/system/*` is `SuperAdmin` only.
 
+### What Stripe tells the site (payment notifications)
+
+Stripe calls `POST /webhooks/stripe` about payments, refunds and disputes. Nothing in a notification is trusted
+until its signature has been checked against the signing secret saved on Connected Systems. Then:
+
+- **Every notification is kept whole, once** (`StripeEvent`, `PaymentNotifications`): the full payload, plus what
+  was read out of it (type, when, the payment, amount, status, Stripe's reason) and the bill and group it is about.
+  Stripe sending the same one again is counted on the row already kept. Notifications that fail the signature
+  check are not kept.
+- **Billing shows them** to the System Administrator (`GET /api/system/billing/notifications`, filter by group):
+  a "Payment notifications from Stripe" panel in plain words, each row opening to every data point Stripe sent
+  (`…/notifications/{id}`, which is audited as `PaymentNotificationRead`). Each bill's details list what Stripe has
+  said about its payment, and a refund or dispute is flagged on the bill and on the Overview's "Needs your attention".
+- **Who can read them:** System Administrators only. Payloads carry the payer's name, email and billing address
+  (never a card or bank account number, only the last four digits), so they are not written to the application
+  log or the audit log; the audit row `PaymentNotificationReceived` says only what kind it was and which bill.
+- In Stripe the destination listens for `payment_intent.succeeded`, `.payment_failed`, `.canceled`, `.processing`,
+  `charge.refunded`, `charge.dispute.created` and `charge.dispute.closed`. Only the payment ones change a bill
+  (after the site asks Stripe itself how the payment stands); the others are kept and shown.
+
 ### Mailing keys, real or test, and how a group is billed
 
 - **Two PostGrid keys.** Connected Systems takes a test key and a live key (`postgrid.mail.test`,

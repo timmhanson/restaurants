@@ -100,6 +100,7 @@ if (payments.Sample && builder.Environment.IsDevelopment())
 else
     builder.Services.AddHttpClient<IPaymentProvider, StripePayments>();
 builder.Services.AddScoped<CardDesigns>();
+builder.Services.AddScoped<PaymentNotifications>();
 builder.Services.AddHttpClient();
 if (postGrid.Sample && builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IPostGridMailer, SamplePostGridMailer>();
@@ -203,7 +204,7 @@ app.MapGet("/card-fonts/{file}", (string file, HttpContext http) =>
 // Stripe's notifications about payments (webhooks). Outside /api because Stripe is not a copy of the site and
 // sends no session id. Nothing in a notification is trusted until its signature has been checked, and even then
 // the site asks Stripe itself how the payment stands before a bill is marked paid.
-app.MapPost("/webhooks/stripe", async (HttpContext http, PaymentAccountStore account, BillingService billing, ILogger<StripePayments> log) =>
+app.MapPost("/webhooks/stripe", async (HttpContext http, PaymentAccountStore account, BillingService billing, PaymentNotifications notifications, ILogger<StripePayments> log) =>
 {
     CachePolicy.NoStore(http.Response.Headers);
     if (account.WebhookSecret is not { } secret) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -217,14 +218,21 @@ app.MapPost("/webhooks/stripe", async (HttpContext http, PaymentAccountStore acc
         return Results.BadRequest(new { message = "The signature did not match." });
     }
     account.NoteNotification();
+    // Everything Stripe sent is kept, whatever it is about, before anything is done with it.
+    var kept = await notifications.RecordAsync(body, http.RequestAborted);
     try
     {
-        if (StripeWebhooks.PaymentId(body) is { } paymentId) await billing.PaymentNotifiedAsync(paymentId, http.RequestAborted);
+        var settled = StripeWebhooks.PaymentId(body) is { } paymentId && await billing.PaymentNotifiedAsync(paymentId, http.RequestAborted);
+        // A repeat of a notification that was already acted on leaves what was done the first time on record.
+        if (settled || kept.Outcome is null)
+            await notifications.OutcomeAsync(kept, settled ? "The site asked Stripe how the payment stands and brought the bill up to date."
+                : kept.InvoiceId is null ? "Kept. It is not about a bill on this site." : "Kept. The bill was already up to date.", http.RequestAborted);
     }
     catch (PaymentException ex)
     {
         // Stripe sends it again later; the hourly round also checks payments that are on their way.
         log.LogWarning("A Stripe notification could not be acted on yet: {Message}", ex.Message);
+        await notifications.OutcomeAsync(kept, "Kept. Stripe could not be asked about the payment just then, so it will be looked at again.", http.RequestAborted);
         return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
     return Results.Ok(new { received = true });

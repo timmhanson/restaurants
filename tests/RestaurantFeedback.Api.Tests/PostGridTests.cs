@@ -451,6 +451,35 @@ public class PostGridTests(ApiFactory factory)
         Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Count(a => a.Action == "MailBillPaymentArrived" && a.GroupId == groupId) == 1)));
         Assert.False(await Db(db => Task.FromResult(db.AuditLogs.ToList().Any(a => (a.Details ?? "").Contains(hookSecret)))));
 
+        // Everything Stripe sent is kept, once: the repeat is counted on the same row, and what was refused is not kept at all.
+        var kept = await Db(db => Task.FromResult(db.StripeEvents.ToList()));
+        var arrived = Assert.Single(kept);
+        Assert.Equal(("evt_1", "payment_intent.succeeded", 2, second.Id, groupId, "succeeded"), (arrived.EventId, arrived.Type, arrived.Deliveries, arrived.InvoiceId ?? 0, arrived.GroupId ?? 0, arrived.Status));
+        Assert.Contains("brought the bill up to date", arrived.Outcome);
+        // Only the System Administrator reads the log. Billing shows each notification in plain words, with its bill.
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync("/api/system/billing/notifications")).StatusCode);
+        var listed = Assert.Single((await site.GetFromJsonAsync<List<PaymentNotificationDto>>($"/api/system/billing/notifications?groupId={groupId}"))!);
+        Assert.Equal(("Payment arrived", second.Number, false), (listed.Label, listed.Bill, listed.NeedsALook));
+        Assert.Equal("evt_1", Assert.Single((await Billing(site)).Invoices.Single(i => i.Id == second.Id).Notifications).EventId);
+        // Every data point in it can be looked up, and looking is audited.
+        var detail = (await site.GetFromJsonAsync<PaymentNotificationDetail>($"/api/system/billing/notifications/{listed.Id}"))!;
+        Assert.Contains(detail.DataPoints, d => d is { Name: "data.object.status", Value: "succeeded" });
+        Assert.Contains(detail.DataPoints, d => d is { Name: "id", Value: "evt_1" });
+        Assert.Equal(5, detail.DataPoints.Count);
+        Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "PaymentNotificationRead")) ));
+        Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Count(a => a.Action == "PaymentNotificationReceived" && a.GroupId == groupId) == 1)));
+
+        // A refund reported by Stripe is kept against the same bill and marked as needing a look.
+        notice = "{\"id\":\"evt_2\",\"type\":\"charge.refunded\",\"created\":1795000000,\"livemode\":false,\"data\":{\"object\":{\"id\":\"ch_1\",\"object\":\"charge\",\"amount\":291,\"amount_refunded\":100,"
+            + "\"currency\":\"usd\",\"payment_intent\":\"" + payRef + "\",\"status\":\"succeeded\",\"refunds\":{\"data\":[{\"id\":\"re_1\",\"amount\":100}]}}}}";
+        Assert.Equal(HttpStatusCode.OK, (await stripe.SendAsync(Notify(hookSecret, DateTimeOffset.UtcNow))).StatusCode);
+        var look = Assert.Single((await site.GetFromJsonAsync<List<PaymentNotificationDto>>("/api/system/billing/notifications?kind=look"))!);
+        Assert.Equal(("Payment refunded", 100, "usd", second.Number, true, true), (look.Label, look.AmountCents, look.Currency, look.Bill, look.NeedsALook, look.Test));
+        Assert.Contains("refund", (await site.GetFromJsonAsync<SystemOverview>("/api/system/overview"))!.Attention.Select(a => a.Title).FirstOrDefault(x => x.Contains("refund")) ?? "");
+        Assert.Contains((await site.GetFromJsonAsync<PaymentNotificationDetail>($"/api/system/billing/notifications/{look.Id}"))!.DataPoints, d => d is { Name: "data.object.refunds.data[0].amount", Value: "100" });
+        Assert.Equal("paid", await StatusOfSecond());
+        await Db(async db => { db.StripeEvents.RemoveRange(db.StripeEvents); return await db.SaveChangesAsync(); });
+
         // Automatic payment: the hourly round charges the last open bill once, and sees the bank payment arrive.
         Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/billing/auto-pay", new AutoPayRequest(true))).StatusCode);
         factory.Payments.Settle((await Billing(site)).Invoices.Single(i => i.Id == second.Id).PaymentRef!);

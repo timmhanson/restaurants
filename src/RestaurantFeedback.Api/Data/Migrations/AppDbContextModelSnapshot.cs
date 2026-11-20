@@ -999,6 +999,88 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("SiteSettings");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.StripeEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AmountCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ApiVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Currency")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Deliveries")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastReceivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("LiveMode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ObjectId")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ObjectType")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaymentId")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
+
+                    b.HasIndex("InvoiceId");
+
+                    b.HasIndex("ReceivedAt");
+
+                    b.ToTable("StripeEvents");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.UserRestaurant", b =>
                 {
                     b.Property<int>("UserId")

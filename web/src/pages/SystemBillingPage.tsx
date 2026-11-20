@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { BillingSettings, GroupBillingRow, GroupCredit, SiteMailStatement, SystemBilling, SystemInvoice } from '../api/types'
+import PaymentNotificationsPanel, { NotificationBadge } from '../components/PaymentNotificationsPanel'
 import Stat from '../components/Stat'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, fmtDate, fmtDateTime, fmtDay, today } from '../components/ui'
 
@@ -171,6 +172,8 @@ export default function SystemBillingPage() {
           </div>
         )}
       </div>
+
+      <PaymentNotificationsPanel groupId={groupId} refreshKey={data} />
 
       <div className="panel">
         <h2>Investment groups</h2>
@@ -419,6 +422,7 @@ function InvoiceRows({ invoice: i, open, onToggle, busy, onPaid, onVoid, onReope
           {i.overdue ? <Badge kind="danger">Overdue</Badge> : <Badge kind={s.kind}>{s.label}</Badge>}
           {i.status === 'paid' && <div className="muted small">{fmtDay(i.paidAt)}{i.paidHow ? `, ${PAID_WITH[i.paidHow]?.toLowerCase() ?? i.paidHow}` : ''}</div>}
           {i.paymentError && <div className="small" style={{ color: 'var(--danger)' }}>Payment failed</div>}
+          {i.notifications.filter((n) => n.needsALook).slice(0, 1).map((n) => <div key={n.id}><NotificationBadge n={n} /></div>)}
         </td>
         <td>
           {i.emailedAt ? <span className="small">Emailed {fmtDay(i.emailedAt)}</span> : <span className="muted small">Not emailed</span>}
@@ -449,6 +453,20 @@ function InvoiceRows({ invoice: i, open, onToggle, busy, onPaid, onVoid, onReope
               {i.status === 'paid' && (<><dt>Paid</dt><dd>{fmtDateTime(i.paidAt)}{i.paidHow ? ` by ${HOW[i.paidHow]?.toLowerCase() ?? i.paidHow}` : ''}{i.paidBy ? `, recorded by ${i.paidBy}` : ''}{i.paidNote ? ` (${i.paidNote})` : ''}</dd></>)}
               {i.paymentRef && (<><dt>Stripe payment</dt><dd><code>{i.paymentRef}</code></dd></>)}
               {i.paymentError && (<><dt>Payment problem</dt><dd style={{ color: 'var(--danger)' }}>{i.paymentError}</dd></>)}
+              {i.notifications.length > 0 && (
+                <>
+                  <dt>Stripe has said</dt>
+                  <dd>
+                    {i.notifications.map((n) => (
+                      <div key={n.id}>
+                        <NotificationBadge n={n} /> <span className="small">{fmtDateTime(n.receivedAt)}{n.amountCents != null ? ` · ${money(n.amountCents)}` : ''}{n.status ? ` · ${n.status}` : ''}</span>
+                        {n.reason && <span className="small" style={{ color: 'var(--danger)' }}> · {n.reason}</span>}
+                      </div>
+                    ))}
+                    <span className="muted small">Every data point of each is under Payment notifications below.</span>
+                  </dd>
+                </>
+              )}
             </dl>
           </td>
         </tr>

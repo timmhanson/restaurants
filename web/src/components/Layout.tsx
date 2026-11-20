@@ -6,7 +6,7 @@ import { track } from '../api/tracker'
 import FollowUpNotice from './FollowUpNotice'
 
 export default function Layout() {
-  const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup } = useAuth()
+  const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup, contextLoaded } = useAuth()
   const [open, setOpen] = useState(false)
   const nav = useNavigate()
   const bar = useRef<HTMLDivElement>(null)
@@ -93,7 +93,7 @@ export default function Layout() {
           <span className="brand-mark" />
           <div>
             <div className="brand-title">Guest Feedback</div>
-            <div className="brand-sub">{context || 'No restaurant assigned'}</div>
+            <div className="brand-sub">{context || (contextLoaded ? 'No restaurant assigned' : 'Loading…')}</div>
           </div>
         </div>
         <div className="user-menu">

@@ -3,22 +3,33 @@ import { Link } from 'react-router-dom'
 import type { CommentSummary } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import CardForm, { emptyCard } from '../components/CardForm'
-import { Alert, Empty, fmtDate } from '../components/ui'
+import { Alert, Empty, Spinner, fmtDate } from '../components/ui'
 
 export default function EnterCardPage() {
-  const { restaurants, settings, has, refreshContext } = useAuth()
+  const { restaurants, contextLoaded, contextFailed, settings, has, refreshContext } = useAuth()
   const [saved, setSaved] = useState<CommentSummary | null>(null)
   const [formKey, setFormKey] = useState(0)
   const initial = useMemo(() => emptyCard(restaurants.length === 1 ? restaurants[0].id : 0), [restaurants, formKey])
+
+  if (!contextLoaded) {
+    return (
+      <>
+        <h1>Enter a guest card</h1>
+        <Spinner label="Loading…" />
+      </>
+    )
+  }
 
   if (!restaurants.length) {
     return (
       <>
         <h1>Enter a guest card</h1>
         <Empty>
-          You are not assigned to a restaurant yet, so there is nowhere to file a card.{' '}
+          {contextFailed
+            ? 'Your restaurants could not be loaded just now.'
+            : 'You are not assigned to a restaurant yet, so there is nowhere to file a card.'}{' '}
           <button type="button" className="btn-link" onClick={() => void refreshContext()}>
-            Refresh
+            {contextFailed ? 'Try again' : 'Refresh'}
           </button>
         </Empty>
       </>

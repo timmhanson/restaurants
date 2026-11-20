@@ -53,6 +53,12 @@ See README.md for the architecture, roles and deployment.
 - **Card and bank numbers never touch the site.** Payment methods are entered on Stripe's own page; store only
   Stripe's references and a label. A charge needs the amount confirmed by the person (or automatic payment they
   switched on), an idempotency key so a bill cannot be charged twice, and an audit row.
+- **What an outside service tells the site is kept, and kept private.** Stripe's notifications are stored whole
+  (`StripeEvent`) after their signature is checked, shown only in the System Administrator's Billing area, and never
+  copied into the application log, the audit log's details or anything a group can read.
+- **Say "Loading…" until the answer is in.** Never show an empty-state message ("not assigned to a restaurant",
+  "nothing yet") before the data has come back; `contextLoaded` in `AuthContext` says when the person's restaurants
+  are known.
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use
