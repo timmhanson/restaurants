@@ -168,6 +168,7 @@ public class FakePostGridMailer : IPostGridMailer
             if (_byIdempotencyKey.TryGetValue(idempotencyKey, out var seen)) return Task.FromResult(seen);
             if (request.To.LastName?.Contains("Unreachable") == true) throw new PostGridException("PostGrid could not be reached.", answered: false);
             if (request.To.LastName?.Contains("Refused") == true) throw new PostGridException("PostGrid refused the card (422: address is invalid).", answered: true);
+            if (request.To.AddressLine1?.Contains("Nowhere") == true) throw new PostGridException("PostGrid refused the card (422: the recipient's address could not be verified).", answered: true);
             Created++;
             var card = new MailedPostcard($"postcard_test{Created}", MailStatuses.Ready, !MailStatuses.IsKeyForTest(key), $"https://proofs.test/{Created}.pdf", null);
             _byIdempotencyKey[idempotencyKey] = card;

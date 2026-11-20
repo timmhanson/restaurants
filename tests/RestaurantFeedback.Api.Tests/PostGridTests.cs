@@ -1729,7 +1729,7 @@ public class PostGridTests(ApiFactory factory)
     [Fact]
     public async Task Addresses_are_offered_as_the_street_is_typed_for_restaurants_that_have_cards_mailed()
     {
-        var (owner, _, site, rid, groupId) = await SetUpAsync();
+        var (owner, admin, site, rid, groupId) = await SetUpAsync();
         const string typed = "7431 Quietwater";
         async Task<AddressSuggestResponse> Ask(HttpClient who, int restaurant, string street) =>
             (await (await who.PostAsJsonAsync("/api/addresses/suggest", new AddressSuggestRequest(restaurant, street, null, null, null))).Content.ReadFromJsonAsync<AddressSuggestResponse>())!;
@@ -1756,13 +1756,17 @@ public class PostGridTests(ApiFactory factory)
             Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("off", null, null, null, null, null))).StatusCode);
             var off = await Ask(owner, rid, typed);
             Assert.False(off.Available);
+            // Why is told to the System Administrator only: an owner is not told how the site is set up.
+            Assert.Null(off.Why);
+            Assert.Equal("mail", (await Ask(admin, rid, typed)).Why);
             Assert.Empty(off.Suggestions);
             Assert.Equal(before + 1, factory.Suggestions.Calls);
 
             // And with no address service that can offer them, nothing is offered either.
             Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("on", null, null, null, null, null))).StatusCode);
             factory.Suggestions.Configured = false;
-            Assert.False((await Ask(owner, rid, typed)).Available);
+            Assert.Equal((false, null), ((await Ask(owner, rid, typed)).Available, (await Ask(owner, rid, typed)).Why));
+            Assert.Equal("key", (await Ask(admin, rid, typed)).Why);
         }
         finally { factory.Suggestions.Configured = true; }
 
@@ -1833,5 +1837,49 @@ public class PostGridTests(ApiFactory factory)
         string N(string stamp) => $"restaurant-feedback-{stamp}.db.gz";
         var kept = DatabaseBackups.Kept([N("20261120-080000"), N("20261119-080000"), N("20261118-080000"), N("20261101-080000"), N("20261015-080000"), N("20261001-080000"), N("20260901-080000"), "notes.txt"], daily: 2, monthly: 2);
         Assert.Equal(new[] { N("20261001-080000"), N("20261101-080000"), N("20261119-080000"), N("20261120-080000") }, kept.Order());
+    }
+
+    [Fact]
+    public async Task An_address_the_mailing_service_refuses_is_corrected_from_the_mailing_screen_and_the_card_then_goes()
+    {
+        var (owner, _, _, rid, _) = await SetUpAsync();
+        var request = Card(rid, "Fixable");
+        request.StreetAddress = "12 Nowhere Ln";
+        var card = await Create(owner, request);
+        try
+        {
+            // The mailing service does not take the address. The answer says so in the group's words, and marks it as
+            // something correcting the address will put right.
+            var refused = (await Mail(owner, [card.Id])).Single();
+            Assert.Equal((false, true), (refused.Ok, refused.AddressProblem));
+            Assert.DoesNotContain("PostGrid", refused.Error);
+            Assert.Contains("address", refused.Error);
+
+            // Corrected by the person sending it: the whole address is needed, only the address changes, and it is checked again.
+            Assert.Equal(HttpStatusCode.BadRequest, (await owner.PutAsJsonAsync($"/api/comments/{card.Id}/address", new CardAddressRequest("9 Mailer Rd", "Joliet", "IL", " "))).StatusCode);
+            var fixedCard = await owner.PutAsJsonAsync($"/api/comments/{card.Id}/address", new CardAddressRequest("  9  Mailer Rd ", "Joliet", "IL", "60431"));
+            Assert.Equal(HttpStatusCode.OK, fixedCard.StatusCode);
+            var now = (await fixedCard.Content.ReadFromJsonAsync<CommentSummary>())!;
+            Assert.Equal(("9 Mailer Rd", "Joliet", "IL", "60431", "Verified", "Fixable"), (now.StreetAddress, now.City, now.State, now.Zip, now.AddressStatus, now.GuestLastName));
+            var audited = await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.Action == "CardAddressCorrected" && a.EntityId == card.Id.ToString()).OrderByDescending(a => a.Id).First()));
+            Assert.Contains("Nowhere", audited.Details);
+            Assert.Contains("9 Mailer Rd", audited.Details);
+
+            // Sent again, it goes; and an address is not changed under a card that is already with the mailing service.
+            Assert.True((await Mail(owner, [card.Id])).Single().Ok);
+            var late = await owner.PutAsJsonAsync($"/api/comments/{card.Id}/address", new CardAddressRequest("1 Other St", "Joliet", "IL", "60431"));
+            Assert.Equal(HttpStatusCode.BadRequest, late.StatusCode);
+            Assert.Contains("already with the mailing service", await late.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            await Db(async db => { db.Comments.RemoveRange(db.Comments.Where(c => c.Id == card.Id)); return await db.SaveChangesAsync(); });
+        }
+
+        // Which refusals are about the address.
+        Assert.True(MailStatuses.IsAboutTheAddress("PostGrid refused the card (422: the recipient's address could not be verified)."));
+        Assert.True(MailStatuses.IsAboutTheAddress("Undeliverable"));
+        Assert.False(MailStatuses.IsAboutTheAddress("PostGrid refused the card (402: payment required)."));
+        Assert.False(MailStatuses.IsAboutTheAddress("PostGrid could not be reached."));
     }
 }

@@ -85,6 +85,10 @@ public static class MailStatuses
     /// The same message without the mail house's name, for investment groups: they deal with this site, and which
     /// company prints the cards is the site's business.
     /// </summary>
+    /// <summary>Whether a refusal is about where the card is going, so the person can put it right by correcting the guest's address.</summary>
+    public static bool IsAboutTheAddress(string message) =>
+        Regex.IsMatch(message, @"address|undeliverable|verif|zip|postal|recipient|\bto\b.*(invalid|missing)", RegexOptions.IgnoreCase);
+
     public static string ForClients(string message)
     {
         var s = Regex.Replace(message, @"PostGrid(?:'s|\u2019s)", "the mailing service's");

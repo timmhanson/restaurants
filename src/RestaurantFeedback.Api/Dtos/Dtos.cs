@@ -440,7 +440,13 @@ public record PrintConfig(bool PostageAvailable, string PostageProvider, bool Ca
 /// <param name="ConfirmCentsPerCard">The price per card the person was shown; the request is refused if the price has changed since.</param>
 public record MailRequest(int[] CommentIds, int ConfirmCount, int ConfirmCentsPerCard);
 /// <param name="Status">The mail house's status: ready, printing, processed_for_delivery, completed or cancelled.</param>
-public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, bool AlreadyMailed, string? Error);
+public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, bool AlreadyMailed, string? Error)
+{
+    /// <summary>The card was not taken because of the guest's address, so correcting the address is the way forward.</summary>
+    public bool AddressProblem { get; init; }
+}
+/// <summary>A guest's mailing address as corrected by the person sending the card.</summary>
+public record CardAddressRequest([MaxLength(200)] string? StreetAddress, [MaxLength(100)] string? City, [MaxLength(40)] string? State, [MaxLength(20)] string? Zip);
 /// <param name="HasProof">The mail house has a proof of the printed card, fetched through comments/{id}/mail/proof.</param>
 public record MailStatusDto(int CommentId, string? Status, bool Test, bool HasProof, string? Error);
 public record MailPreview(string FrontHtml, string BackHtml);
@@ -646,7 +652,14 @@ public record AddressCheckRequest(string? StreetAddress, string? City, string? S
 /// <summary>What has been typed of a guest's address so far, and the restaurant the card is for.</summary>
 public record AddressSuggestRequest(int RestaurantId, [MaxLength(200)] string? StreetAddress, [MaxLength(100)] string? City, [MaxLength(40)] string? State, [MaxLength(20)] string? Zip);
 /// <param name="Available">Addresses are offered for this restaurant. When false, the form stops asking.</param>
-public record AddressSuggestResponse(bool Available, List<Services.AddressPreview> Suggestions);
+public record AddressSuggestResponse(bool Available, List<Services.AddressPreview> Suggestions)
+{
+    /// <summary>
+    /// Why addresses are not offered, told to System Administrators only (the answer names how the site is set up):
+    /// "key" (no address service that can offer them has been set up) or "mail" (the restaurant does not have cards mailed).
+    /// </summary>
+    public string? Why { get; init; }
+}
 /// <param name="Available">False when address checking is not set up on this site (the form then shows nothing).</param>
 public record AddressCheckResponse(bool Available, string Status, string Message, AddressSuggestion? Suggested);
 

@@ -5,8 +5,15 @@ import type { AddressPreview } from '../api/types'
 
 const MIN_TYPED = 4
 
-/** Restaurants for which addresses are not offered, so the form stops asking. Kept for the visit. */
-const notOffered = new Set<number>()
+/** Restaurants for which addresses are not offered, and until when the form stops asking (a minute, so a change in set-up is picked up). */
+const notOffered = new Map<number, number>()
+const asksAgain = (restaurantId: number) => (notOffered.get(restaurantId) ?? 0) < Date.now()
+
+/** Told to the System Administrator only, while they use the form inside a group. */
+const WHY: Record<string, string> = {
+  key: 'Address suggestions are off: PostGrid’s Address Verification key has not been entered. Add it on Connected Systems, under PostGrid, “Checking guest addresses” (it is a different key from the Print & Mail keys). Only you see this note.',
+  mail: 'Address suggestions are offered for restaurants that have their cards printed and mailed, and that is off for this restaurant. Only you see this note.',
+}
 
 /**
  * The street address box on a guest's card. For restaurants that have their cards printed and mailed for them, it
@@ -28,6 +35,7 @@ export default function AddressSuggestInput({ value, city, state, zip, restauran
   const [offered, setOffered] = useState<AddressPreview[]>([])
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
+  const [why, setWhy] = useState<string | null>(null)
   const asked = useRef(0)
   // The street as it was filled in by a pick, so the box does not offer the same address straight back.
   const picked = useRef<string | null>(null)
@@ -36,15 +44,16 @@ export default function AddressSuggestInput({ value, city, state, zip, restauran
 
   useEffect(() => {
     const street = value.trim()
-    if (!typing.current || !restaurantId || notOffered.has(restaurantId) || street.length < MIN_TYPED || street === picked.current) {
+    if (!typing.current || !restaurantId || !asksAgain(restaurantId) || street.length < MIN_TYPED || street === picked.current) {
       if (street.length < MIN_TYPED) setOffered([])
       return
     }
     const mine = ++asked.current
     const timer = window.setTimeout(() => {
-      api.post<{ available: boolean; suggestions: AddressPreview[] }>('/addresses/suggest', { restaurantId, streetAddress: street, city, state, zip })
+      api.post<{ available: boolean; suggestions: AddressPreview[]; why?: string | null }>('/addresses/suggest', { restaurantId, streetAddress: street, city, state, zip })
         .then((r) => {
-          if (!r.available) notOffered.add(restaurantId)
+          if (!r.available) notOffered.set(restaurantId, Date.now() + 60_000)
+          setWhy(r.available ? null : r.why ?? null)
           if (mine !== asked.current) return
           setOffered(r.available ? r.suggestions : [])
           setActive(-1)
@@ -89,6 +98,7 @@ export default function AddressSuggestInput({ value, city, state, zip, restauran
           else if (e.key === 'Escape') setOpen(false)
         }}
       />
+      {why && WHY[why] && <span className="field-hint">{WHY[why]}</span>}
       {showing && (
         <span className="suggest-list" role="listbox" id={listId} aria-label="Addresses that match what you have typed">
           {offered.map((a, i) => (

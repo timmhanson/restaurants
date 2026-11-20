@@ -272,6 +272,37 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         return CommentSummary.From(c, check.PriorCount + 1);
     }
 
+    /// <summary>
+    /// Corrects a guest's mailing address, for the person sending the card: when the mailing service does not take
+    /// an address, or the card has none in full, it is put right from the mailing screen without opening the whole
+    /// card. Anyone who may send cards may (MarkResponded); nothing else on the card changes. Not for a card that is
+    /// already with the mailing service: that one is cancelled first. The new address is checked like any other.
+    /// </summary>
+    [HttpPut("{id:int}/address")]
+    public async Task<ActionResult<CommentSummary>> CorrectAddress(int id, CardAddressRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.MarkResponded) && !me.Has(ManagerPermission.EditComments)) return Forbid();
+        var c = await db.Comments.Include(x => x.Restaurant).FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null || !me.CanAccessRestaurant(c.RestaurantId)) return NotFound();
+        if (c.MailStatus is not null && c.MailStatus != MailStatuses.Cancelled)
+            return BadRequest(new { message = "This card is already with the mailing service. Cancel it first (while it has not been printed), then correct the address and send it again." });
+        static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        var (street, city, state, zip) = (Clean(req.StreetAddress), Clean(req.City), Clean(req.State), Clean(req.Zip));
+        if (street is null || city is null || state is null || zip is null)
+            return BadRequest(new { message = "Enter the street address, city, state and zip, so the card can be mailed." });
+
+        var addressBefore = AddressOf(c);
+        var before = new { c.StreetAddress, c.City, c.State, c.Zip, c.AddressStatus };
+        (c.StreetAddress, c.City, c.State, c.Zip) = (street, city, state, zip);
+        if (addressBefore == AddressOf(c)) return CommentSummary.From(c, 0);
+        await CheckAddress(c, addressBefore, ct);
+        c.UpdatedAt = DateTime.UtcNow; c.UpdatedByUserId = me.Id;
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(me, "CardAddressCorrected", "Comment", c.Id, new { before, after = new { c.StreetAddress, c.City, c.State, c.Zip, c.AddressStatus } }, c.RestaurantId);
+        return CommentSummary.From(c, 0);
+    }
+
     [HttpPost("{id:int}/responded")]
     public async Task<ActionResult<CommentSummary>> MarkResponded(int id, RespondRequest req)
     {

@@ -248,7 +248,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 log.LogWarning("PostGrid did not take card {CardId} for group {GroupId}: {Message}", c.Id, groupId, ex.Message);
                 var said = MailStatuses.ForClients(ex.Message);
                 await audit.LogAsync(me, "CardMailFailed", "Comment", c.Id, new { error = said }, c.RestaurantId);
-                results.Add(new(c.Id, false, null, false, false, said));
+                results.Add(new(c.Id, false, null, false, false, said) { AddressProblem = MailStatuses.IsAboutTheAddress(ex.Message) });
             }
         }
         return results;

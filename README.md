@@ -166,7 +166,15 @@ street, city, state and zip, and the address is then checked as usual. It uses P
 (`GET /v1/addver/completions`), which use no lookup, so offering addresses costs nothing; the paid completion
 call is not used. Addresses in the restaurant's state come first. What is typed travels in the request body, the
 list is marked `data-no-track`, outgoing requests are not logged, and only "Picked a suggested address" is
-recorded. Groups never see PostGrid's name here: the form just offers addresses.
+recorded. Groups never see PostGrid's name here: the form just offers addresses. When addresses are not
+offered, a System Administrator using the form inside a group is told why under the box (no key entered, or
+mailing off for the restaurant); nobody else is.
+
+**Correcting an address the mailing service refuses.** On Mail Cards, a card that was not taken because of its
+address says so with a **Correct the address** button, and every card not yet sent has **Correct address** (or
+**Add address**). The dialog has the same address suggestions and USPS check as Enter Card, changes only the
+address (`PUT /api/comments/{id}/address`, for anyone who may send cards; audited as `CardAddressCorrected`),
+and puts the card back among the cards to send. A card already with the mailing service is cancelled first.
 
 **How the cards go out.** The print screen offers three choices every time:
 

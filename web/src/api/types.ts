@@ -239,7 +239,11 @@ export interface PrintConfig {
 }
 /** Where a mailed card is. */
 export type MailStatus = 'ready' | 'printing' | 'processed_for_delivery' | 'completed' | 'cancelled'
-export interface MailOutcome { commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null }
+export interface MailOutcome {
+  commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null
+  /** The card was not taken because of the guest's address: correcting the address is the way forward. */
+  addressProblem?: boolean
+}
 export interface MailStatusInfo { commentId: number; status?: MailStatus | null; test: boolean; hasProof: boolean; error?: string | null }
 export interface MailPreview { frontHtml: string; backHtml: string }
 /** A card's QR code: the address it holds (this site's verify page) and the code as a picture for an img tag. */

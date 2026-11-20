@@ -1,3 +1,4 @@
+import CorrectAddressModal from '../components/CorrectAddressModal'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, downloadBlob } from '../api/client'
@@ -93,6 +94,8 @@ export default function MailCardsPage() {
   const [statuses, setStatuses] = useState<Record<number, MailStatusInfo>>({})
   const [confirm, setConfirm] = useState(false)
   const [cancelId, setCancelId] = useState<number | null>(null)
+  /** The card whose address is being corrected. */
+  const [fixing, setFixing] = useState<CommentSummary | null>(null)
   const [busy, setBusy] = useState<'send' | 'status' | 'cancel' | 'proof' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -298,9 +301,17 @@ export default function MailCardsPage() {
               </Alert>
             )}
             {tooMany && <Alert kind="warn">Up to {config.mailMaxCards} cards can be mailed at a time. Go back and choose fewer.</Alert>}
-            {failed.map((o) => (
-              <Alert key={o.commentId} kind="error">Not sent: {name(cards.find((c) => c.id === o.commentId))}. {o.error}</Alert>
-            ))}
+            {failed.map((o) => {
+              const card = cards.find((c) => c.id === o.commentId)
+              return (
+                <Alert key={o.commentId} kind="error">
+                  Not sent: {name(card)}. {o.error}{' '}
+                  {card && o.addressProblem && (
+                    <button type="button" className="btn btn-sm btn-primary" onClick={() => setFixing(card)} aria-label="Correct the address of the card that was not sent">Correct the address</button>
+                  )}
+                </Alert>
+              )
+            })}
             <div className="table-wrap">
               <table>
                 <thead>
@@ -341,6 +352,12 @@ export default function MailCardsPage() {
                         </td>
                         <td className="row-actions" style={{ whiteSpace: 'nowrap' }}>
                           <button type="button" className="btn btn-sm" onClick={() => setPreviewId(c.id)} disabled={previewId === c.id}>Show card</button>
+                          {!beingMailed(c) && !(c.responded && !outcomes[c.id]) && (
+                            <button type="button" className={`btn btn-sm ${!hasMailingAddress(c) || outcomes[c.id]?.addressProblem ? 'btn-primary' : ''}`} onClick={() => setFixing(c)} disabled={busy !== null}
+                              aria-label="Correct this card’s mailing address">
+                              {hasMailingAddress(c) ? 'Correct address' : 'Add address'}
+                            </button>
+                          )}
                           {hasProof && <button type="button" className="btn btn-sm" onClick={() => void proof(c)} disabled={busy !== null} aria-label={`Download the printed proof of ${name(c)}'s card`}>{busy === 'proof' ? 'Getting…' : 'Printed proof'}</button>}
                           {status === 'ready' && beingMailed(c) && (
                             <button type="button" className="btn btn-sm btn-danger" onClick={() => setCancelId(c.id)} disabled={busy !== null}>Cancel mailing</button>
@@ -368,6 +385,24 @@ export default function MailCardsPage() {
           busy={busy === 'send'}
           onConfirm={() => void send()}
           onCancel={() => setConfirm(false)}
+        />
+      )}
+      {fixing && (
+        <CorrectAddressModal
+          card={fixing}
+          problem={outcomes[fixing.id]?.addressProblem ? outcomes[fixing.id]?.error : null}
+          onClose={() => setFixing(null)}
+          onSaved={(saved) => {
+            // The corrected card takes its place in the list, and is among the cards to send again.
+            setCards((list) => list && list.map((c) => (c.id === saved.id ? { ...c, ...saved } : c)))
+            setOutcomes((o) => {
+              const next = { ...o }
+              delete next[saved.id]
+              return next
+            })
+            setNotice(`${name(saved)}’s address was saved. The card is among the cards to send.`)
+            setFixing(null)
+          }}
         />
       )}
       {cancelId && (
