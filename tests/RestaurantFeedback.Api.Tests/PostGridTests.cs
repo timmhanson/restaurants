@@ -1823,20 +1823,32 @@ public class PostGridTests(ApiFactory factory)
         }
         finally { if (File.Exists(restored)) File.Delete(restored); }
 
-        // Making a copy and taking one are both audited; a good copy tonight means none is due until tomorrow night.
+        // Making a copy and taking one are both audited; after a good copy none is due for an hour.
         Assert.True(await Db(db => Task.FromResult(db.AuditLogs.Any(a => a.Action == "DatabaseBackedUp") && db.AuditLogs.Any(a => a.Action == "DatabaseBackupDownloaded"))));
         using (var scope = factory.Services.CreateScope())
         {
             var backups = scope.ServiceProvider.GetRequiredService<DatabaseBackups>();
             Assert.False(await backups.DueAsync(made.Last.At.AddMinutes(5)));
-            Assert.True(await backups.DueAsync(made.Last.At.AddDays(1).AddHours(1)));
+            Assert.True(await backups.DueAsync(made.Last.At.AddMinutes(61)));
         }
         Assert.DoesNotContain((await site.GetFromJsonAsync<SystemOverview>("/api/system/overview"))!.Attention, a => a.Title.Contains("back", StringComparison.OrdinalIgnoreCase));
 
-        // In storage, the newest copies are kept, and the first copy of each month for longer.
+        // What is kept: every copy for two days, then the first copy of each day for three months, then the first of each month always.
         string N(string stamp) => $"restaurant-feedback-{stamp}.db.gz";
-        var kept = DatabaseBackups.Kept([N("20261120-080000"), N("20261119-080000"), N("20261118-080000"), N("20261101-080000"), N("20261015-080000"), N("20261001-080000"), N("20260901-080000"), "notes.txt"], daily: 2, monthly: 2);
-        Assert.Equal(new[] { N("20261001-080000"), N("20261101-080000"), N("20261119-080000"), N("20261120-080000") }, kept.Order());
+        var now = new DateTime(2026, 11, 27, 12, 0, 0, DateTimeKind.Utc);
+        var all = new[]
+        {
+            N("20261127-110000"), N("20261127-100000"), N("20261126-090000"),   // the last two days: all kept
+            N("20261124-080000"), N("20261124-200000"),                         // older: only the day's first
+            N("20260915-080000"),                                               // inside three months: the day's first
+            N("20260801-080000"), N("20260802-080000"),                         // older than three months: only the month's first
+            N("20260720-080000"), "notes.txt"
+        };
+        Assert.Equal(new[] { N("20260720-080000"), N("20260801-080000"), N("20260915-080000"), N("20261124-080000"), N("20261126-090000"), N("20261127-100000"), N("20261127-110000") },
+            DatabaseBackups.Kept(all, now, hourlyHours: 48, dailyDays: 92).Order());
+        // The site's own disk keeps the two days and a week of daily copies, and always the newest copy.
+        Assert.Equal(new[] { N("20261124-080000"), N("20261126-090000"), N("20261127-100000"), N("20261127-110000") }, DatabaseBackups.Kept(all, now, 48, 7, monthly: false).Order());
+        Assert.Equal(new[] { N("20260720-080000") }, DatabaseBackups.Kept([N("20260720-080000")], now, 48, 7, monthly: false));
     }
 
     [Fact]

@@ -729,7 +729,7 @@ export interface Backups {
   enabled: boolean
   last?: { at: string; ok: boolean; name?: string | null; bytes: number; offSite: boolean; problem?: string | null; by: string } | null
   files: { name: string; at: string; bytes: number; onSite: boolean; offSite: boolean }[]
-  offSite: boolean; hourUtc: number; keepOnSite: number; keepDaily: number; keepMonthly: number
+  offSite: boolean; everyMinutes: number; keepHourlyHours: number; keepDailyDays: number; onSiteDays: number
 }
 export interface SystemPerson { user: UserDto; restaurants: string[]; lastSeen?: string | null; interactions30d: number }
 

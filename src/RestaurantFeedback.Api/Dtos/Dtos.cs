@@ -373,7 +373,7 @@ public record TableCount(string Name, int Rows);
 public record EndpointStat(string Endpoint, int Calls, int AvgMs, int MaxMs, int Errors);
 public record ErrorRow(DateTime At, string? UserName, string? GroupName, string Method, string Path, int Status, string? Detail);
 /// <summary>The copies of the database. OffSite: copies are also sent to the site's storage account.</summary>
-public record BackupsDto(bool Enabled, Services.BackupState? Last, List<Services.BackupFile> Files, bool OffSite, int HourUtc, int KeepOnSite, int KeepDaily, int KeepMonthly);
+public record BackupsDto(bool Enabled, Services.BackupState? Last, List<Services.BackupFile> Files, bool OffSite, int EveryMinutes, int KeepHourlyHours, int KeepDailyDays, int OnSiteDays);
 public record SystemStatus(string Version, string Environment, DateTime StartedAt, DateTime ServerTime, string Database, long DatabaseBytes,
     string? LatestMigration, List<TableCount> Tables, string SettingsStore, string Email, bool EmailConfigured, string? TestEmailTo, int LogRetentionDays,
     DateTime? OldestLogEntry, int Requests24h, int Errors24h, int Refused24h, int AvgMs24h, int P95Ms24h, List<EndpointStat> Slowest, List<ErrorRow> RecentErrors)

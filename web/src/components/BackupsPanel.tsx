@@ -5,12 +5,8 @@ import { Alert, Badge, Confirm, Empty, Spinner, fmtDateTime } from './ui'
 
 const size = (bytes: number) => (bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`)
 
-/** The hour of the night the backup is made, in the reader's own time. */
-const nightly = (hourUtc: number) => {
-  const at = new Date()
-  at.setUTCHours(hourUtc, 0, 0, 0)
-  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
+const every = (minutes: number) => (minutes === 60 ? 'every hour' : `every ${minutes} minutes`)
+const span = (hours: number) => (hours % 24 === 0 ? `${hours / 24} day${hours === 24 ? '' : 's'}` : `${hours} hours`)
 
 /**
  * The copies of the site's database, for the System Administrator: how the last backup went, every copy there is,
@@ -52,7 +48,7 @@ export default function BackupsPanel() {
   }
 
   const last = data?.last
-  const files = data ? (all ? data.files : data.files.slice(0, 7)) : []
+  const files = data ? (all ? data.files : data.files.slice(0, 8)) : []
   return (
     <div className="panel">
       <div className="page-head" style={{ marginBottom: 0 }}>
@@ -65,11 +61,11 @@ export default function BackupsPanel() {
         <>
           <p className="muted">
             {data.enabled
-              ? <>A copy of the whole database is made every night at about {nightly(data.hourUtc)} (your time), while the site carries on working, and checked before it is kept.{' '}</>
-              : <>The nightly backup is switched off for this site. “Back up now” still works.{' '}</>}
+              ? <>A copy of the whole database is made {every(data.everyMinutes)} and every time the site starts, which is what a deploy does, before the new version changes anything. It is made while the site carries on working, and checked before it is kept.{' '}</>
+              : <>The automatic backups are switched off for this site. “Back up now” still works.{' '}</>}
             {data.offSite
-              ? <>Each copy is kept on the site’s own disk (the last {data.keepOnSite}) and in the site’s Azure Storage account, which is a separate service: the last {data.keepDaily} days, and the first of each month for {data.keepMonthly} months.</>
-              : <>Copies are kept on the site’s own disk (the last {data.keepOnSite}). No storage account is set up, so there is no second place: download a copy now and then.</>}
+              ? <>Copies go to the site’s own disk and to the site’s Azure Storage account, which is a separate service. Every copy is kept for {span(data.keepHourlyHours)}; after that the first copy of each day, for {data.keepDailyDays} days; after that the first copy of each month, always. The disk keeps the {span(data.keepHourlyHours)} and {data.onSiteDays} days of daily copies.</>
+              : <>Copies are kept on the site’s own disk: every copy for {span(data.keepHourlyHours)}, then the first of each day for {data.onSiteDays} days. No storage account is set up, so there is no second place: download a copy now and then.</>}
           </p>
           {last ? (
             last.ok ? (
@@ -77,7 +73,7 @@ export default function BackupsPanel() {
                 Last backup: {fmtDateTime(last.at)}, {size(last.bytes)}, by {last.by}. {last.offSite ? 'It is on the disk and in storage.' : 'It is on the site’s disk.'}
               </Alert>
             ) : (
-              <Alert kind="error">The backup at {fmtDateTime(last.at)} did not finish. {last.problem} It is tried again within the hour; “Back up now” tries at once.</Alert>
+              <Alert kind="error">The backup at {fmtDateTime(last.at)} did not finish. {last.problem} It is tried again in ten minutes; “Back up now” tries at once.</Alert>
             )
           ) : (
             <Alert kind="info">No backup has been made yet. The first is made a few minutes after the site starts; “Back up now” makes one at once.</Alert>
@@ -103,8 +99,8 @@ export default function BackupsPanel() {
               </table>
             </div>
           )}
-          {data.files.length > 7 && (
-            <button type="button" className="btn-link" onClick={() => setAll((x) => !x)}>{all ? 'Show the last 7' : `Show all ${data.files.length} copies`}</button>
+          {data.files.length > 8 && (
+            <button type="button" className="btn-link" onClick={() => setAll((x) => !x)}>{all ? 'Show the last 8' : `Show all ${data.files.length} copies`}</button>
           )}
           <p className="muted small" style={{ marginBottom: 0 }}>
             A copy is a compressed SQLite database (<code>.db.gz</code>). To put one back: stop the site, replace the database file on its <code>/home/data</code> share with the

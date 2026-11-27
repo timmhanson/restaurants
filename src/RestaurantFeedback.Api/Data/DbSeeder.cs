@@ -35,9 +35,23 @@ public static class DbSeeder
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
         var settings = scope.ServiceProvider.GetRequiredService<IGroupSettingsStore>();
 
+        // A copy of the database as it stands, before this version changes anything in it. Every deploy starts the
+        // site, so this is the backup before each deploy and before each change to the database's structure. It is
+        // given half a minute; the site starts either way, and the Overview says so if the copy could not be made.
+        var backups = scope.ServiceProvider.GetRequiredService<DatabaseBackups>();
+        BackupState? before = null;
+        if (backups.Options.Enabled && backups.HasDatabase)
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            before = await backups.MakeAsync(DatabaseBackups.BeforeStart, limit.Token);
+            log.LogInformation("Backup before start: {Outcome}", before.Ok ? before.Name : before.Problem);
+        }
+
         await db.Database.MigrateAsync();
         // Indexes left out of step by two copies of the site writing at once are rebuilt before anything reads them.
         await DatabaseCare.RunAsync(db, scope.ServiceProvider.GetRequiredService<DatabaseHealth>(), log);
+
+        if (before is not null) await backups.RecordAsync(before);
 
         // Super admin: always ensured, so a fresh deployment can be administered.
         if (!string.IsNullOrWhiteSpace(seed.SuperAdminUsername) && !string.IsNullOrWhiteSpace(seed.SuperAdminPassword))

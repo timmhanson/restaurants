@@ -59,7 +59,10 @@ See README.md for the architecture, roles and deployment.
 - **Say "Loading…" until the answer is in.** Never show an empty-state message ("not assigned to a restaurant",
   "nothing yet") before the data has come back; `contextLoaded` in `AuthContext` says when the person's restaurants
   are known.
-- **Everything worth keeping must be in a backup.** The SQLite database is copied every night to the site's disk and
+- **Back up before every deploy and every change to the database's structure.** The site copies its database at
+  every start, before migrations run, and every hour (`DatabaseBackups`); take a hand copy through Kudu before
+  pushing as well, and never run SQL against the live database without one.
+- **Everything worth keeping must be in a backup.** The SQLite database is copied to the site's disk and
   to Blob Storage (`DatabaseBackups`). Keep new data in the database (or in Blob Storage) so it is covered; never
   put the Data Protection key ring, or any key, into a backup.
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users

@@ -39,6 +39,6 @@ public class SystemBackupsController(DatabaseBackups backups, AuditService audit
     private async Task<BackupsDto> Dto(CancellationToken ct)
     {
         var o = backups.Options;
-        return new BackupsDto(o.Enabled, await backups.StateAsync(ct), await backups.ListAsync(ct), backups.OffSiteConfigured, o.HourUtc, o.KeepOnSite, o.KeepDaily, o.KeepMonthly);
+        return new BackupsDto(o.Enabled, await backups.StateAsync(ct), await backups.ListAsync(ct), backups.OffSiteConfigured, o.EveryMinutes, o.KeepHourlyHours, o.KeepDailyDays, o.OnSiteDays);
     }
 }

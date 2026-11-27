@@ -513,14 +513,19 @@ Tests: `dotnet test` (unit tests for guest matching plus end-to-end API tests on
   even when the deploy step fails, so the site is never left off. Replacing the files under a running copy once
   left it half-loaded and answering every request with an error although the run was green (2026-11-19). Expect
   about a minute of downtime per deploy.
-- **The database is backed up every night** (`Services/DatabaseBackups.cs`, `BackupWorker`), at about 08:00 UTC
-  (`Backups__HourUtc`), and whenever the System Administrator presses **Back up now** on System Status. A copy is
-  made with SQLite's online backup, so it is consistent while the site is in use, then checked
-  (`PRAGMA integrity_check`), compressed (`restaurant-feedback-yyyyMMdd-HHmmss.db.gz`) and kept in two places:
-  the last 7 on the site's own disk (`/home/data/backups`), and in the storage account's `database-backups`
-  container the last 30 days plus the first copy of each month for a year. System Status lists the copies with
-  Download (SuperAdmin only, asked for and audited: `DatabaseBackedUp`, `DatabaseBackupFailed`,
-  `DatabaseBackupDownloaded`). The Overview says so when the last backup failed or is more than 36 hours old.
+- **The database is backed up every hour, and at every start** (`Services/DatabaseBackups.cs`, `BackupWorker`,
+  `DbSeeder`). A deploy starts the site, and the copy at start is made before the new version runs its
+  migrations, so there is always a backup from just before each deploy and each change to the database's
+  structure. The System Administrator can also press **Back up now** on System Status. A copy is made with
+  SQLite's online backup, so it is consistent while the site is in use, then checked (`PRAGMA integrity_check`),
+  compressed (`restaurant-feedback-yyyyMMdd-HHmmss.db.gz`) and kept in two places: the site's own disk
+  (`/home/data/backups`) and the storage account's `database-backups` container.
+  **What is kept:** every copy for two days (`Backups__KeepHourlyHours`); after that the first copy of each day,
+  for three months (`Backups__KeepDailyDays`); after that the first copy of each month, always. The disk keeps
+  the two days and a week of daily copies (`Backups__OnSiteDays`).
+  System Status lists the copies with Download (SuperAdmin only, asked for and audited: `DatabaseBackedUp`,
+  `DatabaseBackupFailed`, `DatabaseBackupDownloaded`). The Overview says so when the last backup failed or is
+  more than six hours old.
   **To restore:** stop the site, replace `/home/data/restaurant-feedback.db` with the unzipped copy (remove any
   `-wal` and `-shm` files beside it), start the site. The Data Protection key ring (`/home/data/keys`) is
   deliberately not in a copy; restored onto a new site, the outside services' keys are entered again on

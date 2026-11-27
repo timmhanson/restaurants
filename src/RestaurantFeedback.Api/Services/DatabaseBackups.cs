@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure.Identity;
 using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using RestaurantFeedback.Api.Data;
@@ -18,11 +19,14 @@ public class BackupOptions
     public string? Folder { get; set; }
     /// <summary>The container in the site's storage account that copies are also sent to.</summary>
     public string ContainerName { get; set; } = "database-backups";
-    /// <summary>The hour of the day (UTC) after which the night's backup is made. 8 is 2 or 3 in the morning, Central time.</summary>
-    public int HourUtc { get; set; } = 8;
-    public int KeepOnSite { get; set; } = 7;
-    public int KeepDaily { get; set; } = 30;
-    public int KeepMonthly { get; set; } = 12;
+    /// <summary>How often a copy is made.</summary>
+    public int EveryMinutes { get; set; } = 60;
+    /// <summary>Every copy is kept for this long (the rolling hourly copies).</summary>
+    public int KeepHourlyHours { get; set; } = 48;
+    /// <summary>After that, the first copy of each day is kept for this many days (three months).</summary>
+    public int KeepDailyDays { get; set; } = 92;
+    /// <summary>On the site's own disk, the daily copies are kept for this many days; storage keeps the rest.</summary>
+    public int OnSiteDays { get; set; } = 7;
 }
 
 /// <summary>How the last backup went.</summary>
@@ -30,12 +34,16 @@ public record BackupState(DateTime At, bool Ok, string? Name, long Bytes, bool O
 public record BackupFile(string Name, DateTime At, long Bytes, bool OnSite, bool OffSite);
 
 /// <summary>
-/// Copies of the site's database, made every night and whenever the System Administrator asks.
+/// Copies of the site's database: one every hour, one every time the site starts (which is what a deploy does,
+/// and it is made before the new version changes anything in the database), and one whenever the System
+/// Administrator asks.
 ///
 /// A copy is made with SQLite's own online backup, so it is consistent even while the site is in use (it includes
 /// what is still in the write-ahead log). The copy is checked, compressed, kept on the site's own disk and sent to
-/// the site's Azure Storage account, which is a different service from the disk the database lives on. The last
-/// week is kept on the disk; in storage, the last 30 days and the first copy of each month for a year.
+/// the site's Azure Storage account, which is a different service from the disk the database lives on.
+///
+/// What is kept: every copy for two days; after that the first copy of each day, for three months; after that
+/// the first copy of each month, always. The site's disk keeps the two days and a week of daily copies.
 ///
 /// The encryption key ring is deliberately not copied: it unlocks the saved keys of the outside services, and
 /// should not sit beside copies of the data it protects. A database restored without it works, and those keys are
@@ -44,6 +52,7 @@ public record BackupFile(string Name, DateTime At, long Bytes, bool OnSite, bool
 public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOptions options, AuditService audit, ILogger<DatabaseBackups> log)
 {
     private const string StateKey = "backup.state";
+    public const string BeforeStart = "Before the site started (a deploy, or a restart)";
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static readonly Regex NamePattern = new(@"^restaurant-feedback-(\d{8}-\d{6})\.db\.gz$", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -70,27 +79,39 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
         catch (JsonException) { return null; }
     }
 
-    /// <summary>The night's backup is due once the hour has passed and no good copy has been made since.</summary>
+    /// <summary>The hour's backup is due once the last good copy is an hour old. After a failure it is tried again ten minutes later.</summary>
     public async Task<bool> DueAsync(DateTime nowUtc, CancellationToken ct = default)
     {
         if (!options.Enabled) return false;
-        var tonight = nowUtc.Date.AddHours(Math.Clamp(options.HourUtc, 0, 23));
-        if (nowUtc < tonight) tonight = tonight.AddDays(-1);
         var last = await StateAsync(ct);
-        // After a failure it is tried again, but not more than once an hour.
-        if (last is { Ok: false } && nowUtc - last.At < TimeSpan.FromHours(1)) return false;
-        return last is not { Ok: true } || last.At < tonight;
+        if (last is null) return true;
+        return nowUtc - last.At >= (last.Ok ? TimeSpan.FromMinutes(Math.Max(5, options.EveryMinutes) - 2) : TimeSpan.FromMinutes(10));
     }
 
-    /// <summary>Makes a copy now. One at a time: a second request waits for the first.</summary>
+    /// <summary>Makes a copy now and records how it went. One at a time: a second request waits for the first.</summary>
     public async Task<BackupState> RunAsync(string by, CancellationToken ct = default)
+    {
+        var state = await MakeAsync(by, ct);
+        await RecordAsync(state, ct);
+        return state;
+    }
+
+    /// <summary>
+    /// Whether the database file is there to be copied. On a brand-new site there is nothing yet.
+    /// </summary>
+    public bool HasDatabase => File.Exists(DatabasePath) && new FileInfo(DatabasePath).Length > 0;
+
+    /// <summary>
+    /// Makes a copy without reading or writing any of the site's own tables, so it can be made before the
+    /// database is brought up to date by a new version. Record it afterwards with <see cref="RecordAsync"/>.
+    /// </summary>
+    public async Task<BackupState> MakeAsync(string by, CancellationToken ct = default)
     {
         await Gate.WaitAsync(ct);
         try
         {
             var now = DateTime.UtcNow;
             var name = $"restaurant-feedback-{now:yyyyMMdd-HHmmss}.db.gz";
-            BackupState state;
             try
             {
                 Directory.CreateDirectory(Folder);
@@ -109,28 +130,37 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
                         await using var stream = File.OpenRead(file);
                         await container.GetBlobClient(name).UploadAsync(stream, overwrite: true, ct);
                         offSite = true;
-                        await PruneOffSiteAsync(container, ct);
+                        await PruneOffSiteAsync(container, now, ct);
                     }
-                    catch (Exception ex) when (ex is Azure.RequestFailedException or IOException or Azure.Identity.AuthenticationFailedException)
+                    catch (Exception ex) when (ex is Azure.RequestFailedException or IOException or AuthenticationFailedException or OperationCanceledException)
                     {
                         log.LogError(ex, "The database copy could not be sent to storage");
                         problem = $"The copy was made and is on the site's own disk, but it could not be sent to Azure Storage: {ex.Message.Split('\n')[0]}";
                     }
                 }
-                PruneOnSite();
-                state = new BackupState(now, problem is null, name, bytes, offSite, problem, by);
+                PruneOnSite(now);
+                return new BackupState(now, problem is null, name, bytes, offSite, problem, by);
             }
-            catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
+            catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or OperationCanceledException)
             {
                 log.LogError(ex, "The database could not be backed up");
-                state = new BackupState(now, false, null, 0, false, $"No copy could be made: {ex.Message.Split('\n')[0]}", by);
+                return new BackupState(now, false, null, 0, false, $"No copy could be made: {ex.Message.Split('\n')[0]}", by);
             }
-            await SaveStateAsync(state, ct);
-            await audit.LogRawAsync(null, by, null, null, state.Ok ? "DatabaseBackedUp" : "DatabaseBackupFailed", "Database", null,
-                new { state.Name, state.Bytes, state.OffSite, state.Problem });
-            return state;
         }
         finally { Gate.Release(); }
+    }
+
+    /// <summary>Notes how a backup went, for System Status and the Overview, with an audit row.</summary>
+    public async Task RecordAsync(BackupState state, CancellationToken ct = default)
+    {
+        var row = await db.SiteSettings.FirstOrDefaultAsync(s => s.Key == StateKey, ct);
+        if (row is null) db.SiteSettings.Add(row = new SiteSetting { Key = StateKey });
+        row.Value = JsonSerializer.Serialize(state, Json);
+        row.UpdatedAt = DateTime.UtcNow;
+        row.UpdatedBy = state.By;
+        await db.SaveChangesAsync(ct);
+        await audit.LogRawAsync(null, state.By, null, null, state.Ok ? "DatabaseBackedUp" : "DatabaseBackupFailed", "Database", null,
+            new { state.Name, state.Bytes, state.OffSite, state.Problem });
     }
 
     /// <summary>A consistent, checked, compressed copy of the database at <paramref name="file"/>.</summary>
@@ -169,40 +199,38 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
         }
     }
 
-    private void PruneOnSite()
+    /// <summary>
+    /// Which copies are kept: every copy from the last <paramref name="hourlyHours"/> hours; before that the first
+    /// copy of each day, for <paramref name="dailyDays"/> days; before that the first copy of each month, always
+    /// (unless <paramref name="monthly"/> is off, as it is for the site's own disk).
+    /// </summary>
+    public static HashSet<string> Kept(IEnumerable<string> names, DateTime nowUtc, int hourlyHours, int dailyDays, bool monthly = true)
     {
-        var keep = Math.Max(1, options.KeepOnSite);
-        foreach (var old in new DirectoryInfo(Folder).GetFiles("restaurant-feedback-*.db.gz").Where(f => IsBackupName(f.Name)).OrderByDescending(f => f.Name).Skip(keep))
-            old.Delete();
-    }
-
-    /// <summary>Which copies are kept in storage: the newest ones, and the first of each month for a year.</summary>
-    public static HashSet<string> Kept(IEnumerable<string> names, int daily, int monthly)
-    {
-        var all = names.Where(IsBackupName).OrderByDescending(n => n).ToList();
-        var keep = all.Take(Math.Max(1, daily)).ToHashSet();
-        foreach (var first in all.GroupBy(n => n.Substring("restaurant-feedback-".Length, 6)).OrderByDescending(g => g.Key).Take(Math.Max(0, monthly)).Select(g => g.Min()!))
-            keep.Add(first);
+        var all = names.Select(n => (Name: n, At: StampOf(n))).Where(x => x.At is not null).Select(x => (x.Name, At: x.At!.Value)).OrderBy(x => x.At).ToList();
+        var keep = new HashSet<string>();
+        foreach (var x in all.Where(x => x.At >= nowUtc.AddHours(-hourlyHours))) keep.Add(x.Name);
+        foreach (var day in all.Where(x => x.At >= nowUtc.AddDays(-dailyDays)).GroupBy(x => x.At.Date)) keep.Add(day.First().Name);
+        if (monthly)
+            foreach (var month in all.GroupBy(x => (x.At.Year, x.At.Month))) keep.Add(month.First().Name);
+        // The newest copy is never removed, whatever the clock says.
+        if (all.Count > 0) keep.Add(all[^1].Name);
         return keep;
     }
 
-    private async Task PruneOffSiteAsync(BlobContainerClient container, CancellationToken ct)
+    private void PruneOnSite(DateTime now)
     {
-        var names = new List<string>();
-        await foreach (var blob in container.GetBlobsAsync(Azure.Storage.Blobs.Models.BlobTraits.None, Azure.Storage.Blobs.Models.BlobStates.None, "restaurant-feedback-", ct)) names.Add(blob.Name);
-        var keep = Kept(names, options.KeepDaily, options.KeepMonthly);
-        foreach (var name in names.Where(n => IsBackupName(n) && !keep.Contains(n)))
-            await container.DeleteBlobIfExistsAsync(name, cancellationToken: ct);
+        var files = new DirectoryInfo(Folder).GetFiles("restaurant-feedback-*.db.gz").Where(f => IsBackupName(f.Name)).ToList();
+        var keep = Kept(files.Select(f => f.Name), now, options.KeepHourlyHours, options.OnSiteDays, monthly: false);
+        foreach (var old in files.Where(f => !keep.Contains(f.Name))) old.Delete();
     }
 
-    private async Task SaveStateAsync(BackupState state, CancellationToken ct)
+    private async Task PruneOffSiteAsync(BlobContainerClient container, DateTime now, CancellationToken ct)
     {
-        var row = await db.SiteSettings.FirstOrDefaultAsync(s => s.Key == StateKey, ct);
-        if (row is null) db.SiteSettings.Add(row = new SiteSetting { Key = StateKey });
-        row.Value = JsonSerializer.Serialize(state, Json);
-        row.UpdatedAt = DateTime.UtcNow;
-        row.UpdatedBy = state.By;
-        await db.SaveChangesAsync(ct);
+        var names = new List<string>();
+        await foreach (var blob in container.GetBlobsAsync(BlobTraits.None, BlobStates.None, "restaurant-feedback-", ct)) names.Add(blob.Name);
+        var keep = Kept(names, now, options.KeepHourlyHours, options.KeepDailyDays);
+        foreach (var name in names.Where(n => IsBackupName(n) && !keep.Contains(n)))
+            await container.DeleteBlobIfExistsAsync(name, cancellationToken: ct);
     }
 
     /// <summary>Every copy there is, newest first, with where each one is.</summary>
@@ -216,11 +244,11 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
         {
             try
             {
-                await foreach (var blob in container.GetBlobsAsync(Azure.Storage.Blobs.Models.BlobTraits.None, Azure.Storage.Blobs.Models.BlobStates.None, "restaurant-feedback-", ct))
+                await foreach (var blob in container.GetBlobsAsync(BlobTraits.None, BlobStates.None, "restaurant-feedback-", ct))
                     if (StampOf(blob.Name) is { } at)
                         found[blob.Name] = found.TryGetValue(blob.Name, out var here) ? here with { OffSite = true } : new BackupFile(blob.Name, at, blob.Properties.ContentLength ?? 0, false, true);
             }
-            catch (Exception ex) when (ex is Azure.RequestFailedException or Azure.Identity.AuthenticationFailedException)
+            catch (Exception ex) when (ex is Azure.RequestFailedException or AuthenticationFailedException)
             {
                 // No container yet (nothing has been sent), or storage cannot be reached: the copies on the disk are still listed.
                 log.LogWarning("The copies in storage could not be listed: {Message}", ex.Message.Split('\n')[0]);
@@ -241,7 +269,7 @@ public class DatabaseBackups(AppDbContext db, StorageOptions storage, BackupOpti
     }
 }
 
-/// <summary>Makes the night's backup. Looks every half hour, so a restart or a failure only delays it.</summary>
+/// <summary>Makes the hour's backup. Looks every five minutes, so a restart or a failure only delays it.</summary>
 public class BackupWorker(IServiceScopeFactory scopes, BackupOptions options, ILogger<BackupWorker> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -254,11 +282,11 @@ public class BackupWorker(IServiceScopeFactory scopes, BackupOptions options, IL
             {
                 using var scope = scopes.CreateScope();
                 var backups = scope.ServiceProvider.GetRequiredService<DatabaseBackups>();
-                if (await backups.DueAsync(DateTime.UtcNow, stoppingToken)) await backups.RunAsync("Nightly backup", stoppingToken);
+                if (await backups.DueAsync(DateTime.UtcNow, stoppingToken)) await backups.RunAsync("Hourly backup", stoppingToken);
             }
             catch (OperationCanceledException) { return; }
-            catch (Exception ex) { log.LogError(ex, "The nightly backup round failed"); }
-            try { await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken); } catch (OperationCanceledException) { return; }
+            catch (Exception ex) { log.LogError(ex, "The hourly backup round failed"); }
+            try { await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken); } catch (OperationCanceledException) { return; }
         }
     }
 }
