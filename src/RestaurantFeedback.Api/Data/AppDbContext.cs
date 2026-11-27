@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MailInvoice> MailInvoices => Set<MailInvoice>();
     public DbSet<GroupCredit> GroupCredits => Set<GroupCredit>();
     public DbSet<StripeEvent> StripeEvents => Set<StripeEvent>();
+    public DbSet<CardSend> CardSends => Set<CardSend>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -86,6 +87,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         invoice.Property(i => i.Month).HasMaxLength(7);
         invoice.Property(i => i.Number).HasMaxLength(40);
         invoice.Property(i => i.Status).HasMaxLength(20);
+        var send = b.Entity<CardSend>();
+        send.HasIndex(s => s.CommentId);
+        send.HasIndex(s => s.MailId);
+        send.HasOne(s => s.Comment).WithMany().HasForeignKey(s => s.CommentId).OnDelete(DeleteBehavior.Cascade);
+        send.Property(s => s.Method).HasMaxLength(20);
+        send.Property(s => s.Outcome).HasMaxLength(20);
+        send.Property(s => s.MailId).HasMaxLength(120);
         var stripeEvent = b.Entity<StripeEvent>();
         stripeEvent.HasIndex(e => e.EventId).IsUnique();
         stripeEvent.HasIndex(e => e.InvoiceId);

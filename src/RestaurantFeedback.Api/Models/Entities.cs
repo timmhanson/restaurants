@@ -444,6 +444,42 @@ public class StripeEvent
     public string Payload { get; set; } = "";
 }
 
+/// <summary>
+/// One attempt to send a card: see SendHistory. The address is the one the attempt used, kept as it was then.
+/// </summary>
+public class CardSend
+{
+    public int Id { get; set; }
+    public int CommentId { get; set; }
+    public GuestComment Comment { get; set; } = null!;
+    /// <summary>1 for the card's first attempt, 2 for the next, and so on.</summary>
+    public int Number { get; set; }
+    public DateTime At { get; set; } = DateTime.UtcNow;
+    public int? ByUserId { get; set; }
+    public string? ByName { get; set; }
+    /// <summary>mail (printed and mailed for the restaurant) or stamp (printed in the restaurant).</summary>
+    public string Method { get; set; } = "";
+    /// <summary>sent, refused (the mailing service did not take it) or cancelled (before it was printed).</summary>
+    public string Outcome { get; set; } = "";
+    /// <summary>Sent again, after an earlier send of the same card.</summary>
+    public bool Resend { get; set; }
+    public string? StreetAddress { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Zip { get; set; }
+    public string? AddressStatus { get; set; }
+    /// <summary>The mailing service's reference and latest status, for a mailed attempt.</summary>
+    public string? MailId { get; set; }
+    public string? MailStatus { get; set; }
+    public DateTime? StatusCheckedAt { get; set; }
+    public bool Test { get; set; }
+    /// <summary>What the group is billed for this attempt: the mail house's cost and the site's fee. Nothing for a test, a refusal or a card printed here.</summary>
+    public int CostCents { get; set; }
+    public int FeeCents { get; set; }
+    /// <summary>Why it was refused, in words a group can read.</summary>
+    public string? Error { get; set; }
+}
+
 public static class BillSplits
 {
     public const string One = "one", Restaurant = "restaurant", Sets = "sets";

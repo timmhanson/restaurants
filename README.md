@@ -29,6 +29,26 @@ was used. Every column sorts; filters narrow by the date created, restaurant, se
 mailing status, reply and a search. It reads the same `GET /api/comments` the Comments page does, so it shows
 nothing a person could not already see; the CSV download is offered only with `ExportComments`.
 
+### Sending a card again, and the history of sends
+
+A card can be sent more than once (it never arrived, or its address was wrong). Every attempt is kept in
+`CardSend` (`SendHistory`): when, how (mailed for the restaurant, or printed there), by whom, the address that
+attempt used, what came of it (sent, not taken by the mailing service, cancelled) and, for a mailed attempt, the
+mailing service's latest status and what was billed. The card itself carries only its latest send. Rows are only
+added (a mailed row's status is kept up to date), so the address each attempt used stays on record however the
+card's address is changed later. The migration that added the table carried over what had already been done: the
+send each card carried, cards printed and marked sent, and refusals from the audit log.
+
+- **History · Send again** on Sent Postcards opens a card's attempts (`GET /api/comments/{id}/sends`) and lets the
+  address be corrected, then goes to Mail Cards or Print Cards in "again" mode (`resend`), where the cost is shown
+  and confirmed as for any card. A mailed card is charged again; a reprint here is not (the hand-print fee is
+  once per card). A mailed card still waiting to be printed is cancelled and corrected instead of sent twice.
+- **Billing** counts the earlier sends of a card that was sent again (`MailLedger.BilledEarlierSends`), so every
+  card that really went is on the bill, and a cancelled resend is not.
+- **Mailing statuses keep themselves up to date** (`MailStatusRefresher`): a background worker asks the mailing
+  service every half hour about the cards it has not finished with, and Sent Postcards asks when it opens
+  (`POST /api/comments/mail/refresh`), so "waiting to print" is never left standing.
+
 ### Who decides what: handed down level by level
 
 Permissions and settings are decided from the top down, and a decision made higher up takes precedence

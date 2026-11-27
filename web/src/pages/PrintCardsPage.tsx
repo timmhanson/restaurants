@@ -105,7 +105,7 @@ export default function PrintCardsPage() {
     setBusy(true)
     setError(null)
     try {
-      await api.post('/comments/printed', { commentIds: cards.map((c) => c.id), markSent, postage })
+      await api.post('/comments/printed', { commentIds: cards.map((c) => c.id), markSent, postage, resend: params.get('resend') === '1' })
       const days = settings.followUpDays
       setAskPrinted(false)
       setDone(

@@ -267,6 +267,86 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("CardImages");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardSend", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AddressStatus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ByName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("City")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CommentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CostCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FeeCents")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MailId")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MailStatus")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Resend")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StatusCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StreetAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Test")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Zip")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommentId");
+
+                    b.HasIndex("MailId");
+
+                    b.ToTable("CardSends");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.CommentActivity", b =>
                 {
                     b.Property<int>("Id")
@@ -1128,6 +1208,17 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Design");
+                });
+
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.CardSend", b =>
+                {
+                    b.HasOne("RestaurantFeedback.Api.Models.GuestComment", "Comment")
+                        .WithMany()
+                        .HasForeignKey("CommentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Comment");
                 });
 
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupBilling", b =>

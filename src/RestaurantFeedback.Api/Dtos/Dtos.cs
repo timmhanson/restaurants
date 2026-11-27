@@ -215,6 +215,8 @@ public record CommentSummary(
     /// <summary>The day the guest should be followed up with; null when none is needed (not sent by mail, already done, redeemed, or turned off).</summary>
     public DateOnly? FollowUpDueOn { get; init; }
     public string? ReplyMethod { get; init; }
+    /// <summary>How many times the card has been sent (attempts that went, not refusals or cancellations).</summary>
+    public int Sends { get; init; }
     public DateOnly? RepliedOn { get; init; }
     public DateTime? LastActivityAt { get; init; }
     /// <summary>Follow-up counts and the latest note; filled in on lists and single reads.</summary>
@@ -438,7 +440,17 @@ public record PrintConfig(bool PostageAvailable, string PostageProvider, bool Ca
 }
 /// <param name="ConfirmCount">The number of cards the person confirmed; the request is refused if it does not match.</param>
 /// <param name="ConfirmCentsPerCard">The price per card the person was shown; the request is refused if the price has changed since.</param>
-public record MailRequest(int[] CommentIds, int ConfirmCount, int ConfirmCentsPerCard);
+public record MailRequest(int[] CommentIds, int ConfirmCount, int ConfirmCentsPerCard)
+{
+    /// <summary>Send these cards again: they have been sent before, and each is charged again.</summary>
+    public bool Resend { get; init; }
+}
+/// <summary>
+/// One attempt to send a card, for its history. BilledCents is the one price the group pays for a mailed attempt
+/// (never the split). MailStatus is the mailing service's latest status of that attempt.
+/// </summary>
+public record CardSendDto(int Number, DateTime At, string? ByName, string Method, string Outcome, bool Resend, string? StreetAddress, string? City, string? State, string? Zip,
+    string? AddressStatus, string? MailStatus, bool Test, int BilledCents, string? Error);
 /// <param name="Status">The mail house's status: ready, printing, processed_for_delivery, completed or cancelled.</param>
 public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, bool AlreadyMailed, string? Error)
 {
@@ -634,7 +646,11 @@ public record StripeAccountDto(bool Configured, string Source, string? KeyEnding
 public record CardIdsRequest(int[] CommentIds);
 public record PostageOutcome(int CommentId, bool Ok, int? Cents, string? LabelUrl, bool Test, bool AlreadyBought, string? Error);
 /// <param name="Postage">"bought" (postage printed on the card) or "stamp" (a stamp goes on by hand).</param>
-public record PrintedRequest(int[] CommentIds, bool MarkSent = true, string Postage = "stamp");
+public record PrintedRequest(int[] CommentIds, bool MarkSent = true, string Postage = "stamp")
+{
+    /// <summary>Printed to be sent again: the cards were sent before, and this goes into their history as another send.</summary>
+    public bool Resend { get; init; }
+}
 public record RedeemRequest(DateOnly? RedeemedOn, string? Note);
 public record UndoRequest(string? Reason);
 /// <summary>

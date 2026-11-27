@@ -145,12 +145,22 @@ public class MailLedger(AppDbContext db, SiteMailing site)
     public IQueryable<GuestComment> Billed() =>
         db.Comments.AsNoTracking().Where(c => c.MailId != null && !c.MailTest && c.MailStatus != MailStatuses.Cancelled && c.MailedAt != null);
 
+    /// <summary>
+    /// Earlier sends of cards that have since been sent again. The card itself only carries its latest send, so
+    /// the ones before it are billed from the card's history: mailed for real, not cancelled, and not the send
+    /// the card carries now.
+    /// </summary>
+    public IQueryable<CardSend> BilledEarlierSends() =>
+        db.CardSends.AsNoTracking().Where(s => s.Method == SendMethods.Mail && s.Outcome == SendOutcomes.Sent && !s.Test && s.MailId != null
+                                               && s.MailStatus != MailStatuses.Cancelled && s.MailId != s.Comment.MailId);
+
     public async Task<(int Cards, int Cents)> ThisMonthAsync(int groupId, CancellationToken ct = default)
     {
         var from = MonthStart(DateTime.UtcNow);
         var rows = await Billed().Where(c => c.Restaurant.GroupId == groupId && c.MailedAt >= from)
             .Select(c => new { Cost = c.MailEstimateCents ?? 0, Fee = c.MailFeeCents ?? 0 }).ToListAsync(ct);
-        return (rows.Count, rows.Sum(r => r.Cost + r.Fee));
+        var earlier = await BilledEarlierSends().Where(s => s.Comment.Restaurant.GroupId == groupId && s.At >= from).Select(s => new { Cost = s.CostCents, Fee = s.FeeCents }).ToListAsync(ct);
+        return (rows.Count + earlier.Count, rows.Sum(r => r.Cost + r.Fee) + earlier.Sum(r => r.Cost + r.Fee));
     }
 
     public async Task<GroupTerms> TermsAsync(int groupId, CancellationToken ct = default)
@@ -176,15 +186,19 @@ public class MailLedger(AppDbContext db, SiteMailing site)
     public async Task<List<Charge>> ChargesAsync(int? groupId = null, CancellationToken ct = default)
     {
         var mailed = Billed();
+        var earlier = BilledEarlierSends();
         var printed = db.Comments.AsNoTracking().Where(c => c.PrintFeeCents != null && c.PrintFeeCents > 0 && c.PrintFeeAt != null);
         if (groupId is int g)
         {
             mailed = mailed.Where(c => c.Restaurant.GroupId == g);
+            earlier = earlier.Where(s => s.Comment.Restaurant.GroupId == g);
             printed = printed.Where(c => c.Restaurant.GroupId == g);
         }
+        var e = await earlier.Select(s => new { s.Comment.Restaurant.GroupId, Group = s.Comment.Restaurant.Group.Name, s.Comment.RestaurantId, Restaurant = s.Comment.Restaurant.Name, s.At, Cost = s.CostCents, Fee = s.FeeCents }).ToListAsync(ct);
         var a = await mailed.Select(c => new { c.Restaurant.GroupId, Group = c.Restaurant.Group.Name, c.RestaurantId, Restaurant = c.Restaurant.Name, At = c.MailedAt!.Value, Cost = c.MailEstimateCents ?? 0, Fee = c.MailFeeCents ?? 0 }).ToListAsync(ct);
         var b = await printed.Select(c => new { c.Restaurant.GroupId, Group = c.Restaurant.Group.Name, c.RestaurantId, Restaurant = c.Restaurant.Name, At = c.PrintFeeAt!.Value, Fee = c.PrintFeeCents!.Value }).ToListAsync(ct);
         return [.. a.Select(c => new Charge(c.GroupId, c.Group, c.RestaurantId, c.Restaurant, c.At, c.Cost, c.Fee, false)),
+                .. e.Select(c => new Charge(c.GroupId, c.Group, c.RestaurantId, c.Restaurant, c.At, c.Cost, c.Fee, false)),
                 .. b.Select(c => new Charge(c.GroupId, c.Group, c.RestaurantId, c.Restaurant, c.At, 0, c.Fee, true))];
     }
 

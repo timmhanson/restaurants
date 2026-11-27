@@ -285,7 +285,10 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         if (!me.Has(ManagerPermission.MarkResponded) && !me.Has(ManagerPermission.EditComments)) return Forbid();
         var c = await db.Comments.Include(x => x.Restaurant).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c is null || !me.CanAccessRestaurant(c.RestaurantId)) return NotFound();
-        if (c.MailStatus is not null && c.MailStatus != MailStatuses.Cancelled)
+        // While a mailed card is still waiting to be printed it would go to the old address: that one is cancelled
+        // first. Once it has been printed the address can be changed for sending it again; the address each send
+        // used stays in the card's history.
+        if (c.MailId is not null && c.MailStatus is MailStatuses.Ready or "printing")
             return BadRequest(new { message = "This card is already with the mailing service. Cancel it first (while it has not been printed), then correct the address and send it again." });
         static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
         var (street, city, state, zip) = (Clean(req.StreetAddress), Clean(req.City), Clean(req.State), Clean(req.Zip));
@@ -301,6 +304,21 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         await db.SaveChangesAsync(ct);
         await audit.LogAsync(me, "CardAddressCorrected", "Comment", c.Id, new { before, after = new { c.StreetAddress, c.City, c.State, c.Zip, c.AddressStatus } }, c.RestaurantId);
         return CommentSummary.From(c, 0);
+    }
+
+    /// <summary>
+    /// Every attempt to send this card, oldest first: when, how, by whom, to which address, and what came of it.
+    /// </summary>
+    [HttpGet("{id:int}/sends")]
+    public async Task<ActionResult<List<CardSendDto>>> Sends(int id, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.ViewComments)) return Forbid();
+        var c = await db.Comments.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null || !me.CanAccessRestaurant(c.RestaurantId)) return NotFound();
+        return (await db.CardSends.AsNoTracking().Where(s => s.CommentId == id).OrderBy(s => s.Number).ThenBy(s => s.Id).ToListAsync(ct))
+            .Select(s => new CardSendDto(s.Number, DateTime.SpecifyKind(s.At, DateTimeKind.Utc), s.ByName, s.Method, s.Outcome, s.Resend, s.StreetAddress, s.City, s.State, s.Zip, s.AddressStatus,
+                s.MailStatus, s.Test, s.CostCents + s.FeeCents, s.Error)).ToList();
     }
 
     [HttpPost("{id:int}/responded")]

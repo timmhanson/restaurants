@@ -127,13 +127,16 @@ export default function MailCardsPage() {
 
   if (!settings || cards === null || !config) return error ? <Alert kind="error">{error}</Alert> : <Spinner label="Getting the cards ready…" />
 
-  const beingMailed = (c: CommentSummary) => (outcomes[c.id]?.ok ? true : Boolean(c.mailStatus && c.mailStatus !== 'cancelled'))
+  // Sending again (from a card's history): cards that went before go once more, and each is paid for again.
+  const again = params.get('resend') === '1'
+  const notPrintedYet = (c: CommentSummary) => c.mailStatus === 'ready' || c.mailStatus === 'printing'
+  const beingMailed = (c: CommentSummary) => (outcomes[c.id]?.ok ? true : again ? notPrintedYet(c) : Boolean(c.mailStatus && c.mailStatus !== 'cancelled'))
   const statusOf = (c: CommentSummary): MailStatus | null => statuses[c.id]?.status ?? outcomes[c.id]?.status ?? c.mailStatus ?? null
   // Whether cards can be mailed, and whether for real or as tests, is set restaurant by restaurant.
   const rules = (c: CommentSummary) => config.mailRestaurants.find((r) => r.restaurantId === c.restaurantId)
   const blocked = (c: CommentSummary) =>
     !hasMailingAddress(c) ? 'no full mailing address'
-      : c.responded && !beingMailed(c) ? 'already marked as sent'
+      : c.responded && !beingMailed(c) && !again ? 'already marked as sent'
         : rules(c) && !rules(c)!.on ? 'having cards mailed is not switched on for this restaurant'
           : rules(c) && !rules(c)!.ready ? 'mailing is not set up for this restaurant yet'
             : null
@@ -156,7 +159,7 @@ export default function MailCardsPage() {
     setError(null)
     setNotice(null)
     try {
-      const res = await api.post<MailOutcome[]>('/comments/mail', { commentIds: toSend.map((c) => c.id), confirmCount: toSend.length, confirmCentsPerCard: config.mailCentsPerCard })
+      const res = await api.post<MailOutcome[]>('/comments/mail', { commentIds: toSend.map((c) => c.id), confirmCount: toSend.length, confirmCentsPerCard: config.mailCentsPerCard, resend: again })
       setOutcomes((o) => ({ ...o, ...Object.fromEntries(res.map((r) => [r.commentId, r])) }))
       const ok = res.filter((r) => r.ok && !r.alreadyMailed).length
       if (ok > 0)
@@ -226,7 +229,7 @@ export default function MailCardsPage() {
   return (
     <>
       <div className="page-head">
-        <h1>Mail cards</h1>
+        <h1>{again ? 'Mail cards again' : 'Mail cards'}</h1>
         <span className="grow" />
         <button type="button" className="btn" onClick={() => nav('/print')}>Back to Print cards</button>
       </div>
@@ -298,6 +301,12 @@ export default function MailCardsPage() {
               <Alert kind="warn">
                 Mailing these {toSend.length} cards ({money(total)}) would pass this month’s limit for mailed cards: {money(config.mailUsedCents)} of {money(config.mailLimitCents)} is used.
                 Go back and choose fewer, or ask the site’s administrator to raise the limit.
+              </Alert>
+            )}
+            {again && toSend.length > 0 && (
+              <Alert kind="warn">
+                {toSend.length === 1 ? 'This card has been sent before' : 'These cards have been sent before'}. Sending {toSend.length === 1 ? 'it' : 'them'} again prints and mails
+                {toSend.length === 1 ? ' a new card' : ' new cards'}{testOnly ? '' : `, paid for again (${money(total)})`}. Each card’s history keeps every send and the address it used.
               </Alert>
             )}
             {tooMany && <Alert kind="warn">Up to {config.mailMaxCards} cards can be mailed at a time. Go back and choose fewer.</Alert>}

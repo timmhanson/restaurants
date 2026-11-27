@@ -3,6 +3,7 @@ import { api, qs } from '../api/client'
 import type { CommentSummary, MailStatus, PagedResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import DataTable, { type Column } from '../components/DataTable'
+import SendAgainModal from '../components/SendAgainModal'
 import Stat from '../components/Stat'
 import { Alert, Badge, Spinner, fmtDate, fmtDay, today } from '../components/ui'
 import { MAIL_STATUS, MailStatusBadge } from './MailCardsPage'
@@ -46,12 +47,17 @@ export default function SentPostcardsPage() {
   const [status, setStatus] = useState<'' | MailStatus>('')
   const [replied, setReplied] = useState<'' | 'yes' | 'no'>('')
   const [find, setFind] = useState('')
+  /** The card whose history of sends is open. */
+  const [opened, setOpened] = useState<CommentSummary | null>(null)
 
   useEffect(() => {
     let stale = false
     setCards(null)
     setError(null)
     ;(async () => {
+      // Where each mailed card is, asked of the mailing service now, so no status is left standing. Best effort:
+      // the report shows what is known if the mailing service cannot be reached.
+      await api.post('/comments/mail/refresh').catch(() => undefined)
       const all: CommentSummary[] = []
       let count = 0
       for (let page = 1; page <= MOST / PAGE; page++) {
@@ -95,6 +101,10 @@ export default function SentPostcardsPage() {
     },
     { key: 'how', label: 'How it was sent', value: howSent, csvOnly: true },
     {
+      key: 'sends', label: 'Times sent', num: true, value: (c) => c.sends ?? 0,
+      render: (c) => ((c.sends ?? 0) > 1 ? <Badge kind="accent" title="This card has been sent more than once">{c.sends}</Badge> : <>{c.sends ?? 0}</>),
+    },
+    {
       key: 'status', label: 'Mailing status', value: (c) => (c.mailStatus ? `${MAIL_STATUS[c.mailStatus as MailStatus]?.label ?? c.mailStatus}${c.mailTest ? ' (test order)' : ''}` : null),
       render: (c) => (c.mailStatus ? <MailStatusBadge status={c.mailStatus as MailStatus} test={c.mailTest} /> : <span className="muted" title="Only cards printed and mailed for you have a mailing status">—</span>),
     },
@@ -106,6 +116,14 @@ export default function SentPostcardsPage() {
     },
     { key: 'replyMethod', label: 'How replied', value: (c) => (c.responded ? c.replyMethod ?? null : null), csvOnly: true },
     { key: 'redeemed', label: 'Coupon used', value: (c) => c.redeemedOn ?? null, render: (c) => (c.redeemedOn ? fmtDate(c.redeemedOn) : <span className="muted">—</span>) },
+    {
+      key: 'actions', label: '', value: () => null, noSort: true, noCsv: true,
+      render: (c) => (
+        <button type="button" className="btn btn-sm" onClick={() => setOpened(c)} aria-label="Show this card’s history of sends, or send it again">
+          {has('MarkResponded') ? (wasSent(c) ? 'History · Send again' : 'History · Send') : 'History'}
+        </button>
+      ),
+    },
   ]
 
   const sent = (cards ?? []).filter(wasSent)
@@ -114,7 +132,8 @@ export default function SentPostcardsPage() {
       <div className="page-head"><h1>Sent postcards</h1></div>
       <p className="muted">
         Every coupon postcard, with when it was created, when it was sent and how, and whether the guest has been replied to. Cards printed and mailed for you also show
-        where they are. Click a column’s heading to sort by it.
+        where they are; that is checked with the mailing service each time this page opens. Click a column’s heading to sort by it. A card’s
+        <strong> History</strong> lists every attempt to send it with the address used, and lets it be sent again.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       <div className="panel">
@@ -179,6 +198,13 @@ export default function SentPostcardsPage() {
             empty={cards.length === 0 ? 'No cards were created in these dates.' : 'No postcards match these filters.'}
           />
         </>
+      )}
+      {opened && (
+        <SendAgainModal
+          card={opened}
+          onClose={() => setOpened(null)}
+          onChanged={(next) => setCards((list) => list && list.map((c) => (c.id === next.id ? { ...c, ...next, sends: c.sends } : c)))}
+        />
       )}
     </>
   )

@@ -20,7 +20,7 @@ namespace RestaurantFeedback.Api.Controllers;
 public class CardMailingController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
     CommentSummaryBuilder summaries, CardFollowUps followUps, IPostageProvider postage, PostageOptions postageOptions,
     GroupPostageAccounts postageAccounts, IPostGridMailer mailer, SiteMailing siteMailing, MailLedger ledger, CardDesigns designs,
-    PostGridOptions mailOptions, IHttpClientFactory httpFactory, ILogger<CardMailingController> log, CardCodes codes, SiteAddress siteAddress) : ControllerBase
+    PostGridOptions mailOptions, IHttpClientFactory httpFactory, ILogger<CardMailingController> log, CardCodes codes, SiteAddress siteAddress, SendHistory history) : ControllerBase
 {
     // ---- Printing and postage -------------------------------------------------------------------------------
 
@@ -130,13 +130,18 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (anyLive && req.ConfirmCentsPerCard != pricing.PriceCents)
             return BadRequest(new { message = $"The price is now {Dollars(pricing.PriceCents)} a card. Nothing was sent; review the cards and confirm again." });
 
-        bool AlreadyWithMailHouse(GuestComment c) => c.MailId is not null && c.MailStatus != MailStatuses.Cancelled;
+        // Sending again: a card that went before goes once more (it never arrived, or its address was wrong). The
+        // earlier card must be past cancelling, or it is the one to cancel and correct instead.
+        var again = req.Resend;
+        bool NotPrintedYet(GuestComment c) => c.MailId is not null && c.MailStatus is MailStatuses.Ready or "printing";
+        bool AlreadyWithMailHouse(GuestComment c) => c.MailId is not null && c.MailStatus != MailStatuses.Cancelled && (!again || NotPrintedYet(c));
+        bool AlreadySent(GuestComment c) => c.Responded && !again;
         if (anyLive)
         {
             var limit = pricing.LimitCents;
             if (limit <= 0) return BadRequest(new { message = "Mailing cards is switched off for this investment group. Ask the site's administrator." });
             var used = (await ledger.ThisMonthAsync(groupId, ct)).Cents;
-            var toSend = cards.Count(c => GoesLive(c) && !AlreadyWithMailHouse(c) && !c.Responded && MissingAddress(c) is null);
+            var toSend = cards.Count(c => GoesLive(c) && !AlreadyWithMailHouse(c) && !AlreadySent(c) && MissingAddress(c) is null);
             // With no payment method saved, the group mails on its credit, and only as far as the credit goes.
             if (pricing.OnCredit && toSend * pricing.PriceCents > pricing.CreditCents)
             {
@@ -167,12 +172,17 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var results = new List<MailOutcome>();
         foreach (var c in cards)
         {
+            if (again && NotPrintedYet(c))
+            {
+                results.Add(new(c.Id, false, c.MailStatus, c.MailTest, true, "The card sent before has not been printed yet. Cancel it, correct the address if need be, and send it again; that way it is not paid for twice."));
+                continue;
+            }
             if (AlreadyWithMailHouse(c))
             {
                 results.Add(new(c.Id, true, c.MailStatus, c.MailTest, true, null));
                 continue;
             }
-            if (c.Responded)
+            if (AlreadySent(c))
             {
                 results.Add(new(c.Id, false, null, false, false, "This card is already marked as sent. Reopen it first if it really needs to go out again."));
                 continue;
@@ -208,6 +218,14 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             try
             {
                 var sent = await mailer.CreatePostcardAsync(account.ApiKey, request, $"rf-g{groupId}-card{c.Id}-{c.MailAttempts}", ct);
+                // The same request arriving twice gets the same card back from the mail house: it is not recorded, or billed, twice.
+                if (await db.CardSends.AnyAsync(s => s.CommentId == c.Id && s.MailId == sent.Id, ct))
+                {
+                    results.Add(new(c.Id, true, sent.Status, c.MailTest, true, null));
+                    continue;
+                }
+                var sentBefore = c.Responded || await history.SentBeforeAsync(c.Id, ct);
+                var firstReplyAt = c.Responded ? c.RespondedAt : null;
                 var now = DateTime.UtcNow;
                 c.MailAttempts++;
                 c.MailProvider = "PostGrid";
@@ -218,21 +236,29 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 c.MailedByName = me.DisplayName;
                 c.MailEstimateCents = c.MailTest ? 0 : pricing.CostCents;
                 c.MailFeeCents = c.MailTest ? 0 : pricing.FeeCents;
-                c.Responded = true;
-                c.RespondedAt = now;
-                c.RespondedByUserId = me.Id;
-                c.RespondedByName = me.DisplayName;
-                c.ReplyMethod = method;
-                c.RepliedOn = today < c.VisitDate ? c.VisitDate : today;
                 var billed = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0);
+                var record = await history.AddAsync(c, me, SendMethods.Mail, SendOutcomes.Sent, sentBefore, ct);
+                (record.MailId, record.MailStatus, record.Test, record.CostCents, record.FeeCents) = (sent.Id, sent.Status, c.MailTest, c.MailEstimateCents ?? 0, c.MailFeeCents ?? 0);
+                var again2 = sentBefore ? " again" : "";
                 Activity(c, me, ActivityKind.Mailed, text: c.MailTest
-                    ? "Sent to be printed and mailed (test order: not printed, mailed or charged)."
-                    : $"Sent to be printed and mailed for the restaurant ({Dollars(billed)}).");
-                var entry = Activity(c, me, ActivityKind.Replied, method, c.RepliedOn, "Coupon card printed and mailed for the restaurant.");
-                c.LastActivityAt = entry.CreatedAt;
+                    ? $"Sent{again2} to be printed and mailed (test order: not printed, mailed or charged)."
+                    : $"Sent{again2} to be printed and mailed for the restaurant ({Dollars(billed)}).");
+                if (firstReplyAt is null)
+                {
+                    // The first time the guest is replied to. A card sent again keeps the day it was first replied to.
+                    c.Responded = true;
+                    c.RespondedAt = now;
+                    c.RespondedByUserId = me.Id;
+                    c.RespondedByName = me.DisplayName;
+                    c.ReplyMethod = method;
+                    c.RepliedOn = today < c.VisitDate ? c.VisitDate : today;
+                    var entry = Activity(c, me, ActivityKind.Replied, method, c.RepliedOn, "Coupon card printed and mailed for the restaurant.");
+                    c.LastActivityAt = entry.CreatedAt;
+                }
+                else c.LastActivityAt = now;
                 // Saved card by card: once a card is with the mail house the record must exist even if a later one fails.
                 await db.SaveChangesAsync(ct);
-                await audit.LogAsync(me, "CardMailed", "Comment", c.Id, new { sent.Id, sent.Status, Test = c.MailTest, BilledCents = billed }, c.RestaurantId);
+                await audit.LogAsync(me, "CardMailed", "Comment", c.Id, new { sent.Id, sent.Status, Test = c.MailTest, BilledCents = billed, SentAgain = sentBefore, Attempt = record.Number }, c.RestaurantId);
                 results.Add(new(c.Id, true, sent.Status, c.MailTest, false, null));
             }
             catch (PostGridException ex)
@@ -247,6 +273,13 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 }
                 log.LogWarning("PostGrid did not take card {CardId} for group {GroupId}: {Message}", c.Id, groupId, ex.Message);
                 var said = MailStatuses.ForClients(ex.Message);
+                if (ex.Answered)
+                {
+                    // The refusal goes into the card's history, with the address that was refused.
+                    var refused = await history.AddAsync(c, me, SendMethods.Mail, SendOutcomes.Refused, c.Responded, ct);
+                    (refused.Test, refused.Error) = (test, said);
+                    await db.SaveChangesAsync(ct);
+                }
                 await audit.LogAsync(me, "CardMailFailed", "Comment", c.Id, new { error = said }, c.RestaurantId);
                 results.Add(new(c.Id, false, null, false, false, said) { AddressProblem = MailStatuses.IsAboutTheAddress(ex.Message) });
             }
@@ -276,6 +309,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             {
                 var now = await mailer.GetPostcardAsync(account.ApiKey, c.MailId!, ct);
                 c.MailStatus = now.Status;
+                await history.SyncStatusAsync(c, ct);
                 results.Add(new(c.Id, now.Status, c.MailTest, !string.IsNullOrWhiteSpace(now.PreviewUrl), null));
             }
             catch (PostGridException ex)
@@ -285,6 +319,20 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         }
         await db.SaveChangesAsync(ct);
         return results;
+    }
+
+    /// <summary>
+    /// Asks the mailing service where the cards of this person's restaurants are, for the ones it has not finished
+    /// with, so a status is never left standing at "waiting to print". Sent Postcards calls it when it opens; a
+    /// background worker does the same for every restaurant. Returns how many statuses changed.
+    /// </summary>
+    [HttpPost("comments/mail/refresh")]
+    public async Task<ActionResult<object>> RefreshMailStatuses([FromServices] MailStatusRefresher refresher, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        if (!me.Has(ManagerPermission.ViewComments)) return Forbid();
+        if (me.GroupId is null) return new { changed = 0 };
+        return new { changed = await refresher.RefreshAsync(me.RestaurantIds.ToList(), 200, ct) };
     }
 
     /// <summary>
@@ -351,8 +399,11 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             return BadRequest(new { message = $"This card could not be cancelled: {said} A card can only be cancelled until it starts printing." });
         }
         c.MailStatus = after.Status == MailStatuses.Ready ? MailStatuses.Cancelled : after.Status;
+        await history.SyncStatusAsync(c, ct);
         var wasSentOn = c.RepliedOn;
-        if (c.MailStatus == MailStatuses.Cancelled && c.Responded)
+        // A card that had gone before this send stays "sent": only this latest attempt is called off.
+        var wentBefore = await db.CardSends.AnyAsync(s => s.CommentId == c.Id && s.Outcome == SendOutcomes.Sent && s.MailId != c.MailId, ct);
+        if (c.MailStatus == MailStatuses.Cancelled && c.Responded && !wentBefore)
         {
             // Not going out after all: back to "not sent", so it shows up to print or mail again.
             c.Responded = false; c.RespondedAt = null; c.RespondedByUserId = null; c.RespondedByName = null; c.ReplyMethod = null; c.RepliedOn = null;
@@ -478,6 +529,9 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             c.PrintedByName = me.DisplayName;
             c.PrintCount++;
             Activity(c, me, ActivityKind.Printed, text: c.PrintCount > 1 ? $"Printed again ({how})" : $"Printed on a postcard ({how})");
+            // Into the card's history when this printing is what sends it: the first time, or printed to be sent again.
+            if (req.MarkSent && (!c.Responded || req.Resend))
+                await history.AddAsync(c, me, SendMethods.Stamp, SendOutcomes.Sent, c.Responded, ct);
             if (req.MarkSent && !c.Responded)
             {
                 c.Responded = true;

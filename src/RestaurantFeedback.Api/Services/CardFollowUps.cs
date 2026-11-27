@@ -54,6 +54,9 @@ public class CommentSummaryBuilder(AppDbContext db, CardFollowUps followUps)
         var activity = await db.CommentActivities.Where(a => ids.Contains(a.CommentId) && (a.Kind == ActivityKind.Note || a.Kind == ActivityKind.Attempt)).ToListAsync(ct);
         var byComment = activity.GroupBy(a => a.CommentId).ToDictionary(g => g.Key, g => g.ToList());
         var days = await followUps.DaysByRestaurantAsync(groupId, items.Select(c => c.RestaurantId), ct);
+        // How many times each card has gone out (see SendHistory).
+        var sends = (await db.CardSends.Where(s => ids.Contains(s.CommentId) && s.Outcome == SendOutcomes.Sent).Select(s => s.CommentId).ToListAsync(ct))
+            .GroupBy(id => id).ToDictionary(g => g.Key, g => g.Count());
         return items.Select(c =>
         {
             var mine = byComment.GetValueOrDefault(c.Id) ?? [];
@@ -63,7 +66,8 @@ public class CommentSummaryBuilder(AppDbContext db, CardFollowUps followUps)
                 NoteCount = mine.Count(a => a.Kind == ActivityKind.Note),
                 AttemptCount = mine.Count(a => a.Kind == ActivityKind.Attempt),
                 LatestNote = latest is null ? null : ActivityDto.From(latest),
-                FollowUpDueOn = CardFollowUps.DueOn(c, days.GetValueOrDefault(c.RestaurantId))
+                FollowUpDueOn = CardFollowUps.DueOn(c, days.GetValueOrDefault(c.RestaurantId)),
+                Sends = sends.GetValueOrDefault(c.Id)
             };
         }).ToList();
     }

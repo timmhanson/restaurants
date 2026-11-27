@@ -65,6 +65,9 @@ See README.md for the architecture, roles and deployment.
 - **Everything worth keeping must be in a backup.** The SQLite database is copied to the site's disk and
   to Blob Storage (`DatabaseBackups`). Keep new data in the database (or in Blob Storage) so it is covered; never
   put the Data Protection key ring, or any key, into a backup.
+- **Every attempt to send a card goes into its history** (`SendHistory.AddAsync`, table `CardSend`) with the address
+  it used; rows are added, never rewritten. Anything that sends, resends, cancels or checks a card keeps that
+  history in step, and billing counts every send that really went (`MailLedger.BilledEarlierSends`).
 - **Caching:** API responses and pages are `no-store`; only `/assets/*` is cached. Keep it that way so users
   always get the live version.
 - **Secrets:** this repo is public. Never commit passwords, connection strings or keys. Use

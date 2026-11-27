@@ -239,6 +239,12 @@ export interface PrintConfig {
 }
 /** Where a mailed card is. */
 export type MailStatus = 'ready' | 'printing' | 'processed_for_delivery' | 'completed' | 'cancelled'
+/** One attempt to send a card, from its history. billedCents is the one price paid for a mailed attempt. */
+export interface CardSend {
+  number: number; at: string; byName?: string | null; method: 'mail' | 'stamp' | string; outcome: 'sent' | 'refused' | 'cancelled' | string; resend: boolean
+  streetAddress?: string | null; city?: string | null; state?: string | null; zip?: string | null; addressStatus?: string | null
+  mailStatus?: string | null; test: boolean; billedCents: number; error?: string | null
+}
 export interface MailOutcome {
   commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null
   /** The card was not taken because of the guest's address: correcting the address is the way forward. */
@@ -475,6 +481,8 @@ export interface CommentSummary {
   guestKey: string
   guestCommentCount: number
   replyMethod?: string | null
+  /** How many times the card has been sent (attempts that went, not refusals or cancellations). */
+  sends?: number
   source?: string | null
   repliedOn?: string | null
   lastActivityAt?: string | null

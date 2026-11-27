@@ -106,6 +106,9 @@ else
     builder.Services.AddHttpClient<IPaymentProvider, StripePayments>();
 builder.Services.AddScoped<CardDesigns>();
 builder.Services.AddScoped<PaymentNotifications>();
+builder.Services.AddScoped<SendHistory>();
+builder.Services.AddScoped<MailStatusRefresher>();
+builder.Services.AddHostedService<MailStatusWorker>();
 builder.Services.AddHttpClient();
 if (postGrid.Sample && builder.Environment.IsDevelopment())
     builder.Services.AddSingleton<IPostGridMailer, SamplePostGridMailer>();

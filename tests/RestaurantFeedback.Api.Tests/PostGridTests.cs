@@ -1894,4 +1894,71 @@ public class PostGridTests(ApiFactory factory)
         Assert.False(MailStatuses.IsAboutTheAddress("PostGrid refused the card (402: payment required)."));
         Assert.False(MailStatuses.IsAboutTheAddress("PostGrid could not be reached."));
     }
+
+    [Fact]
+    public async Task A_card_can_be_sent_again_and_every_attempt_is_kept_with_the_address_it_used()
+    {
+        var (owner, _, site, rid, groupId) = await SetUpAsync(LiveKey);
+        await SaveSettings(site, s => { s.CostCents = 90; s.FeeCents = 10; });
+        Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/billing/groups/{groupId}", new GroupBillingTermsRequest(null, 1_000_000, true))).StatusCode);
+        var card = await Create(owner, Card(rid, "Again"));
+        async Task<List<CardSendDto>> Sends() => (await owner.GetFromJsonAsync<List<CardSendDto>>($"/api/comments/{card.Id}/sends"))!;
+        async Task<int> Used() => (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!.MailUsedCents;
+        async Task<CommentSummary> Now() => (await owner.GetFromJsonAsync<CommentSummary>($"/api/comments/{card.Id}"))!;
+        async Task<MailOutcome> SendAgain() =>
+            (await (await owner.PostAsJsonAsync("/api/comments/mail", new MailRequest([card.Id], 1, await Price(owner)) { Resend = true })).Content.ReadFromJsonAsync<List<MailOutcome>>())!.Single();
+        try
+        {
+            var usedBefore = await Used();
+            Assert.True((await Mail(owner, [card.Id])).Single().Ok);
+            var first = Assert.Single(await Sends());
+            Assert.Equal((1, "mail", "sent", false, "9 Mailer Rd", 100, "ready"), (first.Number, first.Method, first.Outcome, first.Resend, first.StreetAddress, first.BilledCents, first.MailStatus));
+            var repliedAt = (await Now()).RespondedAt;
+
+            // Asked for again by mistake (not as a resend), nothing more goes. As a resend, not while the first card can still be cancelled.
+            Assert.True((await Mail(owner, [card.Id])).Single().AlreadyMailed);
+            var tooSoon = await SendAgain();
+            Assert.False(tooSoon.Ok);
+            Assert.Contains("has not been printed yet", tooSoon.Error);
+            Assert.Single(await Sends());
+            Assert.Equal(usedBefore + 100, await Used());
+
+            // The mailing service moves the card along, and the site finds out by itself: nobody presses "Check status".
+            var mailId = await Db(async db => (await db.Comments.FindAsync(card.Id))!.MailId!);
+            factory.Mail.SetStatus(mailId, "completed");
+            var refreshed = await owner.PostAsync("/api/comments/mail/refresh", null);
+            Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+            Assert.Equal("completed", (await Now()).MailStatus);
+            Assert.Equal("completed", (await Sends()).Single().MailStatus);
+
+            // It never arrived: the address is corrected, and the card is sent again. Both attempts are kept, each with the address it used.
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/comments/{card.Id}/address", new CardAddressRequest("10 Mailer Rd", "Joliet", "IL", "60431"))).StatusCode);
+            Assert.True((await SendAgain()).Ok);
+            var two = await Sends();
+            Assert.Equal(new[] { (1, "9 Mailer Rd", false, "completed"), (2, "10 Mailer Rd", true, "ready") }, two.Select(s => (s.Number, s.StreetAddress!, s.Resend, s.MailStatus!)));
+            var after = await Now();
+            Assert.Equal((2, repliedAt, true), (after.Sends, after.RespondedAt, after.Responded));
+            // Each card that goes is paid for.
+            Assert.Equal(usedBefore + 200, await Used());
+            Assert.Contains("\"sentAgain\":true", await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.Action == "CardMailed" && a.EntityId == card.Id.ToString()).OrderByDescending(a => a.Id).First().Details!)));
+
+            // The second card is called off before printing: it is not billed, the first still counts, and the card stays "sent".
+            Assert.Equal(HttpStatusCode.OK, (await owner.PostAsync($"/api/comments/{card.Id}/mail/cancel", null)).StatusCode);
+            Assert.Equal(new[] { "sent", "cancelled" }, (await Sends()).Select(s => s.Outcome));
+            Assert.Equal(usedBefore + 100, await Used());
+            Assert.Equal((true, 1), ((await Now()).Responded, (await Now()).Sends));
+
+            // Sent again by printing it here for a stamp: one more line in the history, with the address used.
+            Assert.Equal(HttpStatusCode.OK, (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([card.Id], true, "stamp") { Resend = true })).StatusCode);
+            var last = (await Sends())[^1];
+            Assert.Equal((3, "stamp", "sent", true, "10 Mailer Rd", 0), (last.Number, last.Method, last.Outcome, last.Resend, last.StreetAddress, last.BilledCents));
+            // Printing it once more for a jam, not as a resend, adds nothing to the history.
+            Assert.Equal(HttpStatusCode.OK, (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([card.Id], true, "stamp"))).StatusCode);
+            Assert.Equal(3, (await Sends()).Count);
+        }
+        finally
+        {
+            await Db(async db => { db.Comments.RemoveRange(db.Comments.Where(c => c.Id == card.Id)); return await db.SaveChangesAsync(); });
+        }
+    }
 }
