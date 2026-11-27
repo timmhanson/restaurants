@@ -19,6 +19,16 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 | **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus what all managers in the group were given and what was ticked for them: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin, BuyPostage, SetFollowUpDays. Permissions apply at every restaurant they work at |
 | **Team Member** (`TeamMember`) | the shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
 
+### Sent Postcards report
+
+Under **Reports** inside a group, **Sent Postcards** (`/sent-postcards`, `SentPostcardsPage`) lists the coupon
+postcards for the restaurants a person works at, for anyone who may see guest comments (`ViewComments`): when each
+card was created, when it was sent and how (mailed for you, or printed here for a stamp by hand), whether the
+guest has been replied to and when, the mailing status of cards mailed for the restaurant, and when the coupon
+was used. Every column sorts; filters narrow by the date created, restaurant, sent or not, how it was sent,
+mailing status, reply and a search. It reads the same `GET /api/comments` the Comments page does, so it shows
+nothing a person could not already see; the CSV download is offered only with `ExportComments`.
+
 ### Who decides what: handed down level by level
 
 Permissions and settings are decided from the top down, and a decision made higher up takes precedence
@@ -39,7 +49,7 @@ Permissions and settings are decided from the top down, and a decision made high
    group's owners do not hold. **Team logins** only enter cards.
 
 Inside a group the menu has four parts: the cards (Enter Card, Comments, Print Cards), **Staff** (Restaurants &
-Staff, All Staff), **Reports** (Billing, Analytics, Audit Log) and, at the bottom, **Configuration**
+Staff, All Staff), **Reports** (Billing, Analytics, Sent Postcards, Audit Log) and, at the bottom, **Configuration**
 (Permissions, Settings, Card Design). Each person sees only the entries they may use. Every word of a tab's
 name is capitalized, in both menus.
 

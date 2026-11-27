@@ -25,6 +25,7 @@ export default function DataTable<T>({
   filename,
   defaultSort,
   empty = 'Nothing to show.',
+  download: canDownload = true,
 }: {
   title: string
   help?: ReactNode
@@ -34,6 +35,8 @@ export default function DataTable<T>({
   filename: string
   defaultSort?: { key: string; desc: boolean }
   empty?: string
+  /** Offer the CSV download. Off where the person may see the rows but not take them away. */
+  download?: boolean
 }) {
   const [sort, setSort] = useState(defaultSort ?? { key: columns[0].key, desc: false })
   const shown = columns.filter((c) => !c.csvOnly)
@@ -66,9 +69,11 @@ export default function DataTable<T>({
       <div className="page-head">
         <h2 style={{ margin: 0 }}>{title}</h2>
         <span className="grow" />
-        <button type="button" className="btn btn-sm" onClick={download} disabled={!rows.length}>
-          ⬇ Download CSV
-        </button>
+        {canDownload && (
+          <button type="button" className="btn btn-sm" onClick={download} disabled={!rows.length}>
+            ⬇ Download CSV
+          </button>
+        )}
       </div>
       {help && <p className="legend-note">{help}</p>}
       {rows.length === 0 ? (

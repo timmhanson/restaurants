@@ -52,6 +52,7 @@ export default function Layout() {
         { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin'), section: 'Staff' },
         { to: '/billing', label: 'Billing', show: isAdmin, section: 'Reports' },
         { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics'), section: 'Reports' },
+        { to: '/sent-postcards', label: 'Sent Postcards', show: has('ViewComments'), section: 'Reports' },
         { to: '/audit', label: 'Audit Log', show: has('ViewAudit'), section: 'Reports' },
         { to: '/permissions', label: 'Permissions', show: isGroupWide, section: 'Configuration' },
         { to: '/settings', label: 'Settings', show: isGroupWide, section: 'Configuration' },
