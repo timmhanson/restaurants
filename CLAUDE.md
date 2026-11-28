@@ -38,7 +38,9 @@ See README.md for the architecture, roles and deployment.
   permission, a confirmation naming what will be charged, protection against charging twice, and an audit row.
   Third-party keys are entered in the site and stored encrypted with Data Protection (never returned to a
   browser, logged or audited beyond their last four characters), or live in App Service settings.
-- **Investment groups never see which companies the site uses for mailing (PostGrid).** Screens, messages, history
+- **Investment groups never see which companies the site uses for mailing (PostGrid).** That goes for every screen
+  inside a group, whoever is looking: a note "only the System Administrator sees" still does not belong there
+  (they may be impersonating, and it reads as if owners see it). Say it on the Overview or Connected Systems. Screens, messages, history
   entries, exports and audit rows a group can read say "mailed for you" or "the mailing service"
   (`MailStatuses.ForClients`); the names appear only in the System Administrator's area. Groups also see one
   price per card, never the split between the mail house's cost and the site's fee.

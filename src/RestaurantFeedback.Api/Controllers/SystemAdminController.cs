@@ -19,7 +19,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
-    IAddressVerifier addressVerifier, DatabaseHealth databaseHealth, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
+    IAddressVerifier addressVerifier, IAddressSuggester addressSuggester, DatabaseHealth databaseHealth, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
     MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments, PaymentOptions paymentOptions, DatabaseBackups backups) : ControllerBase
 {
     private const string SignIn = "Login";
@@ -120,6 +120,11 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             attention.Add(new("medium", $"{never} {(never == 1 ? "person has" : "people have")} never signed in", "Their accounts were created more than two days ago.", "/people?status=never"));
         if (!addressVerifier.Configured)
             attention.Add(new("info", "Guest addresses are not being checked", "Enter the site's USPS account or a PostGrid address verification key on Connected Systems to switch address checking on.", "/connected-systems"));
+        // Said here and nowhere inside a group: which company does this is the site's business.
+        if (!addressSuggester.Configured && (siteMailing.Live is not null || siteMailing.Test is not null))
+            attention.Add(new("info", "Addresses are not offered as they are typed",
+                "Restaurants that have cards mailed get addresses to pick from on Enter Card once PostGrid's Address Verification key is entered: Connected Systems, under PostGrid, \u201cChecking guest addresses\u201d. It is a different key from the Print & Mail keys.",
+                "/connected-systems"));
         if (mail is LoggingEmailSender)
             attention.Add(new("medium", "Email is not set up", "Password codes cannot be emailed, so nobody can change their own password.", "/system"));
         foreach (var r in restaurants.Where(r => r.IsActive && !assigned.Contains(r.Id) && groups.Any(g => g.Id == r.GroupId && g.IsActive)))

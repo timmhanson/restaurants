@@ -1757,17 +1757,23 @@ public class PostGridTests(ApiFactory factory)
             Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("off", null, null, null, null, null))).StatusCode);
             var off = await Ask(owner, rid, typed);
             Assert.False(off.Available);
-            // Why is told to the System Administrator only: an owner is not told how the site is set up.
-            Assert.Null(off.Why);
-            Assert.Equal("mail", (await Ask(admin, rid, typed)).Why);
             Assert.Empty(off.Suggestions);
             Assert.Equal(before + 1, factory.Suggestions.Calls);
 
             // And with no address service that can offer them, nothing is offered either.
             Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/settings", new GroupSettingsRequest("on", null, null, null, null, null))).StatusCode);
             factory.Suggestions.Configured = false;
-            Assert.Equal((false, null), ((await Ask(owner, rid, typed)).Available, (await Ask(owner, rid, typed)).Why));
-            Assert.Equal("key", (await Ask(admin, rid, typed)).Why);
+            Assert.False((await Ask(owner, rid, typed)).Available);
+            // Nobody inside a group is told why, not even a System Administrator using the group's screens: the
+            // answer says nothing about how the site is set up, and never names the company.
+            foreach (var who in new[] { owner, admin })
+            {
+                var said = await (await who.PostAsJsonAsync("/api/addresses/suggest", new AddressSuggestRequest(rid, typed, null, null, null))).Content.ReadAsStringAsync();
+                Assert.DoesNotContain("PostGrid", said, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("why", said, StringComparison.OrdinalIgnoreCase);
+            }
+            // The System Administrator is told on the Overview, in their own area.
+            Assert.Contains((await site.GetFromJsonAsync<SystemOverview>("/api/system/overview"))!.Attention, a => a.Title == "Addresses are not offered as they are typed" && a.Link == "/connected-systems");
         }
         finally { factory.Suggestions.Configured = true; }
 

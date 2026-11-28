@@ -228,9 +228,9 @@ street, city, state and zip, and the address is then checked as usual. It uses P
 (`GET /v1/addver/completions`), which use no lookup, so offering addresses costs nothing; the paid completion
 call is not used. Addresses in the restaurant's state come first. What is typed travels in the request body, the
 list is marked `data-no-track`, outgoing requests are not logged, and only "Picked a suggested address" is
-recorded. Groups never see PostGrid's name here: the form just offers addresses. When addresses are not
-offered, a System Administrator using the form inside a group is told why under the box (no key entered, or
-mailing off for the restaurant); nobody else is.
+recorded. Groups never see PostGrid's name here: the form just offers addresses, or does not. When the key has
+not been entered, the System Administrator is told on the Overview ("Needs your attention"), never on a screen
+inside a group, where an owner or manager (or the System Administrator while impersonating) would read it.
 
 **Correcting an address the mailing service refuses.** On Mail Cards, a card that was not taken because of its
 address says so with a **Correct the address** button, and every card not yet sent has **Correct address** (or

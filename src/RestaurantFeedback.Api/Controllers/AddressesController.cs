@@ -38,11 +38,11 @@ public class AddressesController(IAddressVerifier verifier, IAddressSuggester su
         var none = new AddressSuggestResponse(false, []);
         var me = await users.GetAsync();
         if (me.GroupId is not int groupId || !me.CanAccessRestaurant(req.RestaurantId)) return none;
-        if (!suggester.Configured) return none with { Why = me.IsSuperAdmin ? "key" : null };
+        if (!suggester.Configured) return none;
         var restaurant = await db.Restaurants.AsNoTracking().FirstOrDefaultAsync(r => r.Id == req.RestaurantId && r.GroupId == groupId, ct);
         if (restaurant is null) return none;
         var group = await db.GroupBilling.AsNoTracking().FirstOrDefaultAsync(b => b.GroupId == groupId, ct);
-        if (!GroupPolicy.For(site.Billing, group, restaurant).MailOn) return none with { Why = me.IsSuperAdmin ? "mail" : null };
+        if (!GroupPolicy.For(site.Billing, group, restaurant).MailOn) return none;
         var found = await suggester.SuggestAsync(new AddressInput(req.StreetAddress, req.City, req.State, req.Zip), restaurant.State, ct);
         return new AddressSuggestResponse(true, found);
     }
