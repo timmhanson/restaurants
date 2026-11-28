@@ -22,6 +22,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StripeEvent> StripeEvents => Set<StripeEvent>();
     public DbSet<CardSend> CardSends => Set<CardSend>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
+    public DbSet<AttentionDismissal> AttentionDismissals => Set<AttentionDismissal>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -88,6 +89,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         invoice.Property(i => i.Month).HasMaxLength(7);
         invoice.Property(i => i.Number).HasMaxLength(40);
         invoice.Property(i => i.Status).HasMaxLength(20);
+        b.Entity<AttentionDismissal>().HasIndex(d => new { d.UserId, d.Key }).IsUnique();
         var ai = b.Entity<AiRequest>();
         ai.HasIndex(r => r.RequestKey).IsUnique();
         ai.HasIndex(r => new { r.GroupId, r.At });

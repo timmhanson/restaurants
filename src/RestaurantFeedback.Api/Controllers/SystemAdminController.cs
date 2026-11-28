@@ -144,6 +144,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             cards.Count(c => c.GroupId == g.Id && !c.Responded && OverAWeek(c.VisitDate)),
             acts.Where(a => a.GroupId == g.Id).Select(a => (DateTime?)Utc(a.Last)).Max())).ToList();
 
+        attention = await Attention.MarkAsync(db, (await users.GetAsync()).Id, attention);
         return new SystemOverview(now, groups.Count, groups.Count(g => g.IsActive), restaurants.Count(r => r.IsActive),
             people.Count(u => u.IsActive && u.Role != UserRole.SuperAdmin), people.Count(u => u.IsActive && u.Role == UserRole.SuperAdmin),
             acts.Where(a => a.Day == today).Select(a => a.UserId).Distinct().Count(), acts.Select(a => a.UserId).Distinct().Count(),
@@ -151,6 +152,35 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             cards.Count(c => c.CreatedAt >= today), cards.Count(c => c.CreatedAt >= weekAgo), cards.Count(c => !c.Responded),
             cards.Count(c => !c.Responded && OverAWeek(c.VisitDate)), errors24h,
             attention, snapshots, signIns.Take(12).Select(s => ToSignIn(s, accounts.GetValueOrDefault(s.UserId ?? 0)?.DisplayName, groupNames)).ToList());
+    }
+
+    /// <summary>
+    /// Dismisses a "Needs your attention" item for this System Administrator. It comes back by itself if it changes
+    /// (a different count, a different detail) or goes away and returns.
+    /// </summary>
+    [HttpPost("attention/dismiss")]
+    public async Task<IActionResult> DismissAttention(AttentionDismissRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var row = await db.AttentionDismissals.FirstOrDefaultAsync(d => d.UserId == me.Id && d.Key == req.Key, ct);
+        if (row is null) db.AttentionDismissals.Add(row = new AttentionDismissal { UserId = me.Id, Key = req.Key });
+        (row.Fingerprint, row.Title, row.DismissedAt) = (req.Fingerprint, (req.Title ?? "").Trim(), DateTime.UtcNow);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(me, "AttentionDismissed", details: new { row.Title });
+        return NoContent();
+    }
+
+    /// <summary>Brings a dismissed item back onto the list.</summary>
+    [HttpPost("attention/restore")]
+    public async Task<IActionResult> RestoreAttention(AttentionRestoreRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var row = await db.AttentionDismissals.FirstOrDefaultAsync(d => d.UserId == me.Id && d.Key == req.Key, ct);
+        if (row is null) return NoContent();
+        db.AttentionDismissals.Remove(row);
+        await db.SaveChangesAsync(ct);
+        await audit.LogAsync(me, "AttentionRestored", details: new { row.Title });
+        return NoContent();
     }
 
     // ---- Security -------------------------------------------------------------------------------------------

@@ -413,6 +413,8 @@ public class GroupBilling
     public string? AiLevel { get; set; }
     /// <summary>The most the group may be charged for the assistant in a calendar month, in cents. Null uses the site's default.</summary>
     public int? AiMonthlyLimitCents { get; set; }
+    /// <summary>The highest level of the assistant the group may choose, set by the System Administrator (AiLevels); null is the top one.</summary>
+    public string? AiMaxLevel { get; set; }
     /// <summary>
     /// Whether this group must have a payment method saved before its cards can be mailed. Null follows the site's
     /// setting (required unless the System Administrator has switched that off).
@@ -705,6 +707,21 @@ public class CardImage
 }
 
 /// <summary>One entry in a comment's follow-up history, shared by every manager who can see the comment.</summary>
+/// <summary>
+/// A "Needs your attention" item a System Administrator has dismissed from their Overview. It stays dismissed only
+/// while the item reads exactly the same (Fingerprint): when it changes, or goes away and comes back, it shows again.
+/// </summary>
+public class AttentionDismissal
+{
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    /// <summary>Which item it is, whatever numbers it holds at the moment (see Attention.Key).</summary>
+    public string Key { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public string Title { get; set; } = "";
+    public DateTime DismissedAt { get; set; } = DateTime.UtcNow;
+}
+
 /// <summary>
 /// One press of "Process" on the AI assistant: see AiLedger. Kept whether or not a card was ever saved from it, so
 /// every request a group is charged for can be shown with who made it, when, what was typed and what came back.

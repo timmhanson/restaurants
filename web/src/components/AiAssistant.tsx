@@ -201,10 +201,10 @@ export function AiGroupPanel() {
       <h3>Level</h3>
       <div className="source-choice" role="radiogroup" aria-label="Level of the assistant">
         {s.levels.map((l) => (
-          <label key={l.id} className={l.id === s.level ? 'selected' : ''}>
-            <input type="radio" name="ai-level" checked={l.id === s.level} disabled={busy || !s.canChange} onChange={() => void save({ level: l.id })} />
+          <label key={l.id} className={l.id === s.level ? 'selected' : ''} style={l.allowed ? undefined : { opacity: 0.55 }}>
+            <input type="radio" name="ai-level" checked={l.id === s.level} disabled={busy || !s.canChange || !l.allowed} onChange={() => void save({ level: l.id })} />
             <span className="source-label">{l.label} · {l.price} a request</span>
-            <span className="source-hint">{l.says}</span>
+            <span className="source-hint">{l.allowed ? l.says : 'Not offered to your investment group. Ask the people who run the site.'}</span>
           </label>
         ))}
       </div>
@@ -443,9 +443,14 @@ export function AiGroupEditor({ groupId }: { groupId: number }) {
         </label>
       </div>
       <div className="form-row" style={{ marginTop: '0.75rem' }}>
-        <Field label="Level" hint="The group can change this itself.">
-          <select value={g.level} disabled={busy} onChange={(e) => void save({ level: e.target.value })}>
+        <Field label="Highest level the group can choose" hint="Levels above this one are not offered to the group.">
+          <select value={g.maxLevel} disabled={busy} onChange={(e) => void save({ maxLevel: e.target.value })}>
             {g.levels.map((l) => <option key={l.id} value={l.id}>{l.label} · {l.price} a request</option>)}
+          </select>
+        </Field>
+        <Field label="Level in use" hint="The group can change this itself, up to the highest level.">
+          <select value={g.level} disabled={busy} onChange={(e) => void save({ level: e.target.value })}>
+            {g.levels.map((l, i) => <option key={l.id} value={l.id} disabled={i > g.levels.findIndex((x) => x.id === g.maxLevel)}>{l.label} · {l.price} a request</option>)}
           </select>
         </Field>
         <Field label="Most it can be charged in a month ($)" hint={`Empty uses the usual ${dollars(g.defaultLimitCents)}. 0 stops every request.`}>

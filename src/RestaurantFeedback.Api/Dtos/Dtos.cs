@@ -377,7 +377,19 @@ public record SystemReport(DateOnly From, DateOnly To, CardStats Totals, int Gro
 // ---- System administration: overview, security, status, directories -------------------------------------
 
 /// <summary>Something the System Administrator should look at. Severity: high, medium or info. Link is a page in the site.</summary>
-public record AttentionItem(string Severity, string Title, string Detail, string? Link);
+public record AttentionItem(string Severity, string Title, string Detail, string? Link)
+{
+    /// <summary>Which item this is, whatever numbers it holds at the moment; and what it says now, so a dismissal lasts only while it reads the same.</summary>
+    public string Key { get; init; } = "";
+    public string Fingerprint { get; init; } = "";
+    /// <summary>"system" (the site itself: backups, errors, keys, security) or "restaurants" (investment groups, their restaurants, people, cards and bills).</summary>
+    public string Scope { get; init; } = "system";
+    /// <summary>This System Administrator dismissed it, and it has not changed since.</summary>
+    public bool Dismissed { get; init; }
+    public DateTime? DismissedAt { get; init; }
+}
+public record AttentionDismissRequest([Required, MaxLength(400)] string Key, [Required, MaxLength(100)] string Fingerprint, [MaxLength(400)] string? Title);
+public record AttentionRestoreRequest([Required, MaxLength(400)] string Key);
 public record GroupSnapshot(int Id, string Name, bool IsActive, int Restaurants, int People, int Admins, int ActivePeople7d, int Cards7d, int Waiting,
     int WaitingOverAWeek, DateTime? LastActivity);
 public record SignInRow(DateTime At, string? UserName, string? DisplayName, string? RoleTitle, string? GroupName, bool Succeeded, string? IpAddress, string? UserAgent);
@@ -729,7 +741,11 @@ public record ServiceTestResult(bool Ok, string Message);
 /// <summary>A face on the card: how upset the guest was, and the reward it stands for at this group.</summary>
 public record AiFaceDto(int Level, string Face, string Label, string Meaning, string? Reward);
 /// <summary>A level the group can choose. Groups get the label and the price, never which company's model it is.</summary>
-public record AiLevelDto(string Id, string Label, string Says, int PriceMills, string Price);
+public record AiLevelDto(string Id, string Label, string Says, int PriceMills, string Price)
+{
+    /// <summary>The group may choose this level: it is not above the highest one the System Administrator allows it.</summary>
+    public bool Allowed { get; init; } = true;
+}
 /// <param name="Enabled">The assistant can be used for this restaurant now. False hides its section on the card.</param>
 public record AiConfigDto(bool Enabled, string? Level, int PriceMills, string? Price, List<AiFaceDto> Faces);
 public record AiProcessRequest([Required, MaxLength(64)] string RequestKey, int RestaurantId, [Required, MaxLength(4000)] string Text, bool WantEmail);
@@ -739,7 +755,11 @@ public record AiProcessResponse(string RequestKey, int PriceMills, string Price,
 /// <param name="CanChange">This person may change the level and rewards (and switch it on or off, when the group decides).</param>
 /// <param name="Ready">The site has the assistant set up. When false it cannot be used whatever is chosen here.</param>
 public record AiSettingsDto(bool On, string DecidedBy, bool CanChange, bool Ready, string Level, List<AiLevelDto> Levels, int LimitCents, int UsedMills, int UsedRequests,
-    List<AiFaceDto> Faces, List<string> Offers);
+    List<AiFaceDto> Faces, List<string> Offers)
+{
+    /// <summary>The highest level this group may choose, set by the people who run the site.</summary>
+    public string MaxLevel { get; init; } = Services.AiLevels.Thorough;
+}
 public record AiSettingsRequest(bool? On, string? Level, List<string?>? Rewards);
 /// <summary>One request, for the group's Billing page and the System Administrator's analytics. Guest and CommentId say which card it was for; CommentId is null when no card was saved.</summary>
 public record AiRequestRow(int Id, DateTime At, string By, int GroupId, string? Group, int RestaurantId, string Restaurant, string Level, int PriceMills, string Outcome, bool WantEmail,
@@ -759,8 +779,12 @@ public record AiKeyRequest(string? ApiKey);
 public record AiSiteLevelDto(string Id, string Label, string Model, int PriceMills, string Price, decimal InPerMillion, decimal OutPerMillion);
 public record AiSiteDto(bool Configured, string Source, string? KeyEnding, DateTime? SavedAt, string? SavedBy, bool CanEnter, List<AiSiteLevelDto> Levels, int DefaultLimitCents);
 /// <param name="GroupDecides">Left to the group to switch on or off; otherwise On is the System Administrator's answer.</param>
-public record AiGroupDto(int GroupId, bool On, bool GroupDecides, string Level, int? LimitCents, int DefaultLimitCents, int UsedMills, int UsedRequests, List<AiLevelDto> Levels);
-public record AiGroupRequest(bool? On, bool? GroupDecides, string? Level, int? LimitCents, bool UseDefaultLimit = false);
+public record AiGroupDto(int GroupId, bool On, bool GroupDecides, string Level, int? LimitCents, int DefaultLimitCents, int UsedMills, int UsedRequests, List<AiLevelDto> Levels)
+{
+    public string MaxLevel { get; init; } = Services.AiLevels.Thorough;
+}
+/// <param name="MaxLevel">The highest level the group may choose.</param>
+public record AiGroupRequest(bool? On, bool? GroupDecides, string? Level, int? LimitCents, bool UseDefaultLimit = false, string? MaxLevel = null);
 public record AiUsageBucket(string Key, string Label, int Requests, int Charged, int Failed, int NotSaved, int Mills, int CostMicros);
 /// <summary>The System Administrator's analytics. Mills is what groups were charged (tenths of a cent); CostMicros what it cost the site (millionths of a dollar).</summary>
 public record AiUsageDto(int Requests, int Charged, int Failed, int NotSaved, int WithEmail, int Mills, int CostMicros, List<AiUsageBucket> ByGroup, List<AiUsageBucket> ByRestaurant,

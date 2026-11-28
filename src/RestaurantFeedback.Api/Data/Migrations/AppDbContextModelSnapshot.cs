@@ -177,6 +177,38 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.AttentionDismissal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("DismissedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("AttentionDismissals");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.AuditLog", b =>
                 {
                     b.Property<long>("Id")
@@ -496,6 +528,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("AiLevel")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AiMaxLevel")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("AiMonthlyLimitCents")

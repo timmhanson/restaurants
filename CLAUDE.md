@@ -21,7 +21,9 @@ See README.md for the architecture, roles and deployment.
   their own. Accounts for outside services the whole site uses are entered on Connected Systems. Never
   show them restaurant-level screens unless they chose "Impersonate" (once called "View as admin"). Put new site-wide features in that area
   (`SystemAdminController`, `/api/system/*`, `SuperAdmin` only) and surface anything needing action in the
-  Overview's "Needs your attention" list.
+  Overview's "Needs your attention" list. An item there is about the system or about restaurants according to
+  where its link leads (`Attention.Scope`): give a new item the right link, and keep its numbers in the title or
+  detail so a dismissed item comes back when they change.
 - **Permissions and settings are handed down level by level, and the higher level wins.** System Administrator
   (per investment group) → Investment Group Administrators (who can do everything in their group) → Restaurant
   Owners → Managers; team logins only enter cards. Check `me.Has(ManagerPermission.X)` for anything an owner or

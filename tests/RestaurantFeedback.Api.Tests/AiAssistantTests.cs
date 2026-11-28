@@ -149,6 +149,20 @@ public class AiAssistantTests(ApiFactory factory)
             Assert.Equal([offers[0], offers[0], offers[1], offers[1], offers[^1]], chosen.Faces.Select(f => f.Reward!));
             Assert.Equal(AiLevels.Quick, chosen.Level);
 
+            // The System Administrator sets the highest level the group may choose. Lowering it brings the level in use down with it.
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync("/api/ai/settings", new AiSettingsRequest(null, AiLevels.Thorough, null))).StatusCode);
+            var capped = (await (await ForGroup(new AiGroupRequest(null, null, null, null, MaxLevel: AiLevels.Balanced))).Content.ReadFromJsonAsync<AiGroupDto>())!;
+            Assert.Equal((AiLevels.Balanced, AiLevels.Balanced), (capped.MaxLevel, capped.Level));
+            var limited = (await owner.GetFromJsonAsync<AiSettingsDto>("/api/ai/settings"))!;
+            Assert.Equal((AiLevels.Balanced, AiLevels.Balanced), (limited.MaxLevel, limited.Level));
+            Assert.Equal([true, true, false], limited.Levels.Select(l => l.Allowed));
+            Assert.Equal("1.8¢", (await Config()).Price);
+            var over = await owner.PutAsJsonAsync("/api/ai/settings", new AiSettingsRequest(null, AiLevels.Thorough, null));
+            Assert.Equal(HttpStatusCode.Forbidden, over.StatusCode);
+            Assert.Contains("highest level this investment group can choose is Balanced", await over.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync("/api/ai/settings", new AiSettingsRequest(null, AiLevels.Quick, null))).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await ForGroup(new AiGroupRequest(null, null, null, null, MaxLevel: "genius"))).StatusCode);
+
             // Switched off by the System Administrator, for the group: gone from the card form, and the group cannot bring it back.
             Assert.Equal(HttpStatusCode.OK, (await ForGroup(new AiGroupRequest(false, false, null, null))).StatusCode);
             Assert.False((await Config()).Enabled);
@@ -156,7 +170,7 @@ public class AiAssistantTests(ApiFactory factory)
         }
         finally
         {
-            await ForGroup(new AiGroupRequest(false, false, AiLevels.Balanced, null, UseDefaultLimit: true));
+            await ForGroup(new AiGroupRequest(false, false, AiLevels.Balanced, null, UseDefaultLimit: true, MaxLevel: AiLevels.Thorough));
             await Db(async db => { db.AiRequests.RemoveRange(db.AiRequests.Where(r => r.GroupId == groupId)); return await db.SaveChangesAsync(); });
         }
     }

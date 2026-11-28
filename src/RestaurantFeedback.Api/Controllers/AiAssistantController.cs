@@ -36,7 +36,9 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         return AiMoods.All.Select((m, i) => new AiFaceDto(m.Level, m.Face, m.Label, m.Meaning, rewards[i])).ToList();
     }
 
-    public static List<AiLevelDto> Levels() => AiLevels.All.Select(l => new AiLevelDto(l.Id, l.Label, l.Says, l.PriceMills, AiLevels.Price(l.PriceMills))).ToList();
+    /// <param name="max">The highest level the group may choose; those above it are marked not allowed.</param>
+    public static List<AiLevelDto> Levels(AiLevel? max = null) =>
+        AiLevels.All.Select(l => new AiLevelDto(l.Id, l.Label, l.Says, l.PriceMills, AiLevels.Price(l.PriceMills)) { Allowed = max is null || AiLevels.Within(l, max) }).ToList();
 
     private Task<GroupBilling?> Row(int groupId, CancellationToken ct) => db.GroupBilling.FirstOrDefaultAsync(b => b.GroupId == groupId, ct);
 
@@ -148,7 +150,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         var rules = AiPolicy.For(await Row(groupId, ct), options);
         var settings = await settingsStore.GetAsync(groupId, ct);
         var (requests, mills) = await ledger.ThisMonthAsync(groupId, ct);
-        return new AiSettingsDto(rules.On, rules.DecidedBy, CanChange(me), drafter.Configured, rules.Level.Id, Levels(), rules.LimitCents, mills, requests, Faces(settings), settings.CouponOffers);
+        return new AiSettingsDto(rules.On, rules.DecidedBy, CanChange(me), drafter.Configured, rules.Level.Id, Levels(rules.Max), rules.LimitCents, mills, requests, Faces(settings), settings.CouponOffers) { MaxLevel = rules.Max.Id };
     }
 
     [HttpGet("settings")]
@@ -180,6 +182,9 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         if (req.Level is not null)
         {
             if (!AiLevels.Is(req.Level)) return BadRequest(new { message = "Choose one of the levels." });
+            var max = AiLevels.Max(row.AiMaxLevel);
+            if (!AiLevels.Within(AiLevels.Of(req.Level), max))
+                return StatusCode(403, new { message = $"The highest level this investment group can choose is {max.Label}. That is decided by the people who run the site." });
             row.AiLevel = req.Level;
         }
         await db.SaveChangesAsync(ct);
@@ -294,7 +299,7 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
     {
         var rules = AiPolicy.For(row, options);
         var (requests, mills) = await ledger.ThisMonthAsync(id, ct);
-        return new AiGroupDto(id, rules.On, rules.DecidedBy == MailChoices.Group, rules.Level.Id, row?.AiMonthlyLimitCents, options.DefaultMonthlyLimitCents, mills, requests, AiAssistantController.Levels());
+        return new AiGroupDto(id, rules.On, rules.DecidedBy == MailChoices.Group, rules.Level.Id, row?.AiMonthlyLimitCents, options.DefaultMonthlyLimitCents, mills, requests, AiAssistantController.Levels()) { MaxLevel = rules.Max.Id };
     }
 
     [HttpGet("groups/{id:int}/ai")]
@@ -306,19 +311,23 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
     {
         var me = await users.GetAsync();
         if (!await db.Groups.AnyAsync(g => g.Id == id, ct)) return NotFound();
-        if (req.Level is not null && !AiLevels.Is(req.Level)) return BadRequest(new { message = "Choose one of the levels." });
+        if ((req.Level is not null && !AiLevels.Is(req.Level)) || (req.MaxLevel is not null && !AiLevels.Is(req.MaxLevel))) return BadRequest(new { message = "Choose one of the levels." });
         if (req.LimitCents is < 0 or > 1_000_000) return BadRequest(new { message = "Enter a monthly limit from $0 to $10,000." });
         var row = await db.GroupBilling.FirstOrDefaultAsync(b => b.GroupId == id, ct);
         if (row is null) db.GroupBilling.Add(row = new GroupBilling { GroupId = id });
-        var before = new { On = row.AiEnabled, GroupDecides = GroupPolicy.Decides(row, GroupChoice.Ai), Level = AiLevels.Of(row.AiLevel).Label, LimitCents = row.AiMonthlyLimitCents };
+        var before = new { On = row.AiEnabled, GroupDecides = GroupPolicy.Decides(row, GroupChoice.Ai), Level = AiLevels.Of(row.AiLevel).Label, Highest = AiLevels.Max(row.AiMaxLevel).Label, LimitCents = row.AiMonthlyLimitCents };
         if (req.On is bool on) row.AiEnabled = on;
+        if (req.MaxLevel is not null) row.AiMaxLevel = req.MaxLevel;
         if (req.GroupDecides is bool decides) row.GroupDecides = decides ? row.GroupDecides | GroupChoice.Ai : row.GroupDecides & ~GroupChoice.Ai;
         if (req.Level is not null) row.AiLevel = req.Level;
+        // The level in use is never above the highest one allowed: lowering the highest brings it down with it.
+        var highest = AiLevels.Max(row.AiMaxLevel);
+        if (!AiLevels.Within(AiLevels.Of(row.AiLevel), highest)) row.AiLevel = highest.Id;
         if (req.UseDefaultLimit) row.AiMonthlyLimitCents = null;
         else if (req.LimitCents is int limit) row.AiMonthlyLimitCents = limit;
         await db.SaveChangesAsync(ct);
         await audit.LogAsync(me, "AiAssistantSetForGroup", "Group", id,
-            new { before, after = new { On = row.AiEnabled, GroupDecides = GroupPolicy.Decides(row, GroupChoice.Ai), Level = AiLevels.Of(row.AiLevel).Label, LimitCents = row.AiMonthlyLimitCents } }, groupId: id);
+            new { before, after = new { On = row.AiEnabled, GroupDecides = GroupPolicy.Decides(row, GroupChoice.Ai), Level = AiLevels.Of(row.AiLevel).Label, Highest = highest.Label, LimitCents = row.AiMonthlyLimitCents } }, groupId: id);
         return await GroupNow(id, row, ct);
     }
 

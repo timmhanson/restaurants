@@ -3,11 +3,10 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { GroupSnapshot, SignInRow, SystemOverview } from '../api/types'
 import { useViewAs } from '../auth/useViewAs'
+import AttentionPanel from '../components/AttentionPanel'
 import DataTable from '../components/DataTable'
 import Stat from '../components/Stat'
 import { Alert, Badge, Spinner, fmtDateTime } from '../components/ui'
-
-const SEVERITY = { high: 'Needs action', medium: 'Worth a look', info: 'For your information' } as const
 
 /** The System Administrator's home: what needs attention, and how the whole site is doing right now. */
 export default function OverviewPage() {
@@ -42,25 +41,7 @@ export default function OverviewPage() {
         <Spinner />
       ) : (
         <>
-          <div className="panel">
-            <h2>Needs your attention</h2>
-            {data.attention.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }}>Nothing right now. Every group has an administrator, nothing is failing and no cards are overdue.</p>
-            ) : (
-              <ul className="attention">
-                {data.attention.map((a, i) => (
-                  <li key={i} className={`attention-${a.severity}`}>
-                    <span className="attention-mark" title={SEVERITY[a.severity]} aria-label={SEVERITY[a.severity]} />
-                    <div className="attention-text">
-                      <strong>{a.title}</strong>
-                      <div className="muted small">{a.detail}</div>
-                    </div>
-                    {a.link && <Link className="btn btn-sm" to={a.link}>Open</Link>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <AttentionPanel items={data.attention} onChange={(attention) => setData((d) => (d ? { ...d, attention } : d))} />
 
           <div className="grid grid-4 stat-grid" style={{ marginBottom: '1rem' }}>
             <Stat value={data.activeGroups} label={`investment group${data.activeGroups === 1 ? '' : 's'}${data.groups > data.activeGroups ? ` (${data.groups - data.activeGroups} inactive)` : ''}`} />

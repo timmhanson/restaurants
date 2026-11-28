@@ -81,6 +81,17 @@ send each card carried, cards printed and marked sent, and refusals from the aud
   service every half hour about the cards it has not finished with, and Follow Up asks when it opens
   (`POST /api/comments/mail/refresh`), so "waiting to print" is never left standing.
 
+### Needs your attention: dismissing, and what each item is about
+
+On the System Administrator's Overview, each "Needs your attention" item can be **dismissed** (`AttentionPanel`,
+`POST /api/system/attention/dismiss` and `/restore`, table `AttentionDismissal`). A dismissal is that System
+Administrator's own and holds only while the item reads exactly the same: when its count or detail changes, or it
+goes away and comes back, it shows again (`Attention.Key` says which item it is whatever its numbers;
+`Attention.Fingerprint` what it says now). "Show dismissed" lists the dismissed ones with **Bring back**. A switch
+shows **All**, **System Only** (the site itself: backups, errors, keys, email, security) or **Restaurants Only**
+(investment groups: their restaurants, people, cards and bills); which an item is comes from where it leads
+(`Attention.Scope`). The switch is remembered in the browser.
+
 ### The AI assistant on Enter Card
 
 Where it is switched on, Enter Card starts with a box: the person types what happened in their own words, ticks
@@ -95,7 +106,9 @@ card; sending it from the site is not built yet.
 
 - **Off by default, handed down like every other setting** (`AiPolicy`, `GroupBilling.AiEnabled`,
   `GroupChoice.Ai`). The System Administrator sets each group, in its Edit dialog (`PUT /api/system/groups/{id}/ai`):
-  off, on for the group, or "the group decides", plus the most it may be charged in a month. Where the group
+  off, on for the group, or "the group decides", plus the highest level the group may choose
+  (`GroupBilling.AiMaxLevel`; levels above it are shown to the group as not offered, and lowering it brings the
+  level in use down with it) and the most it may be charged in a month. Where the group
   decides, its administrators, and owners who hold `ManageAiAssistant`, switch it on or off on their Billing page
   (`AiGroupPanel`, `PUT /api/ai/settings`), where they also choose the level and the reward for each face. Where it
   is off, the section is simply not on the card form (`GET /api/ai/config`).

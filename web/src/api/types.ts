@@ -466,7 +466,8 @@ export interface CommentRequest {
 // ---- The AI assistant ----
 /** A face: how upset the guest was, and the reward it stands for at this group. */
 export interface AiFace { level: number; face: string; label: string; meaning: string; reward?: string | null }
-export interface AiLevelChoice { id: string; label: string; says: string; priceMills: number; price: string }
+/** allowed: not above the highest level the System Administrator lets this group choose. */
+export interface AiLevelChoice { id: string; label: string; says: string; priceMills: number; price: string; allowed: boolean }
 /** Whether Enter Card shows the assistant for a restaurant, and what a press costs. */
 export interface AiConfig { enabled: boolean; level?: string | null; priceMills: number; price?: string | null; faces: AiFace[] }
 export interface AiFields {
@@ -479,7 +480,7 @@ export interface AiProcessResponse { requestKey: string; priceMills: number; pri
 /** The group's own settings. usedMills is tenths of a cent. */
 export interface AiSettings {
   on: boolean; decidedBy: 'site' | 'group'; canChange: boolean; ready: boolean; level: string; levels: AiLevelChoice[]
-  limitCents: number; usedMills: number; usedRequests: number; faces: AiFace[]; offers: string[]
+  limitCents: number; usedMills: number; usedRequests: number; faces: AiFace[]; offers: string[]; maxLevel: string
 }
 export interface AiRequestRow {
   id: number; at: string; by: string; groupId: number; group?: string | null; restaurantId: number; restaurant: string; level: string; priceMills: number
@@ -492,7 +493,7 @@ export interface AiSite {
   configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; savedAt?: string | null; savedBy?: string | null; canEnter: boolean
   levels: { id: string; label: string; model: string; priceMills: number; price: string; inPerMillion: number; outPerMillion: number }[]; defaultLimitCents: number
 }
-export interface AiGroupSettings { groupId: number; on: boolean; groupDecides: boolean; level: string; limitCents?: number | null; defaultLimitCents: number; usedMills: number; usedRequests: number; levels: AiLevelChoice[] }
+export interface AiGroupSettings { groupId: number; on: boolean; groupDecides: boolean; level: string; limitCents?: number | null; defaultLimitCents: number; usedMills: number; usedRequests: number; levels: AiLevelChoice[]; maxLevel: string }
 export interface AiUsageBucket { key: string; label: string; requests: number; charged: number; failed: number; notSaved: number; mills: number; costMicros: number }
 export interface AiUsage {
   requests: number; charged: number; failed: number; notSaved: number; withEmail: number; mills: number; costMicros: number
@@ -753,7 +754,11 @@ export interface SystemReport {
 }
 
 // ---- System administration: overview, security, status, directories ----
-export interface AttentionItem { severity: 'high' | 'medium' | 'info'; title: string; detail: string; link?: string | null }
+/** scope: the site itself, or the investment groups and their restaurants. dismissed: by this System Administrator, and unchanged since. */
+export interface AttentionItem {
+  severity: 'high' | 'medium' | 'info'; title: string; detail: string; link?: string | null
+  key: string; fingerprint: string; scope: 'system' | 'restaurants'; dismissed: boolean; dismissedAt?: string | null
+}
 export interface GroupSnapshot {
   id: number; name: string; isActive: boolean; restaurants: number; people: number; admins: number; activePeople7d: number; cards7d: number
   waiting: number; waitingOverAWeek: number; lastActivity?: string | null

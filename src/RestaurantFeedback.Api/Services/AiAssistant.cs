@@ -43,6 +43,10 @@ public static class AiLevels
 
     public static AiLevel Of(string? id) => All.FirstOrDefault(l => l.Id == id) ?? All.First(l => l.Id == Default);
     public static bool Is(string? id) => All.Any(l => l.Id == id);
+    /// <summary>The highest level a group may choose: the System Administrator's limit for it, or the top one.</summary>
+    public static AiLevel Max(string? id) => All.FirstOrDefault(l => l.Id == id) ?? All[^1];
+    /// <summary>Whether a level is within the highest one allowed. Levels run from the cheapest to the most thorough.</summary>
+    public static bool Within(AiLevel level, AiLevel max) => Array.IndexOf(All, level) <= Array.IndexOf(All, max);
 
     /// <summary>"3¢", "1.8¢", "0.1¢".</summary>
     public static string Price(int mills) => (mills / 10m).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "¢";
@@ -85,7 +89,9 @@ public static class AiMoods
 
 /// <summary>Whether the assistant is on for a group, and who decided: see <see cref="AiPolicy.For"/>.</summary>
 /// <param name="DecidedBy">"site" (the System Administrator's answer for the group) or "group" (left to the group).</param>
-public record AiRules(bool On, string DecidedBy, AiLevel Level, int LimitCents);
+/// <param name="Level">The level in use: the group's choice, brought down to Max when that is lower.</param>
+/// <param name="Max">The highest level the group may choose.</param>
+public record AiRules(bool On, string DecidedBy, AiLevel Level, int LimitCents, AiLevel Max);
 
 public static class AiPolicy
 {
@@ -93,8 +99,13 @@ public static class AiPolicy
     /// Off for every group until the System Administrator switches it on for the group, or leaves the decision to
     /// the group (GroupChoice.Ai) and the group switches it on. The level is the group's own choice.
     /// </summary>
-    public static AiRules For(GroupBilling? b, AiOptions options) =>
-        new(b?.AiEnabled == true, GroupPolicy.Decides(b, GroupChoice.Ai) ? MailChoices.Group : MailChoices.Site, AiLevels.Of(b?.AiLevel), b?.AiMonthlyLimitCents ?? options.DefaultMonthlyLimitCents);
+    public static AiRules For(GroupBilling? b, AiOptions options)
+    {
+        var max = AiLevels.Max(b?.AiMaxLevel);
+        var chosen = AiLevels.Of(b?.AiLevel);
+        return new(b?.AiEnabled == true, GroupPolicy.Decides(b, GroupChoice.Ai) ? MailChoices.Group : MailChoices.Site, AiLevels.Within(chosen, max) ? chosen : max,
+            b?.AiMonthlyLimitCents ?? options.DefaultMonthlyLimitCents, max);
+    }
 }
 
 // ---- The site's key ---------------------------------------------------------------------------------------------
