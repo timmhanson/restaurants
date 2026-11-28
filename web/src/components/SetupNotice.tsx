@@ -11,16 +11,18 @@ export const onboardingChanged = () => window.dispatchEvent(new Event('gf:onboar
 const SENT = 'gf:welcomed'
 
 /**
- * Where the investment group's set-up stands, for its administrators only (nobody else has anything to do). At a
- * real administrator's first visit to a group that has not started, they are taken to the Welcome page, once per
- * browser session; a System Administrator viewing the group is never sent there, though they can open it.
+ * Where the investment group's set-up stands (for its administrators), and whether this person has had their own
+ * welcome. At their first visit, a new group's administrator is taken to Getting Started, and an owner or manager
+ * (or an administrator of a group already set up) to the tour of what they can do: once per browser session, and
+ * never again once they have seen it. The shared team login gets neither, and a System Administrator viewing a
+ * group is never sent there, though they can open it. Returns the set-up state for administrators only.
  */
 export function useOnboarding() {
-  const { isGroupWide, overseeing, viewingAs, user } = useAuth()
+  const { isGroupWide, isTeamMember, overseeing, viewingAs, user } = useAuth()
   const nav = useNavigate()
   const location = useLocation()
   const [state, setState] = useState<Onboarding | null>(null)
-  const applies = isGroupWide && !overseeing
+  const applies = Boolean(user) && !overseeing && !isTeamMember
 
   const load = useCallback(() => {
     if (!applies) return setState(null)
@@ -33,7 +35,8 @@ export function useOnboarding() {
   }, [load])
 
   useEffect(() => {
-    if (!state || state.status !== 'new' || viewingAs || location.pathname !== '/enter') return
+    const due = state && ((state.canRun && state.status === 'new') || state.tour)
+    if (!due || viewingAs || location.pathname !== '/enter') return
     try {
       if (window.sessionStorage.getItem(SENT)) return
       window.sessionStorage.setItem(SENT, '1')
@@ -43,7 +46,7 @@ export function useOnboarding() {
     nav('/welcome', { replace: true })
   }, [state, viewingAs, location.pathname, nav])
 
-  return applies && state?.canRun ? state : null
+  return applies && isGroupWide && state?.canRun ? state : null
 }
 
 /** Shown at the top of every page until set-up is finished: how far it has got, and the way back to it. */

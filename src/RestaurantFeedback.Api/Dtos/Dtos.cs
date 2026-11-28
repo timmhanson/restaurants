@@ -755,6 +755,8 @@ public record OnboardingDto(string Status, bool CanRun, string GroupName, string
     List<OnboardingRestaurant> Restaurants, List<OnboardingPerson> People, OnboardingSending? Sending, OnboardingAssistant? Assistant, List<string> Offers, List<string> Reasons, DateTime? CompletedAt)
 {
     public static readonly OnboardingDto NotMine = new(Controllers.Onboarding.None, false, "", "", null, null, [], true, [], [], null, null, [], [], null);
+    /// <summary>This person has not had their own welcome yet: the tour of what they can do here (owners, managers, and administrators of a group that is already set up).</summary>
+    public bool Tour { get; init; }
 }
 public record SystemOnboardingDto(int GroupId, string Status, string? WelcomeNote, DateTime? StartedAt, DateTime? LaterAt, DateTime? CompletedAt, string? CompletedBy, List<OnboardingStepDto> Steps);
 public record SystemOnboardingRequest([MaxLength(2000)] string? WelcomeNote, bool Restart = false, bool MarkDone = false);
@@ -771,7 +773,8 @@ public record AiLevelDto(string Id, string Label, string Says, int PriceMills, s
 }
 /// <param name="Enabled">The assistant can be used for this restaurant now. False hides its section on the card.</param>
 public record AiConfigDto(bool Enabled, string? Level, int PriceMills, string? Price, List<AiFaceDto> Faces);
-public record AiProcessRequest([Required, MaxLength(64)] string RequestKey, int RestaurantId, [Required, MaxLength(4000)] string Text, bool WantEmail);
+/// <param name="WantEmail">No longer a choice: an email to the guest is always drafted (it costs nothing extra). Kept so older copies of the site still work.</param>
+public record AiProcessRequest([Required, MaxLength(64)] string RequestKey, int RestaurantId, [Required, MaxLength(4000)] string Text, bool WantEmail = true);
 /// <summary>What the assistant filled in. CouponOffer is the reward its face stands for.</summary>
 public record AiProcessResponse(string RequestKey, int PriceMills, string Price, Services.AiFields Fields, string? CouponOffer, List<AiFaceDto> Faces);
 /// <param name="DecidedBy">"site": the System Administrator decided whether it is on; "group": the group does.</param>

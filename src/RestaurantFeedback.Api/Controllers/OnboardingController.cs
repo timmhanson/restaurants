@@ -83,13 +83,40 @@ public class OnboardingController(AppDbContext db, CurrentUserProvider users, IG
     public async Task<OnboardingDto> Get(CancellationToken ct)
     {
         var me = await users.GetAsync();
-        return CanRun(me) ? await Now(me, ct) : OnboardingDto.NotMine;
+        // Everyone but the shared team login and the System Administrator gets a welcome of their own, once: a new
+        // group's administrator gets Getting Started; an owner, a manager, or an administrator of a group that is
+        // already set up gets the tour of what they can do.
+        var fresh = me.Role is UserRole.Owner or UserRole.Manager or UserRole.GroupAdmin && await db.Users.AnyAsync(u => u.Id == me.Id && u.WelcomedAt == null, ct);
+        if (!CanRun(me)) return OnboardingDto.NotMine with { Tour = fresh };
+        var now = await Now(me, ct);
+        return now with { Tour = fresh && now.Status == Onboarding.Done };
     }
 
+    /// <summary>This person has seen their welcome; they are not sent to it again.</summary>
+    [HttpPost("welcomed")]
+    public async Task<IActionResult> Welcomed(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == me.Id, ct);
+        if (user is not null && user.WelcomedAt is null && user.Role != UserRole.SuperAdmin)
+        {
+            user.WelcomedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await audit.LogAsync(me, "WelcomeSeen", "User", me.Id);
+        }
+        return NoContent();
+    }
+
+    /// <summary>
+    /// The group's set-up row, made if there is none. An administrator who acts on Getting Started has had their
+    /// welcome, so they are not shown the tour as well (saved with the row).
+    /// </summary>
     private async Task<GroupOnboarding> Row(int groupId, CancellationToken ct)
     {
         var row = await db.GroupOnboardings.FirstOrDefaultAsync(o => o.GroupId == groupId, ct);
         if (row is null) db.GroupOnboardings.Add(row = new GroupOnboarding { GroupId = groupId });
+        var me = await users.GetAsync();
+        if (me.Role == UserRole.GroupAdmin && await db.Users.FirstOrDefaultAsync(u => u.Id == me.Id && u.WelcomedAt == null, ct) is { } user) user.WelcomedAt = DateTime.UtcNow;
         return row;
     }
 

@@ -43,6 +43,20 @@ public class OnboardingTests(ApiFactory factory)
             Assert.Equal(HttpStatusCode.Forbidden, (await owner.PostAsync("/api/onboarding/finish", null)).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync($"/api/system/groups/{groupId}/onboarding")).StatusCode);
 
+            // An owner who has not been welcomed yet gets the tour of what they can do, once; the System Administrator never does.
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                (await db.Users.FirstAsync(u => u.Username == ApiFactory.OwnerUser)).WelcomedAt = null;
+                await db.SaveChangesAsync();
+            }
+            Assert.True((await owner.GetFromJsonAsync<OnboardingDto>("/api/onboarding"))!.Tour);
+            Assert.Equal(HttpStatusCode.NoContent, (await owner.PostAsync("/api/onboarding/welcomed", null)).StatusCode);
+            Assert.False((await owner.GetFromJsonAsync<OnboardingDto>("/api/onboarding"))!.Tour);
+            Assert.False((await site.GetFromJsonAsync<OnboardingDto>("/api/onboarding"))!.Tour);
+            // A new group's administrator gets Getting Started instead of the tour, and using it counts as their welcome.
+            Assert.False((await Now()).Tour);
+
             // The System Administrator leaves a welcome note; the new administrator finds it, with what is already there.
             Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync($"/api/system/groups/{groupId}/onboarding", new SystemOnboardingRequest("Good talking with you. Check the addresses."))).StatusCode);
             var first = await Now();
@@ -74,6 +88,7 @@ public class OnboardingTests(ApiFactory factory)
             var done = (await (await admin.PostAsync("/api/onboarding/finish", null)).Content.ReadFromJsonAsync<OnboardingDto>())!;
             Assert.Equal("done", done.Status);
             Assert.NotNull(done.CompletedAt);
+            Assert.False((await Now()).Tour);
             Assert.Equal([true, true, false, false, false], done.Steps.Select(s => s.Confirmed));
             Assert.DoesNotContain($"{name} has not finished setting up", await Attention());
 

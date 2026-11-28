@@ -293,8 +293,6 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
         <AiCardPanel
           restaurantId={v.restaurantId}
           mood={v.mood ?? null}
-          wantEmail={emailOpen}
-          onWantEmail={setEmailOpen}
           onFilled={fillFromAssistant}
           onMood={(face) => setV((s) => ({ ...s, mood: face.level, couponOffer: face.reward ?? s.couponOffer }))}
         />

@@ -94,11 +94,12 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         }
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var ask = new AiAsk(text, req.WantEmail, restaurant.Name, settings.ReasonCategories, CommentSources.All, AiMoods.All.Select((m, i) => (m, faces[i].Reward)).ToList(), today);
+        // An email to the guest is always drafted: it costs the group nothing extra, so it is not a choice.
+        var ask = new AiAsk(text, true, restaurant.Name, settings.ReasonCategories, CommentSources.All, AiMoods.All.Select((m, i) => (m, faces[i].Reward)).ToList(), today);
         var entry = new AiRequest
         {
             RequestKey = key, GroupId = groupId, RestaurantId = restaurant.Id, UserId = me.Id, UserName = me.DisplayName, Level = level.Id, Model = level.Model,
-            WantEmail = req.WantEmail, Input = text
+            WantEmail = true, Input = text
         };
         AiAnswer answer;
         try
@@ -126,7 +127,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
             StreetAddress = Kept(f.StreetAddress, 200), City = Kept(f.City, 100), State = UsStates.Code(f.State), Zip = Kept(f.Zip, 20), VisitDate = visit,
             Source = CommentSources.Match(f.Source), Reason = settings.ReasonCategories.FirstOrDefault(r => r.Equals(f.Reason?.Trim(), StringComparison.OrdinalIgnoreCase)),
             Details = Kept(f.Details, 2000), Mood = mood, MoodWhy = Kept(f.MoodWhy, 300),
-            EmailSubject = req.WantEmail ? Kept(f.EmailSubject, 200) : null, EmailBody = req.WantEmail ? Kept(f.EmailBody, 4000) : null
+            EmailSubject = Kept(f.EmailSubject, 200), EmailBody = Kept(f.EmailBody, 4000)
         };
         var offer = faces[mood - 1].Reward;
 
@@ -139,7 +140,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         (entry.Reason, entry.Mood, entry.Offer) = (fields.Reason, mood, offer);
         db.AiRequests.Add(entry);
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync(me, "AiAssistantUsed", "AiRequest", entry.Id, new { Level = level.Label, ChargedCents = level.PriceMills / 10m, EmailDrafted = req.WantEmail, Face = mood, Reward = offer }, restaurant.Id);
+        await audit.LogAsync(me, "AiAssistantUsed", "AiRequest", entry.Id, new { Level = level.Label, ChargedCents = level.PriceMills / 10m, Face = mood, Reward = offer }, restaurant.Id);
         return new AiProcessResponse(key, level.PriceMills, AiLevels.Price(level.PriceMills), fields, offer, faces);
     }
 

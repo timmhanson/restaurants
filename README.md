@@ -104,6 +104,13 @@ administrator first signs in (after choosing their own password) they land on **
   again, and has "… has not finished setting up" on the Overview until it is done. Groups that already had a
   restaurant when this was added count as set up.
 
+**A welcome for everyone else.** An owner or a manager (and an administrator who joins a group that is already
+set up) is taken, at their first sign-in, to a tour of their own on the same page (`PersonalTour`): who they are
+here and for which restaurants, a card for each thing they can do (which follows their role and permissions), and
+a few things worth knowing. "Got it" records it (`User.WelcomedAt`, `POST /api/onboarding/welcomed`) and it is not
+shown again. The shared team login and the System Administrator get none; people who had already signed in when
+this was added were not sent on it.
+
 ### Needs your attention: dismissing, and what each item is about
 
 On the System Administrator's Overview, each "Needs your attention" item can be **dismissed** (`AttentionPanel`,
@@ -118,10 +125,10 @@ shows **All**, **System Only** (the site itself: backups, errors, keys, email, s
 ### The AI assistant on Enter Card
 
 Where it is switched on, Enter Card starts with a box: the person types what happened in their own words, ticks
-"Also draft an email" if one is wanted, and presses **Process**. The assistant (`IAiDrafter`, `ClaudeDrafter`:
+and presses **Process**. The assistant (`IAiDrafter`, `ClaudeDrafter`:
 one Messages API request to Claude with a JSON schema, no tools) reads it and fills in the card for them to check:
 the guest, the visit, the reason (only ever one from the group's own list), a short account for managers, and how
-upset the guest was as one of five faces (`AiMoods`, 🙂 to 😡). Each face stands for one of the group's rewards
+upset the guest was as one of five faces, and always an email to the guest (it costs nothing extra, so it is not a choice), (`AiMoods`, 🙂 to 😡). Each face stands for one of the group's rewards
 (`GroupSettings.AiRewards`, else its offers spread in order), which goes on the card; picking another face changes
 the reward. What was typed is treated as material to read, never as instructions. Nothing is saved until the card
 is. The card also has an optional email section (the guest's address, a subject and the email), kept with the

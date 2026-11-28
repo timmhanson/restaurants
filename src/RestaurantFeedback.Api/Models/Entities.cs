@@ -172,6 +172,8 @@ public class AppUser
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAt { get; set; }
+    /// <summary>When this person saw their welcome (the tour of what they can do, or a new group's Getting Started). Null: they are welcomed at their next sign-in.</summary>
+    public DateTime? WelcomedAt { get; set; }
     public List<UserRestaurant> UserRestaurants { get; set; } = [];
 }
 

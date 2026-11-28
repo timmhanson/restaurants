@@ -474,6 +474,8 @@ export interface Onboarding {
   sending?: { mail: 'on' | 'off' | 'each'; groupDecidesMail: boolean; mode: string; priceCents: number; printFeeCents: number; hasPayMethod: boolean; payRequired: boolean; signatureForAll?: string | null } | null
   assistant?: { on: boolean; groupDecides: boolean; level: string; price: string } | null
   offers: string[]; reasons: string[]; completedAt?: string | null
+  /** This person has not had their own welcome yet: the tour of what they can do here. */
+  tour: boolean
 }
 export interface SystemOnboarding {
   groupId: number; status: 'new' | 'open' | 'done'; welcomeNote?: string | null; startedAt?: string | null; laterAt?: string | null; completedAt?: string | null; completedBy?: string | null

@@ -30,16 +30,14 @@ export function Faces({ faces, value, onPick, disabled }: { faces: AiFace[]; val
 
 /**
  * The AI assistant at the top of Enter Card, shown only where it is switched on. The person types what happened in
- * their own words, says whether an email to the guest is wanted, and presses Process: the card below is filled in
- * for them to check, and a face shows how upset the guest was, with the reward it stands for. Each press is charged
+ * their own words and presses Process: the card below is filled in for them to check, an email to the guest is
+ * drafted (always: it costs nothing extra), and a face shows how upset the guest was, with the reward it stands for. Each press is charged
  * to the investment group at the price on the button; a press that fails is not charged. Nothing is saved until the
  * card is.
  */
-export function AiCardPanel({ restaurantId, mood, wantEmail, onWantEmail, onFilled, onMood }: {
+export function AiCardPanel({ restaurantId, mood, onFilled, onMood }: {
   restaurantId: number
   mood: number | null
-  wantEmail: boolean
-  onWantEmail: (want: boolean) => void
   onFilled: (answer: AiProcessResponse) => void
   onMood: (face: AiFace) => void
 }) {
@@ -65,7 +63,7 @@ export function AiCardPanel({ restaurantId, mood, wantEmail, onWantEmail, onFill
     setError(null)
     try {
       // A key of its own for each press: if the same press is sent twice it is answered, and charged, once.
-      const answer = await api.post<AiProcessResponse>('/ai/process', { requestKey: crypto.randomUUID(), restaurantId, text, wantEmail })
+      const answer = await api.post<AiProcessResponse>('/ai/process', { requestKey: crypto.randomUUID(), restaurantId, text })
       setFaces(answer.faces)
       setWhy(answer.fields.moodWhy ?? null)
       setDone((n) => n + 1)
@@ -82,17 +80,13 @@ export function AiCardPanel({ restaurantId, mood, wantEmail, onWantEmail, onFill
       <h2>Let the assistant fill in the card <Badge kind="accent">optional</Badge></h2>
       <p className="muted">
         Type what happened in your own words, or paste the guest’s message, then press Process. The card below is filled in for you to check and correct before
-        you save it. Each press costs your investment group {config.price}.
+        you save it, and an email to the guest is drafted at the bottom of the card. Each press costs your investment group {config.price}.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       <Field label="What happened">
         <textarea rows={4} value={text} maxLength={4000} onChange={(e) => setText(e.target.value)} data-no-track
           placeholder="e.g. Maria Lopez called, 815-555-0142. She came through the drive-thru last night, waited 20 minutes and her burger was cold. She was polite but said it is the second time." />
       </Field>
-      <label className="check">
-        <input type="checkbox" checked={wantEmail} onChange={(e) => onWantEmail(e.target.checked)} />
-        <span>Also draft an email to the guest <span className="muted">(no extra charge; choose this before you press Process)</span></span>
-      </label>
       <div className="row-actions" style={{ marginTop: '0.5rem' }}>
         <button type="button" className="btn btn-primary" onClick={() => void process()} disabled={busy || text.trim().length < 15}
           aria-label={`Process with the assistant, ${config.price}`}>
@@ -126,7 +120,6 @@ const requestColumns = (withRestaurant: boolean): Column<AiRequestRow>[] => [
   },
   { key: 'reason', label: 'Reason', value: (r) => r.reason ?? null },
   { key: 'level', label: 'Level', value: (r) => r.level },
-  { key: 'email', label: 'Email drafted', value: (r) => (r.wantEmail ? 'yes' : 'no') },
   {
     key: 'price', label: 'Charged', num: true, value: (r) => r.priceMills / 1000,
     render: (r) => (r.outcome === 'ok' ? aiDollars(r.priceMills) : <Badge kind="neutral" title="It did not work, so it was not charged">not charged</Badge>),

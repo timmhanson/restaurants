@@ -50,15 +50,8 @@ export default function WelcomePage() {
 
   if (error && !o) return <Alert kind="error">{error}</Alert>
   if (!o) return <Spinner label="Loading…" />
-  if (!o.canRun) {
-    return (
-      <div className="panel">
-        <h1>Welcome</h1>
-        <p>Your investment group’s administrators set the site up. There is nothing here for you to do.</p>
-        <Link className="btn btn-primary" to="/enter">Go to Enter Card</Link>
-      </div>
-    )
-  }
+  // Owners and managers (and an administrator of a group that is already set up, at their first visit) get the tour.
+  if (!o.canRun || (o.tour && o.status === 'done' && !step)) return <PersonalTour steps={o.canRun} />
 
   const steps = o.steps
   const index = steps.findIndex((s) => s.id === step)
@@ -214,6 +207,76 @@ export default function WelcomePage() {
             {busy ? 'Saving…' : index + 1 < steps.length ? 'Looks right, next' : 'Looks right'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The welcome for one person: who they are here, and a card for each thing they can do, which depends on their
+ * role and what they have been allowed. "Got it" records that they have seen it, so it is not shown again.
+ */
+function PersonalTour({ steps }: { steps: boolean }) {
+  const { user, restaurants, has, isAdmin, isGroupWide, isGroupAdmin } = useAuth()
+  const nav = useNavigate()
+  const [busy, setBusy] = useState(false)
+  const first = (user?.displayName ?? '').split(' ')[0]
+  const places = restaurants.map((r) => r.name)
+  const where = places.length === 0 ? 'no restaurant yet' : places.length <= 3 ? places.join(', ') : `${places.length} restaurants`
+  const role = user?.role === 'Owner' ? 'an owner' : user?.role === 'Manager' ? 'a manager' : 'an administrator'
+  const gotIt = async (to: string) => {
+    setBusy(true)
+    await api.post('/onboarding/welcomed').catch(() => undefined)
+    onboardingChanged()
+    nav(to)
+  }
+  const cards: { show: boolean; title: string; to: string; text: string }[] = [
+    { show: true, title: 'Enter Card', to: '/enter', text: 'When a guest complains or comments (a survey, a message, a phone call), type it in: who, when, what went wrong and what they are being offered.' },
+    { show: has('ViewComments') && has('MarkResponded'), title: 'Print Cards', to: '/print', text: 'Each guest gets a coupon card. Print them and add a stamp, or have them printed and mailed for you. The red number is how many have not been sent.' },
+    { show: has('ViewComments'), title: 'Follow Up', to: '/follow-up', text: 'Who still needs a reply from someone, and who should be called to check their card arrived. Sending a card does not count as replying.' },
+    { show: has('ViewComments'), title: 'All Comments', to: '/comments', text: 'Every comment for your restaurants, to search, open and correct.' },
+    { show: has('ViewAnalytics'), title: 'Analytics', to: '/analytics', text: 'What goes wrong most, where and when, and how quickly guests are answered.' },
+    { show: isAdmin, title: 'Restaurants & Staff', to: '/restaurants', text: 'Each restaurant’s details and who works there. Add managers, and a shared team login that only enters cards.' },
+    { show: isAdmin, title: 'Billing', to: '/billing', text: 'What you are billed for cards mailed for you, and how it is paid.' },
+    { show: isAdmin && has('DesignCards'), title: 'Card Design', to: '/card-design', text: 'Your logo, colours and wording on the card guests receive.' },
+    { show: isGroupWide, title: 'Permissions and Settings', to: '/permissions', text: 'What owners and managers may do, and the choices on every card.' },
+  ].filter((c) => c.show)
+  return (
+    <div className="welcome">
+      <div className="panel welcome-hero">
+        <h1>Welcome{first ? `, ${first}` : ''}</h1>
+        <p className="welcome-lead">
+          You are {role} here{isGroupAdmin ? ', so you can do everything in your investment group' : `, for ${where}`}. This is where guest comments are kept track of, each guest is
+          sent a coupon card, and someone makes sure they are followed up.
+        </p>
+        <div className="row-actions">
+          <button type="button" className="btn btn-primary" onClick={() => void gotIt('/enter')} disabled={busy}>Got it, take me to Enter Card</button>
+          {has('ViewComments') && <button type="button" className="btn" onClick={() => void gotIt('/follow-up')} disabled={busy}>Show me what is waiting</button>}
+          {steps && <Link className="btn" to="/welcome?step=group">See how the group is set up</Link>}
+        </div>
+        <p className="muted small" style={{ marginBottom: 0 }}>This welcome is shown once. Everything on it is in the menu on the left.</p>
+      </div>
+
+      <h2 className="section-head">What you can do</h2>
+      <div className="grid grid-4 welcome-tour">
+        {cards.map((c, i) => (
+          <div key={c.title} className="panel welcome-tour-card">
+            <div className="welcome-step-n">{i + 1}</div>
+            <strong>{c.title}</strong>
+            <p className="muted small" style={{ margin: '0.25rem 0 0.5rem' }}>{c.text}</p>
+            <Link className="btn btn-sm" to={c.to}>Open</Link>
+          </div>
+        ))}
+      </div>
+
+      <h2 className="section-head">Good to know</h2>
+      <div className="panel">
+        <ul className="welcome-list">
+          <li><strong>A guest is finished with</strong> when someone has replied to them, their card has been sent, and someone has checked it arrived.</li>
+          <li><strong>The red numbers in the menu</strong> are what is waiting: cards not sent yet, and guests waiting for a reply or a follow-up call.</li>
+          {!isGroupWide && <li><strong>What you see is what you have been allowed.</strong> If something you need is missing, ask {user?.role === 'Manager' ? 'your owner or administrator' : 'your investment group’s administrator'}.</li>}
+          <li><strong>Your password</strong> is yours to change, with the Password button at the top right.</li>
+        </ul>
       </div>
     </div>
   )

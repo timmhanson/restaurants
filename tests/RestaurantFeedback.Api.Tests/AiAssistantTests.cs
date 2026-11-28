@@ -110,9 +110,11 @@ public class AiAssistantTests(ApiFactory factory)
             // The same press arriving again is answered, not asked or charged again.
             var again = (await (await Press("k-1", email: true)).Content.ReadFromJsonAsync<AiProcessResponse>())!;
             Assert.Equal((answer.CouponOffer, callsBefore + 1), (again.CouponOffer, factory.Ai.Calls));
-            // Without the email asked for, none comes back.
+            // An email to the guest is always drafted, asked for or not: it costs nothing extra.
             var plain = (await (await Press("k-2", Typed + " She was angry.")).Content.ReadFromJsonAsync<AiProcessResponse>())!;
-            Assert.Equal((4, null, config.Faces[3].Reward), (plain.Fields.Mood, plain.Fields.EmailBody, plain.CouponOffer));
+            Assert.Equal((4, config.Faces[3].Reward), (plain.Fields.Mood, plain.CouponOffer));
+            Assert.NotNull(plain.Fields.EmailBody);
+            Assert.True(factory.Ai.Last!.WantEmail);
             // A try that fails is kept and not charged.
             var failed = await Press("k-3", Typed + " Outage");
             Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
