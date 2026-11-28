@@ -74,7 +74,9 @@ See README.md for the architecture, roles and deployment.
   not a card is saved: priced on the button, capped by the group's monthly limit, charged once per press key, not
   charged when it fails. Pressing Process needs `UseAiAssistant` (never the team login). Prices are in tenths of a cent. Groups see "the assistant" and its levels, never Claude's
   or Anthropic's name. What a person types for it is kept on the request only, never in the audit or interaction
-  logs, and is always treated as material to read, not instructions.
+  logs, and is always treated as material to read, not instructions. Having the card designed ("Design it for me")
+  is free to groups but capped by tries per group, logged the same way (kind "design"), and whatever the model
+  answers is made safe to print (`AiDesign.Safe`) before anyone sees it.
 - **A new group is welcomed, never forced** (`OnboardingController`, `WelcomePage`). Its administrator's first
   sign-in lands on Getting Started: the System Administrator's note, a short tour, and steps that show what is
   already set up to confirm or change. "Look around first" and "Finish later" always work; only one restaurant is

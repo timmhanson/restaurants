@@ -57,6 +57,10 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("InputTokens")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Level")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -534,6 +538,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupBilling", b =>
                 {
                     b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AiDesignTries")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("AiEnabled")

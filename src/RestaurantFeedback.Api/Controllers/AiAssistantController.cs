@@ -217,7 +217,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         if (!me.IsAdmin || me.GroupId is not int groupId) return Forbid();
         var range = MailLedger.Range(month) ?? MailLedger.Range(MailLedger.MonthKey(DateTime.UtcNow))!.Value;
         var mine = me.RestaurantIds.ToList();
-        var rows = await db.AiRequests.AsNoTracking().Where(r => r.GroupId == groupId && r.At >= range.From && r.At < range.To && (me.IsGroupWide || mine.Contains(r.RestaurantId)))
+        var rows = await db.AiRequests.AsNoTracking().Where(r => r.GroupId == groupId && r.Kind != AiKinds.Design && r.At >= range.From && r.At < range.To && (me.IsGroupWide || mine.Contains(r.RestaurantId)))
             .OrderByDescending(r => r.At).Take(2000).ToListAsync(ct);
         var names = await db.Restaurants.AsNoTracking().Where(r => r.GroupId == groupId).ToDictionaryAsync(r => r.Id, r => r.Name, ct);
         var list = rows.Select(r => Row(r, names.GetValueOrDefault(r.RestaurantId, ""), null, false)).ToList();
@@ -310,7 +310,11 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
     {
         var rules = AiPolicy.For(row, options);
         var (requests, mills) = await ledger.ThisMonthAsync(id, ct);
-        return new AiGroupDto(id, rules.On, rules.DecidedBy == MailChoices.Group, rules.Level.Id, row?.AiMonthlyLimitCents, options.DefaultMonthlyLimitCents, mills, requests, AiAssistantController.Levels()) { MaxLevel = rules.Max.Id };
+        return new AiGroupDto(id, rules.On, rules.DecidedBy == MailChoices.Group, rules.Level.Id, row?.AiMonthlyLimitCents, options.DefaultMonthlyLimitCents, mills, requests, AiAssistantController.Levels())
+        {
+            MaxLevel = rules.Max.Id, DesignTries = row?.AiDesignTries, DefaultDesignTries = options.DefaultDesignTries,
+            DesignsUsed = await db.AiRequests.CountAsync(r => r.GroupId == id && r.Kind == AiKinds.Design && r.Outcome == AiOutcomes.Ok, ct)
+        };
     }
 
     [HttpGet("groups/{id:int}/ai")]
@@ -324,6 +328,7 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
         if (!await db.Groups.AnyAsync(g => g.Id == id, ct)) return NotFound();
         if ((req.Level is not null && !AiLevels.Is(req.Level)) || (req.MaxLevel is not null && !AiLevels.Is(req.MaxLevel))) return BadRequest(new { message = "Choose one of the levels." });
         if (req.LimitCents is < 0 or > 1_000_000) return BadRequest(new { message = "Enter a monthly limit from $0 to $10,000." });
+        if (req.DesignTries is < 0 or > 1000) return BadRequest(new { message = "Enter a number of free card designs from 0 to 1,000." });
         var row = await db.GroupBilling.FirstOrDefaultAsync(b => b.GroupId == id, ct);
         if (row is null) db.GroupBilling.Add(row = new GroupBilling { GroupId = id });
         var before = new { On = row.AiEnabled, GroupDecides = GroupPolicy.Decides(row, GroupChoice.Ai), Level = AiLevels.Of(row.AiLevel).Label, Highest = AiLevels.Max(row.AiMaxLevel).Label, LimitCents = row.AiMonthlyLimitCents };
@@ -334,6 +339,8 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
         // The level in use is never above the highest one allowed: lowering the highest brings it down with it.
         var highest = AiLevels.Max(row.AiMaxLevel);
         if (!AiLevels.Within(AiLevels.Of(row.AiLevel), highest)) row.AiLevel = highest.Id;
+        if (req.UseDefaultDesignTries) row.AiDesignTries = null;
+        else if (req.DesignTries is int tries) row.AiDesignTries = tries;
         if (req.UseDefaultLimit) row.AiMonthlyLimitCents = null;
         else if (req.LimitCents is int limit) row.AiMonthlyLimitCents = limit;
         await db.SaveChangesAsync(ct);
@@ -359,7 +366,10 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
         if (rs.Count > 0) q = q.Where(r => rs.Contains(r.RestaurantId));
         if (from is { } f) q = q.Where(r => r.At >= f.ToDateTime(TimeOnly.MinValue));
         if (to is { } t) q = q.Where(r => r.At < t.AddDays(1).ToDateTime(TimeOnly.MinValue));
-        var rows = await q.OrderByDescending(r => r.At).ToListAsync(ct);
+        var everything = await q.OrderByDescending(r => r.At).ToListAsync(ct);
+        // Card designs are free to groups and counted on their own; the rest is the assistant on Enter Card.
+        var designs = everything.Where(r => r.Kind == AiKinds.Design).ToList();
+        var rows = everything.Where(r => r.Kind != AiKinds.Design).ToList();
         var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(g => g.Id, g => g.Name, ct);
         var restaurants = await db.Restaurants.AsNoTracking().IgnoreQueryFilters().ToDictionaryAsync(r => r.Id, r => r.Name, ct);
 
@@ -378,7 +388,8 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
             rows.GroupBy(r => DateOnly.FromDateTime(r.At)).OrderBy(g => g.Key).Select(g => Bucket(g.Key.ToString("yyyy-MM-dd"), g.Key.ToString("MMM d", CultureInfo.InvariantCulture), g)).ToList(),
             rows.Take(1000).Select(r => AiAssistantController.Row(r, restaurants.GetValueOrDefault(r.RestaurantId, ""), groups.GetValueOrDefault(r.GroupId), true)).ToList())
         {
-            Charts = AiCharts.Build(rows, restaurants, forSite: true)
+            Charts = AiCharts.Build(rows, restaurants, forSite: true),
+            Designs = designs.GroupBy(r => r.GroupId).Select(g => Bucket(g.Key.ToString(), groups.GetValueOrDefault(g.Key, $"Group {g.Key}"), g)).OrderByDescending(b => b.Requests).ToList()
         };
     }
 }

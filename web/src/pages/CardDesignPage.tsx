@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { CardBack, CardDesign, CardDesignFields, CardDesignScope, CardFront, CardImage, CardImageKind, CardLayout, MailPreview } from '../api/types'
 import CardLayoutEditor from '../components/CardLayoutEditor'
+import DesignForMe from '../components/DesignForMe'
 import { Alert, Badge, Confirm, Field, Spinner, fmtDateTime } from '../components/ui'
 import { Side } from './MailCardsPage'
 
@@ -216,6 +217,19 @@ export default function CardDesignPage() {
 
       {!design || !draft ? <Spinner /> : (
         <>
+          {canEdit && (
+            <DesignForMe
+              scope={scope}
+              hasLogo={Boolean(design.images.find((i) => i.kind === 'logo'))}
+              hasPhoto={Boolean(design.images.find((i) => i.kind === 'photo'))}
+              onUse={(fields, name) => {
+                // Loaded into the designer like any other change: it prints as shown below, and is saved only with Save.
+                setDraft(fields)
+                setDirty(true)
+                setNotice(`“${name}” is loaded below. Check how it prints, change anything you like, then save it.`)
+              }}
+            />
+          )}
           <div className="panel">
             <h2>How it will print</h2>
             <p className="muted">

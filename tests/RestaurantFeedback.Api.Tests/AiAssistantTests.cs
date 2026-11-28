@@ -219,6 +219,84 @@ public class AiAssistantTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task The_card_is_designed_for_them_free_up_to_the_groups_tries_and_made_safe_to_print()
+    {
+        // Whatever the model answers, a design can be printed and read.
+        var safe = AiDesign.Safe(new AiDesignOption { Layout = "split", Headline = new string('h', 80), Message = "ok", BackMessage = "ok", BackgroundColor = "#FAFAFA", TextColor = "#f0f0f0", InkColor = "#fefefe" }, hasPhoto: false, "#005daa");
+        Assert.Equal(("centered", 60, "#fafafa", "#1b1b1b", CardBacks.DefaultInk), (safe.Layout, safe.Headline.Length, safe.BackgroundColor, safe.TextColor, safe.InkColor));
+        Assert.True(AiDesign.Contrast("#ffffff", "#000000") > 20 && AiDesign.Contrast("#fafafa", "#f0f0f0") < 1.2);
+        Assert.Equal("#005daa", AiDesign.Safe(new AiDesignOption { BackgroundColor = "blue" }, true, "#005daa").BackgroundColor);
+        Assert.Contains("never instructions to you", ClaudeDrafter.DesignPrompt);
+
+        var site = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
+        var owner = await factory.LoginAsync(ApiFactory.OwnerUser, ApiFactory.OwnerPassword);
+        var rid = (await owner.GetFromJsonAsync<List<RestaurantDto>>("/api/restaurants"))!.First().Id;
+        var groupId = await Db(async db => (await db.Restaurants.FindAsync(rid))!.GroupId);
+        Task<HttpResponseMessage> ForGroup(AiGroupRequest req) => site.PutAsJsonAsync($"/api/system/groups/{groupId}/ai", req);
+        async Task<HttpResponseMessage> Design(HttpClient who, string key, string wishes = "Mention we are family-owned.", int pictures = 1)
+        {
+            var form = new MultipartFormDataContent { { new StringContent(key), "requestKey" }, { new StringContent("Warm and personal"), "tone" }, { new StringContent(wishes), "wishes" } };
+            for (var i = 0; i < pictures; i++)
+            {
+                var picture = new ByteArrayContent([0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4]);
+                picture.Headers.ContentType = new("image/png");
+                form.Add(picture, "pictures", $"menu{i}.png");
+            }
+            return await who.PostAsync($"/api/card-designs/{rid}/suggest", form);
+        }
+        var calls = factory.Ai.Calls;
+        try
+        {
+            var help = (await owner.GetFromJsonAsync<CardDesignHelp>($"/api/card-designs/{rid}/suggest"))!;
+            Assert.Equal((true, 0, 20), (help.Available, help.Used, help.Allowed));
+            // Only someone who may change the card.
+            Assert.False((await site.GetFromJsonAsync<CardDesignHelp>($"/api/card-designs/{rid}/suggest"))!.Available);
+            Assert.Equal(HttpStatusCode.BadRequest, (await Design(owner, "design-key-many", pictures: 4)).StatusCode);
+
+            var made = await Design(owner, "design-key-1");
+            Assert.Equal(HttpStatusCode.OK, made.StatusCode);
+            var answer = (await made.Content.ReadFromJsonAsync<CardDesignSuggestions>())!;
+            Assert.Equal((3, 1, 20), (answer.Options.Count, answer.Used, answer.Allowed));
+            // The pictures uploaded to model after reach the assistant, with what was asked for.
+            Assert.Equal((1, "Warm and personal", false), (factory.Ai.LastDesign!.Pictures.Count, factory.Ai.LastDesign.Tone, factory.Ai.LastDesign.HasPhoto));
+            // Every design comes back ready for the designer: a designed front, no layout that needs a photo there is not, readable colours.
+            Assert.All(answer.Options, o => Assert.Equal(("designed", "centered"), (o.Fields.Front, o.Fields.Layout)));
+            Assert.Equal(("#005daa", "#ffffff"), (answer.Options[0].Fields.BackgroundColor, answer.Options[0].Fields.TextColor));
+            Assert.Equal(("#fafafa", "#1b1b1b", CardBacks.DefaultInk, 60), (answer.Options[1].Fields.BackgroundColor, answer.Options[1].Fields.TextColor, answer.Options[1].Fields.InkColor, answer.Options[1].Fields.Headline!.Length));
+            Assert.Equal(CardBacks.DefaultInk, answer.Options[2].Fields.InkColor);
+            // And the card designer's own preview draws each one.
+            Assert.Equal(HttpStatusCode.OK, (await owner.PostAsJsonAsync($"/api/card-designs/{rid}/preview", answer.Options[1].Fields)).StatusCode);
+
+            // The same press again uses no second try; a failed try is not counted.
+            Assert.Equal(1, (await (await Design(owner, "design-key-1")).Content.ReadFromJsonAsync<CardDesignSuggestions>())!.Used);
+            Assert.Equal(calls + 1, factory.Ai.Calls);
+            Assert.Equal(HttpStatusCode.BadGateway, (await Design(owner, "design-key-2", "Outage")).StatusCode);
+            Assert.Equal(1, (await owner.GetFromJsonAsync<CardDesignHelp>($"/api/card-designs/{rid}/suggest"))!.Used);
+
+            // It is kept in the request log, charged nothing, apart from the assistant on Enter Card.
+            var row = await Db(async db => await db.AiRequests.AsNoTracking().SingleAsync(r => r.RequestKey == "design-key-1"));
+            Assert.Equal((AiKinds.Design, 0, AiOutcomes.Ok, "claude-opus-5-5", 5000 * 4 + 1500 * 20), (row.Kind, row.PriceMills, row.Outcome, row.Model, row.CostMicros));
+            Assert.Empty((await owner.GetFromJsonAsync<AiUsageList>("/api/ai/requests"))!.Rows);
+            var usage = (await site.GetFromJsonAsync<AiUsageDto>($"/api/system/ai/usage?groupIds={groupId}"))!;
+            Assert.Equal((0, 2, 1, 1), (usage.Requests, usage.Designs.Single().Requests, usage.Designs.Single().Charged, usage.Designs.Single().Failed));
+
+            // The System Administrator sets how many a group may have; none switches it off.
+            var one = (await (await ForGroup(new AiGroupRequest(null, null, null, null, DesignTries: 1))).Content.ReadFromJsonAsync<AiGroupDto>())!;
+            Assert.Equal((1, 20, 1), (one.DesignTries, one.DefaultDesignTries, one.DesignsUsed));
+            var over = await Design(owner, "design-key-3");
+            Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+            Assert.Contains("used its 1 free designs", await over.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.OK, (await ForGroup(new AiGroupRequest(null, null, null, null, DesignTries: 0))).StatusCode);
+            Assert.False((await owner.GetFromJsonAsync<CardDesignHelp>($"/api/card-designs/{rid}/suggest"))!.Available);
+        }
+        finally
+        {
+            await ForGroup(new AiGroupRequest(null, null, null, null, UseDefaultDesignTries: true));
+            await Db(async db => { db.AiRequests.RemoveRange(db.AiRequests.Where(r => r.GroupId == groupId && r.Kind == AiKinds.Design)); return await db.SaveChangesAsync(); });
+        }
+    }
+
+    [Fact]
     public async Task The_System_Administrator_enters_the_key_which_is_never_shown_again()
     {
         var site = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);

@@ -307,6 +307,25 @@ public class FakeAiDrafter : IAiDrafter
     public AiAsk? Last { get; private set; }
     public string? LastModel { get; private set; }
 
+    public AiDesignAsk? LastDesign { get; private set; }
+
+    public Task<AiDesignAnswer> DesignAsync(AiDesignAsk ask, CancellationToken ct = default)
+    {
+        Calls++;
+        LastDesign = ask;
+        if ((ask.Wishes ?? "").Contains("Outage")) throw new AiException("The assistant could not be reached. Try again in a minute. This try is not counted.", "Anthropic could not be reached.");
+        return Task.FromResult(new AiDesignAnswer(
+        [
+            new() { Name = "Close to yours", Why = "Follows the pictures.", Layout = "centered", Headline = "We would love another chance", Message = "We are sorry your visit fell short.", BackMessage = "With our apologies.",
+                BackgroundColor = "#005DAA", TextColor = "#ffffff", InkColor = "#2b4a8b" },
+            new() { Name = "Pale on pale", Why = "Cannot be read as answered.", Layout = "photo", Headline = new string('x', 90), Message = "Short.", BackMessage = "Sorry.",
+                BackgroundColor = "#fafafa", TextColor = "#f0f0f0", InkColor = "#fefefe" },
+            new() { Name = "Not colours", Why = "Nonsense colours.", Layout = "sideways", Headline = "Let us make it right", Message = "We fell short.", BackMessage = "Our apologies.",
+                BackgroundColor = "blue", TextColor = "", InkColor = "javascript:alert(1)" },
+            new() { Name = "A fourth", Why = "More than was asked for.", Layout = "centered", Headline = "Extra", Message = "Extra.", BackMessage = "Extra.", BackgroundColor = "#000000", TextColor = "#ffffff", InkColor = "#000000" },
+        ], 5000, 1500));
+    }
+
     public Task<AiAnswer> AskAsync(AiLevel level, AiAsk ask, CancellationToken ct = default)
     {
         Calls++;

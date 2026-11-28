@@ -529,6 +529,11 @@ public record CardDesignDto(string Scope, int? RestaurantId, string Name, bool C
     string BackStyle, string InkColor, string? Website, string? LegalText, string DefaultLegalText,
     List<CardElement>? BackLayout, List<CardElement>? FrontLayout, List<CardElement> StandardBack, List<CardElement> StarterFront, List<CardMergeField> MergeFields, string SampleQr);
 public record CardDesignScope(string Scope, int? RestaurantId, string Name, bool CanEdit, bool HasOwn);
+/// <summary>"Design it for me": whether it is offered to this person for this card, and how many of the group's free tries are used.</summary>
+public record CardDesignHelp(bool Available, int Used, int Allowed);
+/// <summary>One design the assistant offers: a name, what it is going for, and the card's fields ready for the designer and the preview.</summary>
+public record CardDesignSuggestion(string Name, string Why, CardDesignFields Fields);
+public record CardDesignSuggestions(List<CardDesignSuggestion> Options, int Used, int Allowed);
 
 // ---- Billing for mailed cards: what a group sees ------------------------------------------------------------
 
@@ -829,15 +834,22 @@ public record AiSiteDto(bool Configured, string Source, string? KeyEnding, DateT
 public record AiGroupDto(int GroupId, bool On, bool GroupDecides, string Level, int? LimitCents, int DefaultLimitCents, int UsedMills, int UsedRequests, List<AiLevelDto> Levels)
 {
     public string MaxLevel { get; init; } = Services.AiLevels.Thorough;
+    /// <summary>Free card designs: how many the group may have (null: the usual number), the usual number, and how many it has used.</summary>
+    public int? DesignTries { get; init; }
+    public int DefaultDesignTries { get; init; }
+    public int DesignsUsed { get; init; }
 }
 /// <param name="MaxLevel">The highest level the group may choose.</param>
-public record AiGroupRequest(bool? On, bool? GroupDecides, string? Level, int? LimitCents, bool UseDefaultLimit = false, string? MaxLevel = null);
+/// <param name="DesignTries">How many free card designs the group may have; 0 switches that off. UseDefaultDesignTries puts it back to the usual number.</param>
+public record AiGroupRequest(bool? On, bool? GroupDecides, string? Level, int? LimitCents, bool UseDefaultLimit = false, string? MaxLevel = null, int? DesignTries = null, bool UseDefaultDesignTries = false);
 public record AiUsageBucket(string Key, string Label, int Requests, int Charged, int Failed, int NotSaved, int Mills, int CostMicros);
 /// <summary>The System Administrator's analytics. Mills is what groups were charged (tenths of a cent); CostMicros what it cost the site (millionths of a dollar).</summary>
 public record AiUsageDto(int Requests, int Charged, int Failed, int NotSaved, int WithEmail, int Mills, int CostMicros, List<AiUsageBucket> ByGroup, List<AiUsageBucket> ByRestaurant,
     List<AiUsageBucket> ByLevel, List<AiUsageBucket> ByDay, List<AiRequestRow> Rows)
 {
     public AiChartsDto? Charts { get; init; }
+    /// <summary>Card designs made for groups in these dates (free to them), and what they cost the site, by group.</summary>
+    public List<AiUsageBucket> Designs { get; init; } = [];
 }
 
 // ---- Which service checks guest addresses, and the site's Geocodio key ----------------------------------------

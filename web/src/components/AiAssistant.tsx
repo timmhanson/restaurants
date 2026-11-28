@@ -488,6 +488,18 @@ export function AiGroupEditor({ groupId }: { groupId: number }) {
           <input value={limit} inputMode="decimal" disabled={busy} onChange={(e) => setLimit(e.target.value)} onBlur={saveLimit} placeholder={(g.defaultLimitCents / 100).toFixed(2)} />
         </Field>
       </div>
+      <div className="form-row" style={{ marginTop: '0.75rem' }}>
+        <Field label="Free card designs" hint={`“Design it for me” on Card Design costs the group nothing. Empty uses the usual ${g.defaultDesignTries}; 0 switches it off. Used so far: ${g.designsUsed}.`}>
+          <input defaultValue={g.designTries ?? ''} inputMode="numeric" disabled={busy} placeholder={String(g.defaultDesignTries)} aria-label="Free card designs for this group"
+            onBlur={(e) => {
+              const text = e.target.value.trim()
+              if (text === '') return void (g.designTries != null && save({ useDefaultDesignTries: true }))
+              const n = Number(text)
+              if (!Number.isInteger(n) || n < 0) return setError('Enter a whole number of free card designs, or leave it empty for the usual number.')
+              if (n !== g.designTries) void save({ designTries: n })
+            }} />
+        </Field>
+      </div>
       <p className="muted small" style={{ marginBottom: 0 }}>
         This month: {g.usedRequests.toLocaleString()} request{g.usedRequests === 1 ? '' : 's'}, {aiDollars(g.usedMills)} charged. {saved && <strong>Saved.</strong>}
       </p>
@@ -529,7 +541,7 @@ export function AiUsageSection({ from, to, groupIds, restaurantIds }: { from: st
         cost you. A request is charged when it worked, whether or not a card was saved from it.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
-      {!data ? (!error && <Spinner label="Loading…" />) : data.requests === 0 ? (
+      {!data ? (!error && <Spinner label="Loading…" />) : data.requests === 0 && data.designs.length === 0 ? (
         <p className="muted" style={{ marginBottom: 0 }}>No requests in these dates.</p>
       ) : (
         <>
@@ -540,6 +552,16 @@ export function AiUsageSection({ from, to, groupIds, restaurantIds }: { from: st
             <Stat value={data.notSaved.toLocaleString()} label="charged, but no card was saved" warn={data.notSaved > 0} />
           </div>
           {data.charts && <div style={{ marginBottom: '1rem' }}><AiUsageCharts charts={data.charts} forSite /></div>}
+          {data.designs.length > 0 && (
+            <DataTable<AiUsageBucket> title="Card designs made for groups (free to them)" rows={data.designs} rowKey={(b) => b.key} filename={`ai-card-designs-${from}-to-${to}.csv`} empty="None."
+              columns={[
+                { key: 'label', label: 'Investment group', value: (b) => b.label },
+                { key: 'requests', label: 'Tries', num: true, value: (b) => b.requests },
+                { key: 'charged', label: 'Counted', num: true, value: (b) => b.charged },
+                { key: 'failed', label: 'Failed (not counted)', num: true, value: (b) => b.failed },
+                { key: 'cost', label: 'Cost to you', num: true, value: (b) => b.costMicros / 1_000_000, render: (b) => cost(b.costMicros) },
+              ]} />
+          )}
           <DataTable<AiUsageBucket> title="By investment group" rows={data.byGroup} columns={bucketColumns('Investment group')} rowKey={(b) => b.key} filename={`ai-by-group-${from}-to-${to}.csv`} defaultSort={{ key: 'requests', desc: true }} empty="None." />
           <DataTable<AiUsageBucket> title="By restaurant" rows={data.byRestaurant} columns={bucketColumns('Restaurant')} rowKey={(b) => b.key} filename={`ai-by-restaurant-${from}-to-${to}.csv`} defaultSort={{ key: 'requests', desc: true }} empty="None." />
           <DataTable<AiUsageBucket> title="By level" rows={data.byLevel} columns={bucketColumns('Level')} rowKey={(b) => b.key} filename={`ai-by-level-${from}-to-${to}.csv`} empty="None." />

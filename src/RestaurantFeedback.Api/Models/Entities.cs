@@ -419,6 +419,8 @@ public class GroupBilling
     public int? AiMonthlyLimitCents { get; set; }
     /// <summary>The highest level of the assistant the group may choose, set by the System Administrator (AiLevels); null is the top one.</summary>
     public string? AiMaxLevel { get; set; }
+    /// <summary>How many times the group may have its coupon card designed for it, free. Null uses the site's default; 0 switches it off.</summary>
+    public int? AiDesignTries { get; set; }
     /// <summary>
     /// Whether this group must have a payment method saved before its cards can be mailed. Null follows the site's
     /// setting (required unless the System Administrator has switched that off).
@@ -744,6 +746,11 @@ public class AttentionDismissal
     public DateTime DismissedAt { get; set; } = DateTime.UtcNow;
 }
 
+public static class AiKinds
+{
+    public const string Card = "card", Design = "design";
+}
+
 /// <summary>
 /// One press of "Process" on the AI assistant: see AiLedger. Kept whether or not a card was ever saved from it, so
 /// every request a group is charged for can be shown with who made it, when, what was typed and what came back.
@@ -784,6 +791,8 @@ public class AiRequest
     public DateTime? LinkedAt { get; set; }
     /// <summary>How hard the model was asked to think (the API's effort setting) for this request.</summary>
     public string? Effort { get; set; }
+    /// <summary>What was asked for: "card" (filling in a guest's card on Enter Card) or "design" (designing the coupon card, which is free).</summary>
+    public string Kind { get; set; } = AiKinds.Card;
     /// <summary>
     /// The face and the reward on the card as it was saved, to set beside what the assistant suggested (Mood, Offer):
     /// whether the person kept its pick or changed it, and to what. Null while no card has been saved from it.

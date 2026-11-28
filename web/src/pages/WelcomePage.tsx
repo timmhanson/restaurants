@@ -143,7 +143,7 @@ export default function WelcomePage() {
               <ul className="welcome-list">
                 <li><Link to="/enter">Enter your first card</Link><div className="muted small">Try one with a real comment. You can remove it afterwards.</div></li>
                 <li><Link to="/users">Add your people</Link><div className="muted small">Owners, managers, and a shared team login for each restaurant.</div></li>
-                <li><Link to="/card-design">Design your coupon card</Link><div className="muted small">Your logo, colours and wording on the card guests receive.</div></li>
+                <li><Link to="/card-design">Design your coupon card</Link><div className="muted small">Your logo, colours and wording on the card guests receive. “Design it for me” there offers three designs to start from, free.</div></li>
                 <li><Link to="/billing">Billing</Link><div className="muted small">Where your bills are, and how you pay them.</div></li>
               </ul>
               {open.length > 0 && <p className="muted">Not checked yet: {open.map((s) => s.title).join(', ')}. They are under Getting Started whenever you want them.</p>}

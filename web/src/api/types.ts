@@ -254,6 +254,10 @@ export interface MailOutcome {
 }
 export interface MailStatusInfo { commentId: number; status?: MailStatus | null; test: boolean; hasProof: boolean; error?: string | null }
 export interface MailPreview { frontHtml: string; backHtml: string }
+/** "Design it for me": whether it is offered for this card, and how many of the group's free tries are used. */
+export interface CardDesignHelp { available: boolean; used: number; allowed: number }
+export interface CardDesignSuggestion { name: string; why: string; fields: CardDesignFields }
+export interface CardDesignSuggestions { options: CardDesignSuggestion[]; used: number; allowed: number }
 /** A card's QR code: the address it holds (this site's verify page) and the code as a picture for an img tag. */
 export interface CardQr { commentId: number; cardId: string; url: string; image: string }
 /** What scanning a card's QR code shows, once signed in. card is null when the code is not genuine or the card is another restaurant's. */
@@ -522,11 +526,15 @@ export interface AiSite {
   configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; savedAt?: string | null; savedBy?: string | null; canEnter: boolean
   levels: { id: string; label: string; model: string; priceMills: number; price: string; inPerMillion: number; outPerMillion: number }[]; defaultLimitCents: number
 }
-export interface AiGroupSettings { groupId: number; on: boolean; groupDecides: boolean; level: string; limitCents?: number | null; defaultLimitCents: number; usedMills: number; usedRequests: number; levels: AiLevelChoice[]; maxLevel: string }
+export interface AiGroupSettings { groupId: number; on: boolean; groupDecides: boolean; level: string; limitCents?: number | null; defaultLimitCents: number; usedMills: number; usedRequests: number; levels: AiLevelChoice[]; maxLevel: string
+  /** Free card designs: how many the group may have (null: the usual number), the usual number, and how many it has used. */
+  designTries?: number | null; defaultDesignTries: number; designsUsed: number }
 export interface AiUsageBucket { key: string; label: string; requests: number; charged: number; failed: number; notSaved: number; mills: number; costMicros: number }
 export interface AiUsage {
   requests: number; charged: number; failed: number; notSaved: number; withEmail: number; mills: number; costMicros: number
   byGroup: AiUsageBucket[]; byRestaurant: AiUsageBucket[]; byLevel: AiUsageBucket[]; byDay: AiUsageBucket[]; rows: AiRequestRow[]; charts?: AiCharts | null
+  /** Card designs made for groups (free to them) and what they cost the site, by group. */
+  designs: AiUsageBucket[]
 }
 
 export interface CommentSummary {

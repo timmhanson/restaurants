@@ -164,6 +164,16 @@ card; sending it from the site is not built yet.
   gives what was typed, everything the assistant filled in, the level and the effort it ran at (`Effort`, always
   low), what was charged and what went on the card. The group sees this for its own requests; the model, the
   tokens, the cost to the site and why a try failed stay with the System Administrator.
+- **Designing the card** (`CardDesignAiController`, `DesignForMe`, `AiDesign`). On Card Design, whoever may change
+  a card can press **Design it for me**: they say how it should feel, may upload up to three pictures to model it
+  after (sent to the assistant, not kept), and get three designs, each a layout, colours and words for the
+  designer's "designed" front, drawn by the designer's own preview. The assistant sees the card's logo and photo;
+  it makes no pictures. Every answer is made safe to print before it is shown (`AiDesign.Safe`: real colours,
+  words that can be read on their background, a photo layout only when there is a photo, lengths that fit).
+  Choosing one loads it into the designer; nothing is saved until the person saves. It runs on Claude Opus 5.5
+  and is **free to groups**, up to a number of tries per group (20 unless the System Administrator sets its own
+  in the Edit dialog; 0 switches it off). Each try is an `AiRequest` of kind "design", charged nothing, with what
+  it cost the site; a try that fails is not counted. Reports lists them by group.
 - **The site's key** is entered on Connected Systems (`AiAccountStore`, encrypted, never shown again;
   `Ai__ApiKey` is a fallback). What was typed is never written to the audit or interaction logs.
 
