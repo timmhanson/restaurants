@@ -2,28 +2,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { SystemStatus } from '../api/types'
-import AddressCheckingPanel from '../components/AddressCheckingPanel'
-import GeocodioPanel from '../components/GeocodioPanel'
+import AddressVerificationPanel from '../components/AddressVerificationPanel'
 import PostGridSitePanel from '../components/PostGridSitePanel'
 import StripePanel from '../components/StripePanel'
-import UspsAccountPanel from '../components/UspsAccountPanel'
 import { Alert, Badge } from '../components/ui'
 
 /**
- * The outside services the site connects to, for the System Administrator: where the accounts for them are
- * entered (Geocodio, USPS, PostGrid, Stripe) and, for the ones managed elsewhere, where that is. Which of the
- * address services checks guest addresses is chosen at the top.
+ * The outside services the site connects to, for the System Administrator, grouped by what they are for: mailing
+ * and postage (PostGrid, EasyPost), payment (Stripe), address verification (one service chosen from Geocodio,
+ * USPS and PostGrid) and email. The accounts are entered here or, for the ones managed elsewhere, it says where.
  */
 export default function ConnectedSystemsPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Goes up when a key is saved or removed, so the choice of address service shows what is set up now.
-  const [version, setVersion] = useState(0)
-  const [chosen, setChosen] = useState<string | null>(null)
-
   const load = useCallback(() => {
-    setVersion((v) => v + 1)
     api.get<SystemStatus>('/system/status').then(setStatus).catch((e) => setError((e as Error).message))
   }, [])
   useEffect(load, [load])
@@ -36,12 +29,8 @@ export default function ConnectedSystemsPage() {
       <p className="muted">The outside services this site uses, and the account each one runs on.</p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
 
-      <AddressCheckingPanel version={version} onChosen={setChosen} />
-      <GeocodioPanel onChanged={load} chosen={chosen} />
-      <UspsAccountPanel onChanged={load} />
-      <PostGridSitePanel onChanged={load} chosen={chosen} />
-      <StripePanel onChanged={load} />
-
+      <h2 className="section-head">Mailing and Postage Services</h2>
+      <PostGridSitePanel onChanged={load} />
       <div className="panel">
         <h2>EasyPost (postage)</h2>
         <p className="muted">
@@ -61,8 +50,15 @@ export default function ConnectedSystemsPage() {
         )}
       </div>
 
+      <h2 className="section-head">Payment</h2>
+      <StripePanel onChanged={load} />
+
+      <h2 className="section-head">Address Verification</h2>
+      <AddressVerificationPanel onChanged={load} />
+
+      <h2 className="section-head">Email</h2>
       <div className="panel">
-        <h2>Email</h2>
+        <h2>Email service</h2>
         <p className="muted">Sends the 6-digit codes people need to change their own password. It is set up in Azure, not here.</p>
         {status && (
           <p style={{ margin: 0 }}>

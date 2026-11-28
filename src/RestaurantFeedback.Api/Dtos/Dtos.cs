@@ -714,10 +714,24 @@ public record ServiceTestResult(bool Ok, string Message);
 
 /// <param name="Id">geocodio, usps or postgrid.</param>
 /// <param name="Configured">Its key or account has been entered, so it can be chosen and asked.</param>
-public record AddressServiceDto(string Id, string Name, bool Configured);
-/// <param name="First">The service that checks addresses. The others that are set up are asked only when it cannot answer.</param>
+/// <param name="KeyEnding">The last four characters of its key (USPS: of the Consumer Key); a key is never returned.</param>
+public record AddressServiceDto(string Id, string Name, bool Configured)
+{
+    /// <summary>"Saved in the site", "App settings" or "None".</summary>
+    public string Source { get; init; } = "None";
+    public string? KeyEnding { get; init; }
+    public DateTime? SavedAt { get; init; }
+    public string? SavedBy { get; init; }
+    /// <summary>USPS only: the account is for USPS's testing environment.</summary>
+    public bool TestEnvironment { get; init; }
+}
+/// <param name="First">The one service that checks addresses. The others are not asked.</param>
 /// <param name="CanChoose">False on a copy of the site that uses a stand-in address service.</param>
-public record AddressCheckingDto(string First, List<AddressServiceDto> Services, bool CanChoose);
+public record AddressCheckingDto(string First, List<AddressServiceDto> Services, bool CanChoose)
+{
+    /// <summary>Addresses are offered as they are typed (PostGrid's Address Verification key is entered), whichever service checks them.</summary>
+    public bool OffersAddresses { get; init; }
+}
 public record AddressCheckingRequest(string? First);
 public record GeocodioKeyRequest(string? ApiKey);
 /// <param name="KeyEnding">The last four characters of the key; the key is never returned.</param>

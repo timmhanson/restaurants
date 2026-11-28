@@ -74,14 +74,6 @@ public class GeocodioTests(ApiFactory factory)
     }
 
     [Fact]
-    public void The_chosen_service_is_asked_first_and_the_others_only_after_it()
-    {
-        Assert.Equal(["geocodio", "usps", "postgrid"], AddressServices.Order(AddressServices.Geocodio));
-        Assert.Equal(["postgrid", "geocodio", "usps"], AddressServices.Order(AddressServices.PostGrid));
-        Assert.Equal(["usps", "geocodio", "postgrid"], AddressServices.Order(AddressServices.Usps));
-    }
-
-    [Fact]
     public async Task The_System_Administrator_enters_the_Geocodio_key_and_switches_between_the_services()
     {
         var site = await factory.LoginAsync(ApiFactory.SuperAdminUser, ApiFactory.SuperAdminPassword);
@@ -101,11 +93,12 @@ public class GeocodioTests(ApiFactory factory)
             Assert.Equal(HttpStatusCode.BadRequest, (await site.PutAsJsonAsync("/api/system/address-checking", new AddressCheckingRequest("somebody"))).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await site.PutAsJsonAsync("/api/system/geocodio", new GeocodioKeyRequest("short"))).StatusCode);
 
-            // Entering the key saves it encrypted and makes Geocodio the service that checks addresses.
+            // Entering the key saves it encrypted. Geocodio then checks addresses once it is chosen, and it alone.
             var saved = await site.PutAsJsonAsync("/api/system/geocodio", new GeocodioKeyRequest($"  {key} "));
             Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
             var raw = await saved.Content.ReadAsStringAsync();
             Assert.DoesNotContain(key, raw);
+            Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/address-checking", new AddressCheckingRequest("geocodio"))).StatusCode);
             var dto = (await site.GetFromJsonAsync<GeocodioDto>("/api/system/geocodio"))!;
             Assert.Equal((true, "WXYZ", "Saved in the site", true), (dto.Configured, dto.KeyEnding, dto.Source, dto.InUse));
             Assert.Equal(key, geocodio.Current!.ApiKey);
@@ -121,9 +114,32 @@ public class GeocodioTests(ApiFactory factory)
                 Assert.DoesNotContain(key, (await db.SiteSettings.FindAsync("geocodio.account"))!.Value);
                 var audited = db.AuditLogs.Where(a => a.Action == "GeocodioKeySet" || a.Action == "AddressCheckOrderChanged").Select(a => a.Details!).ToList();
                 Assert.Contains(audited, d => d.Contains("WXYZ"));
-                Assert.Contains(audited, d => d.Contains("\"first\":\"Geocodio\""));
                 Assert.DoesNotContain(audited, d => d.Contains(key));
             }
+
+            // The section on Connected Systems gets each service's key details with the choice, never a key.
+            var mine = choice.Services.Single(s => s.Id == "geocodio");
+            Assert.Equal(("WXYZ", "Saved in the site"), (mine.KeyEnding, mine.Source));
+            Assert.False(choice.OffersAddresses);
+
+            // PostGrid's key saved "key only" (to offer addresses as they are typed) does not change which service checks.
+            const string other = "pg-addr-test-0123456789-QRST";
+            var postGrid = factory.Services.GetRequiredService<PostGridAddressAccountStore>();
+            try
+            {
+                Assert.Equal(HttpStatusCode.OK, (await site.PutAsJsonAsync("/api/system/postgrid", new PostGridAddressRequest(other, false))).StatusCode);
+                var both = (await site.GetFromJsonAsync<AddressCheckingDto>("/api/system/address-checking"))!;
+                Assert.Equal(("geocodio", true, "QRST"), (both.First, both.OffersAddresses, both.Services.Single(s => s.Id == "postgrid").KeyEnding));
+                Assert.DoesNotContain(other, await (await site.GetAsync("/api/system/address-checking")).Content.ReadAsStringAsync());
+                // Switching is a choice of its own, and the one chosen is the only one that checks.
+                Assert.Equal("postgrid", (await (await site.PutAsJsonAsync("/api/system/address-checking", new AddressCheckingRequest("postgrid"))).Content.ReadFromJsonAsync<AddressCheckingDto>())!.First);
+                Assert.Equal("geocodio", (await (await site.PutAsJsonAsync("/api/system/address-checking", new AddressCheckingRequest("geocodio"))).Content.ReadFromJsonAsync<AddressCheckingDto>())!.First);
+            }
+            finally { await postGrid.RemoveAsync(); }
+            // Each switch is in the audit log, with what it was before.
+            using (var scope = factory.Services.CreateScope())
+                Assert.Contains(scope.ServiceProvider.GetRequiredService<AppDbContext>().AuditLogs.Where(a => a.Action == "AddressCheckOrderChanged").Select(a => a.Details!).ToList(),
+                    d => d.Contains("\"first\":\"Geocodio\"") && d.Contains("\"was\":\"PostGrid\""));
 
             // The key outlives a restart: it is read back from the database.
             await geocodio.LoadAsync();
@@ -132,7 +148,9 @@ public class GeocodioTests(ApiFactory factory)
             // Removed: Geocodio is no longer set up and cannot be chosen.
             Assert.Equal(HttpStatusCode.OK, (await site.DeleteAsync("/api/system/geocodio")).StatusCode);
             Assert.False((await site.GetFromJsonAsync<GeocodioDto>("/api/system/geocodio"))!.Configured);
-            Assert.False((await site.GetFromJsonAsync<AddressCheckingDto>("/api/system/address-checking"))!.Services.Single(s => s.Id == "geocodio").Configured);
+            // It stays the chosen service, with nothing to check with, until another is saved: no other service steps in.
+            var after = (await site.GetFromJsonAsync<AddressCheckingDto>("/api/system/address-checking"))!;
+            Assert.Equal(("geocodio", false), (after.First, after.Services.Single(s => s.Id == "geocodio").Configured));
         }
         finally { await geocodio.RemoveAsync(); }
     }

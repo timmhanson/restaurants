@@ -11,7 +11,7 @@ export default function Layout() {
   const nav = useNavigate()
   const bar = useRef<HTMLDivElement>(null)
 
-  // The topbar sticks just under the yellow bar, whose height changes when it wraps on a phone.
+  // The topbar sticks just under the dark blue bar, whose height changes when it wraps on a phone.
   useEffect(() => {
     const el = bar.current
     const root = document.documentElement
@@ -27,9 +27,9 @@ export default function Layout() {
   if (!user) return null
 
   // A system administrator either oversees every group (Groups, all users, the whole audit log) or views one
-  // group exactly as its Investment Group Administrator would, with the yellow bar to get back out.
+  // group exactly as its Investment Group Administrator would, with the dark blue bar to get back out.
   // The System Administrator has a menu of their own, about the whole site. Restaurant work (cards, comments,
-  // analytics) only appears while they view one group as its administrator, under the yellow bar.
+  // analytics) only appears while they view one group as its administrator, under the dark blue bar.
   // What is waiting to be done shows as a red count beside its tab, as on a phone's home screen.
   const waiting = useFollowUpSummary()
   const links: { to: string; label: string; show: boolean; section?: string; count?: number }[] = overseeing

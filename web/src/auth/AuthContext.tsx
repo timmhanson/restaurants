@@ -29,7 +29,7 @@ interface AuthState {
   /** System or investment group administrator: everything in the group. */
   isGroupWide: boolean
   isTeamMember: boolean
-  /** A system administrator looking at one group as its Investment Group Administrator would (the yellow bar). */
+  /** A system administrator looking at one group as its Investment Group Administrator would (the dark blue bar). */
   viewingAs: boolean
   /** A system administrator with no group open: the oversight pages only. */
   overseeing: boolean

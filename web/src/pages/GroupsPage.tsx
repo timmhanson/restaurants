@@ -30,7 +30,7 @@ export default function GroupsPage() {
     void load()
   }, [load])
 
-  /** Opens the group exactly as its Investment Group Administrator sees it; the yellow bar leads back here. */
+  /** Opens the group exactly as its Investment Group Administrator sees it; the dark blue bar leads back here. */
   const viewAs = (g: GroupDto, page = '/enter') => {
     selectGroup(g.id)
     navigate(page)
@@ -46,7 +46,7 @@ export default function GroupsPage() {
       <p className="muted">
         Each investment group has its own administrators, restaurant owners, managers, team logins and settings. Create a group with its
         administrators, owners and restaurants in one step. <strong>Impersonate</strong> opens the group just as its Investment Group Administrator sees
-        it (starting on Enter card). A yellow bar at the top takes you back here.
+        it (starting on Enter card). A dark blue bar at the top takes you back here.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {notice && <Alert kind="success" onClose={() => setNotice(null)}>{notice}</Alert>}

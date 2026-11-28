@@ -37,10 +37,11 @@ pre { background: #f0f2f5; padding: 0.6rem; border-radius: 6px; overflow: auto; 
 .app { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 60px 1fr; min-height: 100vh; }
 .app.viewing-as { grid-template-rows: auto 60px 1fr; }
 .viewing-bar { grid-column: 1 / -1; position: sticky; top: 0; z-index: 25; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-  padding: 0.5rem 1rem; background: #ffd23f; color: #3d2e00; border-bottom: 1px solid #e0b400; font-size: 0.95rem; }
-.viewing-bar strong { font-weight: 700; }
-.viewing-bar .btn { margin-left: auto; background: #3d2e00; color: #fff; border-color: #3d2e00; }
-.viewing-bar .btn:hover { background: #241b00; }
+  padding: 0.5rem 1rem; background: #162033; color: #d7deea; border-bottom: 1px solid #162033; font-size: 0.95rem; }
+/* The same dark blue as the System Administrator's own menu: this bar is the way back to it. */
+.viewing-bar strong { font-weight: 700; color: #fff; }
+.viewing-bar .btn { margin-left: auto; background: #fff; color: #162033; border-color: #fff; font-weight: 600; }
+.viewing-bar .btn:hover { background: #d7deea; border-color: #d7deea; }
 .app.viewing-as .topbar { top: var(--viewing-bar-h, 41px); }
 .topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 1rem; padding: 0 1rem; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; min-width: 0; }
@@ -76,6 +77,8 @@ table.compact tr:last-child td { border-bottom: none; }
 .app.system .sidenav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; border-left-color: #ffd23f; }
 .app.system .nav-section { color: #8fa0bb; }
 .sidenav a { padding: 0.6rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; display: flex; align-items: center; gap: 0.5rem; }
+/* A heading over a group of panels, e.g. the kinds of outside service on Connected Systems. */
+.section-head { margin: 1.75rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 2px solid var(--accent); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
 /* How many are waiting, beside a tab: a red bubble, as on a phone's home screen. */
 .nav-count { margin-left: auto; min-width: 1.3rem; height: 1.3rem; padding: 0 0.4rem; border-radius: 999px; background: #e0242f; color: #fff; font-size: 0.72rem; font-weight: 700; line-height: 1.3rem; text-align: center; flex: none; }
 .sidenav a:hover { background: var(--bg); }
@@ -138,6 +141,8 @@ textarea { min-height: 70px; resize: vertical; }
 .alert strong { display: block; margin-bottom: 0.2rem; }
 .alert ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
 .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+/* Several bubbles in one cell (the restaurants a person works at): they wrap, with a little room between them. */
+.badge-list { display: flex; flex-wrap: wrap; gap: 0.25rem 0.3rem; }
 .badge-neutral { background: #e9edf2; color: var(--muted); }
 .badge-warn { background: var(--warn-bg); color: var(--warn-ink); }
 .badge-danger { background: var(--danger-bg); color: var(--danger); }

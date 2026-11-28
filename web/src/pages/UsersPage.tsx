@@ -141,23 +141,23 @@ export default function UsersPage() {
                     {u.role === 'GroupAdmin' && u.restaurantIds.length > 0 && <> <RoleBadge role="Owner" title="This administrator is also an owner of one or more restaurants" /></>}
                   </td>
                   <td>
-                    {u.role === 'SuperAdmin' ? (
-                      <span className="muted">every group</span>
-                    ) : u.role === 'GroupAdmin' ? (
-                      <>
-                        <span className="muted">every restaurant in the group</span>
-                        {u.restaurantIds.length > 0 && <div className="small">Also an owner of {u.restaurantIds.map(restaurantName).join(', ')}</div>}
-                      </>
-                    ) : u.restaurantIds.length ? (
-                      u.restaurantIds.map((id) => (
-                        <span key={id} className={ownerScoped && !owns(id) ? 'muted' : undefined} title={ownerScoped && !owns(id) ? 'Owned by someone else' : undefined}>
-                          {restaurantName(id)}
-                          {id !== u.restaurantIds[u.restaurantIds.length - 1] ? ', ' : ''}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="muted">none</span>
-                    )}
+                    {/* Each restaurant as its own bubble, like the role beside it. */}
+                    <div className="badge-list">
+                      {u.role === 'SuperAdmin' ? (
+                        <Badge kind="accent">Every group</Badge>
+                      ) : u.role === 'GroupAdmin' ? (
+                        <>
+                          <Badge kind="accent">Every restaurant in the group</Badge>
+                          {u.restaurantIds.map((id) => <Badge key={id} kind="ok" title="Also an owner of this restaurant">Owner: {restaurantName(id)}</Badge>)}
+                        </>
+                      ) : u.restaurantIds.length ? (
+                        u.restaurantIds.map((id) => (
+                          <Badge key={id} kind={ownerScoped && !owns(id) ? 'neutral' : 'accent'} title={ownerScoped && !owns(id) ? 'Owned by someone else' : undefined}>{restaurantName(id)}</Badge>
+                        ))
+                      ) : (
+                        <Badge kind="neutral">None</Badge>
+                      )}
+                    </div>
                   </td>
                   <td style={{ maxWidth: 280 }}>
                     {u.role === 'Manager' ? (

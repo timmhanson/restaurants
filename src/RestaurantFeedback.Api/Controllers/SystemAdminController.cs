@@ -332,7 +332,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
 
     /// <summary>
     /// Chooses the service that checks guest addresses: Geocodio, USPS or PostGrid. Only one that is set up can be
-    /// chosen. The others that are set up stay as the fallback for when the chosen one cannot answer.
+    /// chosen, and it then does every check: the others are not asked.
     /// </summary>
     [HttpPut("address-checking")]
     public async Task<ActionResult<AddressCheckingDto>> SetAddressChecking(AddressCheckingRequest req, CancellationToken ct)
@@ -351,8 +351,8 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
     public GeocodioDto Geocodio() => GeocodioNow();
 
     /// <summary>
-    /// Saves the Geocodio API key, encrypted; it is never shown again or written to any log. Entering the key for
-    /// the first time also makes Geocodio the service that checks addresses (it can be changed back above).
+    /// Saves the Geocodio API key, encrypted; it is never shown again or written to any log. Which service checks
+    /// addresses is chosen separately (address-checking).
     /// </summary>
     [HttpPut("geocodio")]
     public async Task<ActionResult<GeocodioDto>> SetGeocodio(GeocodioKeyRequest req, CancellationToken ct)
@@ -361,15 +361,8 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var key = (req.ApiKey ?? "").Trim();
         if (key.Length is < 12 or > 200 || key.Any(char.IsWhiteSpace))
             return BadRequest(new { message = "Enter the API key exactly as Geocodio shows it (dash.geocod.io, API Keys), with no spaces." });
-        var isNew = geocodioAccount.Current is null;
         await geocodioAccount.SaveAsync(key, me.DisplayName, ct);
         await audit.LogAsync(me, "GeocodioKeySet", details: new { KeyEnding = key[^4..] });
-        if (isNew && addressChoice.First != AddressServices.Geocodio)
-        {
-            var before = addressChoice.First;
-            await addressChoice.SetAsync(AddressServices.Geocodio, me.DisplayName, ct);
-            await audit.LogAsync(me, "AddressCheckOrderChanged", details: new { First = "Geocodio", Was = AddressServices.Name(before) });
-        }
         return GeocodioNow();
     }
 
@@ -395,15 +388,24 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         return new ServiceTestResult(ok, message);
     }
 
-    private bool ServiceSetUp(string service) => service switch
-    {
-        AddressServices.Geocodio => geocodioAccount.Current is not null,
-        AddressServices.PostGrid => postGridAccount.Current is not null,
-        _ => uspsAccount.Current is not null
-    };
+    private bool ServiceSetUp(string service) => addressChoice.IsSetUp(service);
 
-    private AddressCheckingDto AddressCheckingNow() =>
-        new(addressChoice.First, AddressServices.All.Select(s => new AddressServiceDto(s, AddressServices.Name(s), ServiceSetUp(s))).ToList(), addressVerifier is AddressCheckers);
+    private AddressCheckingDto AddressCheckingNow()
+    {
+        static string? Ending(string? key) => key is { Length: >= 4 } ? key[^4..] : null;
+        AddressServiceDto Service(string id)
+        {
+            var dto = new AddressServiceDto(id, AddressServices.Name(id), ServiceSetUp(id));
+            return id switch
+            {
+                AddressServices.Geocodio when geocodioAccount.Current is { } g => dto with { Source = g.Source, KeyEnding = Ending(g.ApiKey), SavedAt = g.SavedAt, SavedBy = g.SavedBy },
+                AddressServices.PostGrid when postGridAccount.Current is { } p => dto with { Source = p.Source, KeyEnding = Ending(p.ApiKey), SavedAt = p.SavedAt, SavedBy = p.SavedBy },
+                AddressServices.Usps when uspsAccount.Current is { } u => dto with { Source = u.Source, KeyEnding = Ending(u.ClientId), SavedAt = u.SavedAt, SavedBy = u.SavedBy, TestEnvironment = u.BaseUrl.Contains("-tem.") },
+                _ => dto
+            };
+        }
+        return new(addressChoice.First, AddressServices.All.Select(Service).ToList(), addressVerifier is AddressCheckers) { OffersAddresses = postGridAccount.Current is not null };
+    }
 
     private GeocodioDto GeocodioNow()
     {
@@ -428,6 +430,9 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var key = (req.ApiKey ?? "").Trim();
         if (key.Length is < 12 or > 200 || key.Any(char.IsWhiteSpace))
             return BadRequest(new { message = "Enter the address verification API key exactly as PostGrid shows it (Address Verification, Developers), with no spaces." });
+        // Saved for offering addresses as they are typed only: the service that checks addresses stays the one it
+        // is, which is settled before the key exists so that the new key cannot become the checker by default.
+        if (!req.UseFirst && addressChoice.First != AddressServices.PostGrid) await addressChoice.SetAsync(addressChoice.First, me.DisplayName, ct);
         await postGridAccount.SaveAsync(key, req.UseFirst, me.DisplayName, ct);
         await audit.LogAsync(me, "PostGridAddressKeySet", details: new { KeyEnding = key[^4..], req.UseFirst });
         await PostGridFirst(req.UseFirst, me, ct);

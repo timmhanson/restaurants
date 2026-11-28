@@ -1,83 +1,30 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PostGridSite, ServiceTestResult } from '../api/types'
 import SiteKeyBlock from './SiteKeyBlock'
-import { Alert, Badge, Confirm, Field, Spinner, fmtDateTime } from './ui'
+import { Alert, Spinner } from './ui'
 
 /**
- * PostGrid on Connected Systems: the site's Print & Mail key, which prints and mails every investment group's cards
- * on the site's own PostGrid account, and its address verification key (checks guest addresses before or after USPS).
+ * PostGrid on Connected Systems: the site's Print & Mail keys, which print and mail every investment group's cards
+ * on the site's own PostGrid account. (PostGrid's Address Verification key is entered under Address verification.)
  */
-export default function PostGridSitePanel({ onChanged, chosen }: { onChanged?: () => void; chosen?: string | null }) {
+export default function PostGridSitePanel({ onChanged }: { onChanged?: () => void }) {
   const [site, setSite] = useState<PostGridSite | null>(null)
-  const [key, setKey] = useState('')
-  const [entering, setEntering] = useState(false)
-  const [removing, setRemoving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [test, setTest] = useState<ServiceTestResult | null>(null)
-  const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null)
 
   useEffect(() => {
     api.get<PostGridSite>('/system/postgrid').then(setSite).catch((e) => setError((e as Error).message))
   }, [])
 
-  const runTest = async () => {
-    setBusy('test')
-    setTest(null)
-    setError(null)
-    try {
-      setTest(await api.post<ServiceTestResult>('/system/postgrid/test'))
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault()
-    setBusy('save')
-    setError(null)
-    setTest(null)
-    try {
-      // Which service checks addresses is chosen at the top of the page; replacing the key leaves that as it is.
-      setSite(await api.put<PostGridSite>('/system/postgrid', { apiKey: key, useFirst: chosen ? chosen === 'postgrid' : site?.useFirst ?? false }))
-      setKey('')
-      setEntering(false)
-      onChanged?.()
-      setBusy(null)
-      await runTest()
-    } catch (err) {
-      setError((err as Error).message)
-      setBusy(null)
-    }
-  }
-
-  const remove = async () => {
-    setBusy('remove')
-    setError(null)
-    setTest(null)
-    try {
-      setSite(await api.delete<PostGridSite>('/system/postgrid'))
-      onChanged?.()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setBusy(null)
-      setRemoving(false)
-    }
-  }
-
   return (
     <div className="panel">
-      <h2>PostGrid</h2>
+      <h2>PostGrid (printing and mailing cards)</h2>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {!site ? (
         !error && <Spinner />
       ) : (
         <>
-          <h3 style={{ marginTop: 0 }}>Printing and mailing cards</h3>
           <p className="muted">
             Every investment group’s cards are printed and mailed on this one PostGrid account, so PostGrid bills you. You bill each group on{' '}
             <Link to="/system-billing">Billing</Link>, where you set your fee per card and each group’s monthly limit. Groups see “Mailed for you”; they never
@@ -125,77 +72,10 @@ export default function PostGridSitePanel({ onChanged, chosen }: { onChanged?: (
             {site.cardsMailed} card{site.cardsMailed === 1 ? '' : 's'} mailed ({site.cardsThisMonth} this month)
             {site.testCardsMailed > 0 ? `, ${site.testCardsMailed} test order${site.testCardsMailed === 1 ? '' : 's'} (not mailed)` : ''}.
           </p>
-
-          <h3>Checking guest addresses</h3>
-          <p className="muted">
-            PostGrid can also check each guest address as a card is entered, against USPS data. Whether it is the service that checks them is chosen at the
-            top of this page, under “Checking guest addresses”. It uses a separate
-            Address Verification key (in PostGrid: Address Verification, Developers). New accounts get some free lookups; after that PostGrid charges per
-            lookup, billed to the account whose key is entered here.
+          <p className="muted" style={{ marginBottom: 0 }}>
+            PostGrid’s Address Verification key (a different key) is entered under <strong>Address Verification</strong>, below.
           </p>
-          <p className="muted">
-            With this key entered, the street address box on Enter Card also offers addresses to pick as it is typed, for restaurants that have their cards
-            printed and mailed. Offering addresses uses no lookups (PostGrid’s autocomplete previews are free); the address picked is then checked as usual.
-          </p>
-          {test && <Alert kind={test.ok ? 'success' : 'error'} onClose={() => setTest(null)}>{test.message}</Alert>}
-          {!site.canEnter ? (
-            <Alert kind="info">This copy of the site uses a stand-in address service, so no key is needed here.</Alert>
-          ) : (
-            <>
-              {site.configured ? (
-                <dl className="kv">
-                  <dt>Key</dt>
-                  <dd><Badge kind="accent">saved</Badge> ending in <code>{site.keyEnding}</code></dd>
-                  <dt>Entered</dt>
-                  <dd>
-                    {site.source === 'Saved in the site'
-                      ? `${site.savedAt ? fmtDateTime(site.savedAt) : ''}${site.savedBy ? ` by ${site.savedBy}` : ''}`
-                      : 'In the web app’s settings in Azure. Entering a key here takes over from it.'}
-                  </dd>
-                  <dt>Used</dt>
-                  <dd>
-                    {(chosen ? chosen === 'postgrid' : site.useFirst)
-                      ? <Badge kind="ok">checks guest addresses</Badge>
-                      : <Badge kind="neutral" title="Choose PostGrid under Checking guest addresses, at the top of this page">a backup, and offers addresses as they are typed</Badge>}
-                  </dd>
-                </dl>
-              ) : (
-                <p><Badge kind="neutral">not set up</Badge> PostGrid does not check addresses, and no addresses are offered as they are typed.</p>
-              )}
-
-              {entering || !site.configured ? (
-                <form onSubmit={save} className="grid" style={{ maxWidth: 560, marginTop: '0.75rem' }}>
-                  <Field label="PostGrid Address Verification API key" hint="Stored encrypted and never shown again.">
-                    <input type="password" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" spellCheck={false} required minLength={12} />
-                  </Field>
-                  <div className="row-actions">
-                    {entering && <button type="button" className="btn" onClick={() => { setEntering(false); setKey('') }} disabled={busy !== null}>Cancel</button>}
-                    <button type="submit" className="btn btn-primary" disabled={busy !== null || key.trim().length < 12}>{busy === 'save' ? 'Saving…' : 'Save and test'}</button>
-                  </div>
-                </form>
-              ) : (
-                <div className="row-actions" style={{ marginTop: '0.75rem' }}>
-                  <button type="button" className="btn btn-primary" onClick={() => void runTest()} disabled={busy !== null}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>
-                  <button type="button" className="btn" onClick={() => setEntering(true)} disabled={busy !== null}>Replace key</button>
-                  {site.source === 'Saved in the site' && (
-                    <button type="button" className="btn btn-danger" onClick={() => setRemoving(true)} disabled={busy !== null}>Remove</button>
-                  )}
-                </div>
-              )}
-            </>
-          )}
         </>
-      )}
-      {removing && (
-        <Confirm
-          title="Remove the PostGrid address key?"
-          message="PostGrid will no longer check guest addresses or offer them as they are typed; another service still checks them if one is set up. Mailing cards is not affected. Nothing is changed at PostGrid."
-          confirmLabel="Remove"
-          danger
-          busy={busy === 'remove'}
-          onConfirm={() => void remove()}
-          onCancel={() => setRemoving(false)}
-        />
       )}
     </div>
   )

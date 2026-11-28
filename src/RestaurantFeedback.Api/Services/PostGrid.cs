@@ -1069,9 +1069,9 @@ public class PostGridAddressVerifier(HttpClient http, PostGridAddressAccountStor
 }
 
 /// <summary>
-/// The site's address checking: Geocodio, USPS and PostGrid. The one the System Administrator chose on Connected
-/// Systems is asked; when it cannot answer (not set up, refused, busy or down) the others that are set up are
-/// asked in turn, so one outage never switches checking off.
+/// The site's address checking: Geocodio, USPS or PostGrid. The one the System Administrator chose on Connected
+/// Systems does every check, and no other service is asked: when it cannot answer (busy, down, out of lookups)
+/// the card is simply saved without a check, as it always could be.
 /// </summary>
 public class AddressCheckers(UspsAddressVerifier usps, PostGridAddressVerifier postGrid, GeocodioAddressVerifier geocodio, AddressServiceChoice choice) : IAddressVerifier
 {
@@ -1081,30 +1081,15 @@ public class AddressCheckers(UspsAddressVerifier usps, PostGridAddressVerifier p
 
     public IAddressVerifier Of(string service) => service switch { AddressServices.Geocodio => geocodio, AddressServices.PostGrid => postGrid, _ => usps };
 
-    private IAddressVerifier[] Order => AddressServices.Order(choice.First).Select(Of).ToArray();
+    /// <summary>The one service that checks addresses.</summary>
+    private IAddressVerifier Chosen => Of(choice.First);
 
-    public bool Configured => usps.Configured || postGrid.Configured || geocodio.Configured;
+    public bool Configured => Chosen.Configured;
 
-    public string Description
-    {
-        get
-        {
-            var on = Order.Where(v => v.Configured).Select(v => v.Description).ToList();
-            return on.Count switch { 0 => "Not set up", 1 => on[0], _ => $"{on[0]}, then {string.Join(", then ", on.Skip(1))} when it cannot answer" };
-        }
-    }
+    public string Description => Chosen.Configured ? Chosen.Description : "Not set up";
 
-    public async Task<AddressCheck> CheckAsync(AddressInput input, CancellationToken ct = default)
-    {
-        AddressCheck? last = null;
-        foreach (var v in Order.Where(v => v.Configured))
-        {
-            var r = await v.CheckAsync(input, ct);
-            if (r.Status != AddressStatuses.Unavailable) return r;
-            last = r;
-        }
-        return last ?? new(AddressStatuses.Unavailable, "Address checking is not set up.");
-    }
+    public Task<AddressCheck> CheckAsync(AddressInput input, CancellationToken ct = default) =>
+        Chosen.Configured ? Chosen.CheckAsync(input, ct) : Task.FromResult(new AddressCheck(AddressStatuses.Unavailable, "Address checking is not set up."));
 
     public async Task<(bool Ok, string Message)> TestAsync(CancellationToken ct = default)
     {

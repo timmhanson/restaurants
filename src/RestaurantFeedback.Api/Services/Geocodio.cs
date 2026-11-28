@@ -17,30 +17,45 @@ public class GeocodioOptions
     public string BaseUrl { get; set; } = "https://api.geocod.io/v2.1";
 }
 
-/// <summary>The services that can check a guest's mailing address, and the one the System Administrator chose to ask.</summary>
+/// <summary>The services that can check a guest's mailing address. The System Administrator chooses the one that does.</summary>
 public static class AddressServices
 {
     public const string Geocodio = "geocodio", Usps = "usps", PostGrid = "postgrid";
-    /// <summary>The order the others are asked in when the chosen one cannot answer.</summary>
     public static readonly string[] All = [Geocodio, Usps, PostGrid];
     public static string Name(string id) => id switch { Geocodio => "Geocodio", Usps => "USPS", PostGrid => "PostGrid", _ => id };
-
-    /// <summary>The chosen service first, then the rest: asked only when the one before cannot answer.</summary>
-    public static string[] Order(string first) => [first, .. All.Where(s => s != first)];
 }
 
 /// <summary>
 /// Which service checks guest addresses: the System Administrator's choice on Connected Systems, kept in the site's
-/// settings (it is a choice, not a secret). Until one is chosen the earlier rule stands: USPS, or PostGrid when its
-/// key was saved with "ask PostGrid first".
+/// settings (it is a choice, not a secret). The chosen service does every check; the others are never asked, whether
+/// or not their keys are saved. Until a choice has been made, the service that checked before stands: USPS when its
+/// account is set up, else PostGrid (PostGrid first when its key was saved that way), else Geocodio.
 /// </summary>
-public class AddressServiceChoice(IServiceScopeFactory scopes, PostGridAddressAccountStore postGrid)
+public class AddressServiceChoice(IServiceScopeFactory scopes, UspsAccountStore usps, PostGridAddressAccountStore postGrid, GeocodioAccountStore geocodio)
 {
     private const string SettingKey = "addresses.first";
     private volatile string? _chosen;
 
-    /// <summary>The service asked first.</summary>
-    public string First => _chosen ?? (postGrid.Current?.UseFirst == true ? AddressServices.PostGrid : AddressServices.Usps);
+    /// <summary>Its key or account has been entered.</summary>
+    public bool IsSetUp(string service) => service switch
+    {
+        AddressServices.Geocodio => geocodio.Current is not null,
+        AddressServices.PostGrid => postGrid.Current is not null,
+        _ => usps.Current is not null
+    };
+
+    /// <summary>The one service that checks addresses.</summary>
+    public string First
+    {
+        get
+        {
+            if (_chosen is { } chosen) return chosen;
+            string[] before = postGrid.Current?.UseFirst == true
+                ? [AddressServices.PostGrid, AddressServices.Usps, AddressServices.Geocodio]
+                : [AddressServices.Usps, AddressServices.PostGrid, AddressServices.Geocodio];
+            return before.FirstOrDefault(IsSetUp) ?? before[0];
+        }
+    }
 
     public async Task LoadAsync(CancellationToken ct = default)
     {

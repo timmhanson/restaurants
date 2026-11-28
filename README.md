@@ -13,7 +13,7 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 
 | Title (internal role) | Scope | Can |
 | --- | --- | --- |
-| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **Impersonate** opens one group exactly as its Investment Group Administrator sees it, under a yellow bar with **Back to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
+| **System Administrator** (`SuperAdmin`) | every investment group | oversees the groups: creates them and their administrators, sees every user and the whole audit log. **Impersonate** opens one group exactly as its Investment Group Administrator sees it, under a dark blue bar with **Back to System Administration** (the API takes the group from the `X-Group-Id` header). Not assigned to any restaurant |
 | **Investment Group Administrator** (`GroupAdmin`) | one investment group | everything: every restaurant, every user account (owners and other administrators included), the group settings, and what owners and managers may do. Can also be ticked as an owner of particular restaurants (two roles at once) |
 | **Restaurant Owner** (`Owner`) | the restaurants they own | what the levels above leave to owners, by default everything at those restaurants: cards, analytics, export, audit, staffing and co-owners, the restaurant's details and card design. They edit, reset, suspend and restore the managers and team logins who work there, even ones who also work at other owners' restaurants |
 | **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus what all managers in the group were given and what was ticked for them: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin, BuyPostage, SetFollowUpDays. Permissions apply at every restaurant they work at |
@@ -213,9 +213,12 @@ work as a fallback when nothing is entered in the site. The audit log records, p
 version passed over), including when a card is saved without choosing. Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
 USPS's request allowance. USPS allows this only to help send mail, which is what it is used for.
 
-Three services can check addresses, and the System Administrator chooses which one does, on **Connected
-Systems, Checking guest addresses** (`AddressServiceChoice`, `GET/PUT /api/system/address-checking`; the choice
-saves as it is made, and only a service that is set up can be chosen):
+Three services can check addresses, and the System Administrator chooses the one that does, on **Connected
+Systems, Address Verification** (`AddressVerificationPanel`, `AddressServiceChoice`,
+`GET/PUT /api/system/address-checking`). It is one section: a drop-down picks the service, the section shows
+that service's key (saved, with its last four characters, or boxes to enter it), and **Save** stores what was
+entered and makes the service picked the one that checks every guest address. Nothing changes until Save, and
+only a service with a key can be saved as the one in use:
 
 - **Geocodio** (`GeocodioAddressVerifier`, `GET /geocode` with `fields=zip4`): finds the address at its house
   number and how it is properly written, and from the post office's ZIP+4 data says whether mail is delivered
@@ -223,17 +226,19 @@ saves as it is made, and only a service that is set up can be chosen):
   nearest other building counts as not found. Each check uses two lookups (the address and the ZIP+4 data);
   answers are remembered for a day. The key is entered under **Connected Systems, Geocodio**
   (`GeocodioAccountStore`, encrypted, never shown again; `Geocodio__ApiKey` is a fallback) and travels in a
-  header, never in the address of the request. Entering it for the first time makes Geocodio the chosen
-  service. Geocodio does not offer addresses as they are typed.
+  header, never in the address of the request. Geocodio does not offer addresses as they are typed.
 - **USPS**, as above.
 - **PostGrid** (`PostGridAddressVerifier`, PostGrid Address Verification, which uses USPS data), with its *Address
-  Verification* API key under **Connected Systems, PostGrid, Checking guest addresses**
-  (`PostGridAddressAccountStore`, encrypted the same way; `PostGrid__AddressApiKey` is a fallback). It charges
-  per lookup after its free allowance.
+  Verification* API key (`PostGridAddressAccountStore`, encrypted the same way; `PostGrid__AddressApiKey` is a
+  fallback). It charges per lookup after its free allowance. This key also offers addresses as they are typed
+  (below) whichever service checks them, so it can be saved with **Save key only**, which leaves the service in
+  use as it is.
 
-`AddressCheckers` asks the chosen service, and moves to the others that are set up (Geocodio, USPS, PostGrid, in
-that order) only when it cannot answer, so one outage never switches address checking off. Removing a service's
-key is how to make sure it is never asked. Nothing said to a person entering a card names any of these companies.
+`AddressCheckers` asks the chosen service and no other, whether or not the others have keys saved: when it cannot
+answer (busy, down, out of lookups) the card is saved without a check, as it always could be. If the chosen
+service's key is removed, addresses are not checked until another service is saved, and the Overview says so.
+Until a choice has ever been made, the service that checked before carries on (USPS, else PostGrid, else
+Geocodio). Nothing said to a person entering a card names any of these companies.
 
 **Addresses offered as the street is typed.** With that key entered, the street address box on Enter Card offers
 addresses that begin the way the street has been typed, for restaurants that have their cards printed and mailed
@@ -455,13 +460,13 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
 | **Reports**, **Activity log**, **Audit log** | see below |
 | **Billing** | what mailed cards cost and the site's fee (for every group and per group), monthly limits, when and how bills go out, every bill and whether it is paid, and what was mailed month by month |
-| **Connected Systems** | the accounts for outside services the whole site uses, each with Save and test: which service checks guest addresses (Geocodio, USPS or PostGrid) with each one's key or account, PostGrid's Print & Mail key (mails every group's cards), and Stripe (takes payment for mailing bills); EasyPost and email are summarised with where each is managed |
+| **Connected Systems** | the accounts for outside services the whole site uses, grouped under Mailing and Postage Services, Payment, Address Verification and Email: the one service that checks guest addresses (Geocodio, USPS or PostGrid, picked from a drop-down with its key), PostGrid's Print & Mail key (mails every group's cards), and Stripe (takes payment for mailing bills); EasyPost and email are summarised with where each is managed |
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 
 Restaurant-level screens (Enter card, Comments, Analytics, All Staff, Permissions, Restaurants & Staff, Settings) never appear
 for a System Administrator unless they choose **Impersonate** / **Open in group**, which shows one group as
-its Investment Group Administrator sees it under a yellow bar. That choice lasts for the browser tab only.
+its Investment Group Administrator sees it under a dark blue bar. That choice lasts for the browser tab only.
 All of `/api/system/*` is `SuperAdmin` only.
 
 ### What Stripe tells the site (payment notifications)
