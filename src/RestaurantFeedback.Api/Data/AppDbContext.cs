@@ -23,6 +23,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CardSend> CardSends => Set<CardSend>();
     public DbSet<AiRequest> AiRequests => Set<AiRequest>();
     public DbSet<AttentionDismissal> AttentionDismissals => Set<AttentionDismissal>();
+    public DbSet<GroupOnboarding> GroupOnboardings => Set<GroupOnboarding>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

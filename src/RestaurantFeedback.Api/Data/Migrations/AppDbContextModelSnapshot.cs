@@ -670,6 +670,39 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.ToTable("GroupCredits");
                 });
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.GroupOnboarding", b =>
+                {
+                    b.Property<int>("GroupId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CompletedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LaterAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StepsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WelcomeNote")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WelcomeNoteBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("GroupId");
+
+                    b.ToTable("GroupOnboardings");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.GuestComment", b =>
                 {
                     b.Property<int>("Id")

@@ -108,6 +108,12 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
                 attention.Add(new("high", $"{g.Name} has no Investment Group Administrator", "Nobody can manage this group's people, restaurants and settings.", "/groups"));
             if (!restaurants.Any(r => r.GroupId == g.Id && r.IsActive))
                 attention.Add(new("medium", $"{g.Name} has no restaurants", "Add its restaurants so cards can be entered.", "/groups"));
+            // A group that has not finished getting started (see OnboardingController).
+            var setUp = Onboarding.Status(await db.GroupOnboardings.AsNoTracking().FirstOrDefaultAsync(o => o.GroupId == g.Id));
+            if (setUp != Onboarding.Done)
+                attention.Add(new("info", $"{g.Name} has not finished setting up",
+                    setUp == Onboarding.New ? "Its administrator has not opened the welcome page yet. Edit the group to leave them a welcome note."
+                        : "Its administrator has started and not finished. Edit the group to see which steps they have confirmed.", "/groups"));
             var waiting = cards.Count(c => c.GroupId == g.Id && !c.Responded && OverAWeek(c.VisitDate));
             if (waiting > 0)
                 attention.Add(new("medium", $"{waiting} card{(waiting == 1 ? " has" : "s have")} waited over a week at {g.Name}", "Guests who have not had a reply yet.", $"/reports?groupIds={g.Id}"));

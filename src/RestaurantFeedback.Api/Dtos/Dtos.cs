@@ -736,6 +736,29 @@ public record UspsAccountRequest(string? ConsumerKey, string? ConsumerSecret, bo
 public record UspsAccountDto(bool Configured, string Source, string? KeyEnding, bool TestEnvironment, DateTime? SavedAt, string? SavedBy, bool CanEnter);
 public record ServiceTestResult(bool Ok, string Message);
 
+// ---- Getting a new investment group started ------------------------------------------------------------------
+
+/// <param name="Required">The site cannot be used until this step is done (only the restaurants step).</param>
+public record OnboardingStepDto(string Id, string Title, bool Confirmed, DateTime? ConfirmedAt, string? ConfirmedBy, bool Required);
+public record OnboardingRestaurant(int Id, string Name, string? StreetAddress, string? City, string? State, string? Zip, string? Phone);
+/// <param name="NotSignedInYet">They have an account and have not used it yet.</param>
+public record OnboardingPerson(string Name, string Role, bool NotSignedInYet);
+/// <param name="Mail">on, off or each (each restaurant decides).</param>
+/// <param name="GroupDecidesMail">The group may change it; otherwise it was decided by the people who run the site.</param>
+/// <param name="PriceCents">The one price of a card printed and mailed for the group.</param>
+/// <param name="PrintFeeCents">What a card the group prints itself costs.</param>
+public record OnboardingSending(string Mail, bool GroupDecidesMail, string Mode, int PriceCents, int PrintFeeCents, bool HasPayMethod, bool PayRequired, string? SignatureForAll);
+public record OnboardingAssistant(bool On, bool GroupDecides, string Level, string Price);
+/// <param name="Status">new (not started), open (started or left for later), done, or none (not this person's to do).</param>
+/// <param name="MinimumMet">There is at least one restaurant, which is all the site needs to be used.</param>
+public record OnboardingDto(string Status, bool CanRun, string GroupName, string DisplayName, string? WelcomeNote, string? WelcomeNoteBy, List<OnboardingStepDto> Steps, bool MinimumMet,
+    List<OnboardingRestaurant> Restaurants, List<OnboardingPerson> People, OnboardingSending? Sending, OnboardingAssistant? Assistant, List<string> Offers, List<string> Reasons, DateTime? CompletedAt)
+{
+    public static readonly OnboardingDto NotMine = new(Controllers.Onboarding.None, false, "", "", null, null, [], true, [], [], null, null, [], [], null);
+}
+public record SystemOnboardingDto(int GroupId, string Status, string? WelcomeNote, DateTime? StartedAt, DateTime? LaterAt, DateTime? CompletedAt, string? CompletedBy, List<OnboardingStepDto> Steps);
+public record SystemOnboardingRequest([MaxLength(2000)] string? WelcomeNote, bool Restart = false, bool MarkDone = false);
+
 // ---- The AI assistant on Enter Card --------------------------------------------------------------------------
 
 /// <summary>A face on the card: how upset the guest was, and the reward it stands for at this group.</summary>

@@ -30,6 +30,7 @@ import RestaurantsPage from './pages/RestaurantsPage'
 import SecurityPage from './pages/SecurityPage'
 import PermissionsPage from './pages/PermissionsPage'
 import FollowUpPage from './pages/FollowUpPage'
+import WelcomePage from './pages/WelcomePage'
 import SettingsPage from './pages/SettingsPage'
 import SystemStatusPage from './pages/SystemStatusPage'
 import UsersPage from './pages/UsersPage'
@@ -133,6 +134,7 @@ export default function App() {
         <Route index element={<AfterSignIn home={home} />} />
         <Route path="/login" element={<AfterSignIn home={home} />} />
         <Route path="/enter" element={<Guard home={home} allow={inGroup}><EnterCardPage /></Guard>} />
+        <Route path="/welcome" element={<Guard home={home} allow={inGroup}><WelcomePage /></Guard>} />
         <Route path="/password" element={<ChangePasswordPage />} />
         <Route path="/v/:code" element={<VerifyCardPage />} />
         <Route path="/print" element={<Guard home={home} allow={inGroup && perm('MarkResponded') && perm('ViewComments')}><PrintCenterPage /></Guard>} />

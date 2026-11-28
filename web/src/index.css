@@ -79,6 +79,23 @@ table.compact tr:last-child td { border-bottom: none; }
 .app.system .sidenav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; border-left-color: #ffd23f; }
 .app.system .nav-section { color: #8fa0bb; }
 .sidenav a { padding: 0.6rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; display: flex; align-items: center; gap: 0.5rem; }
+/* Getting Started: the welcome and the set-up steps. */
+.welcome { max-width: 980px; }
+.welcome-hero h1 { margin-top: 0; }
+.welcome-lead { font-size: 1.05rem; }
+.welcome-note { margin: 0.75rem 0 1rem; padding: 0.75rem 1rem; border-left: 4px solid var(--accent); background: var(--info-bg); border-radius: 0 8px 8px 0; white-space: pre-wrap; }
+.welcome-note footer { margin-top: 0.4rem; font-size: 0.85rem; color: var(--muted); }
+.welcome-note footer::before { content: "— "; }
+.welcome-tour-card { margin: 0; }
+.welcome-step-n { display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.85rem; flex: none; }
+.welcome-tour-card .welcome-step-n { margin-bottom: 0.4rem; }
+.welcome-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.welcome-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1rem; padding: 0; }
+.welcome-steps button { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.7rem 0.35rem 0.4rem; border: 1px solid var(--line); border-radius: 999px; background: var(--card, #fff); font: inherit; font-size: 0.9rem; cursor: pointer; }
+.welcome-steps li:not(.on):not(.done) .welcome-step-n { background: #e9edf2; color: var(--muted); }
+.welcome-steps li.done .welcome-step-n { background: var(--ok); }
+.welcome-steps li.on button { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.setup-notice { border-left-color: var(--accent); }
 /* The AI assistant's faces: how upset the guest was, each with the reward it stands for. */
 .ai-panel { border-color: var(--accent); }
 .panel > h3 { margin: 1rem 0 0.35rem; }

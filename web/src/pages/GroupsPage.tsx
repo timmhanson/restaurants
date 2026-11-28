@@ -5,6 +5,7 @@ import type { GroupDto, GroupRequest, GroupSettingsData, PermissionRules, Restau
 import { useAuth } from '../auth/AuthContext'
 import GroupPeoplePanel from '../components/GroupPeoplePanel'
 import { AiGroupEditor } from '../components/AiAssistant'
+import { OnboardingEditor } from '../components/SetupNotice'
 import GroupSettingsEditor from '../components/GroupSettingsEditor'
 import PermissionRulesEditor, { type PermissionChange } from '../components/PermissionRulesEditor'
 import { Alert, Badge, Empty, Field, Modal, Spinner, fmtDate } from '../components/ui'
@@ -245,6 +246,8 @@ function GroupModal({ group, onClose, onSaved }: { group: GroupDto | null; onClo
             </select>
           </Field>
           {settings && <GroupSettingsEditor value={settings} onChange={setSettings} />}
+          <h3 style={{ margin: '0.5rem 0 0' }}>Getting them started</h3>
+          <OnboardingEditor groupId={group.id} />
           <h3 style={{ margin: '0.5rem 0 0' }}>AI assistant</h3>
           <AiGroupEditor groupId={group.id} />
           {permissions && (

@@ -81,6 +81,29 @@ send each card carried, cards printed and marked sent, and refusals from the aud
   service every half hour about the cards it has not finished with, and Follow Up asks when it opens
   (`POST /api/comments/mail/refresh`), so "waiting to print" is never left standing.
 
+### Getting a new investment group started
+
+The System Administrator has already talked with a new group, creates it with its first administrator, and may
+set things up for it (restaurants, people, mailing, the AI assistant, permissions) and leave a **welcome note**
+(Investment Groups, Edit, "Getting them started"; `PUT /api/system/groups/{id}/onboarding`). When the group's
+administrator first signs in (after choosing their own password) they land on **Getting Started** (`/welcome`,
+`WelcomePage`, `OnboardingController`, table `GroupOnboarding`):
+
+- **The welcome**: the note, a four-card tour of how the site works (Enter Card, Print Cards, Follow Up, Reports),
+  and a list of what is already there. Then a choice: **Set up now** or **Look around first**. Nothing is locked
+  either way; they are sent there once, and after that it waits in the menu under Configuration and as a
+  reminder across the top (`SetupNotice`) until set-up is finished.
+- **The steps**, each showing how that part stands now, to confirm ("Looks right, next"), change or skip: the
+  group's name; its restaurants (the only step the site needs: one restaurant, with the address used as the
+  return address); what is offered to guests and the reasons for a card; how cards are sent (printing, mailing
+  and its price, real or test, paying, who signs); its people; and the AI assistant where it has been offered.
+  Steps change things through the ordinary endpoints, with the ordinary permissions and audit rows; the wizard
+  only records which steps were confirmed, when and by whom.
+- **Finishing** needs one restaurant; unconfirmed steps stay available under Getting Started. The System
+  Administrator sees where each group stands in its Edit dialog, can mark a group as set up or have it welcomed
+  again, and has "… has not finished setting up" on the Overview until it is done. Groups that already had a
+  restaurant when this was added count as set up.
+
 ### Needs your attention: dismissing, and what each item is about
 
 On the System Administrator's Overview, each "Needs your attention" item can be **dismissed** (`AttentionPanel`,
@@ -150,7 +173,7 @@ Permissions and settings are decided from the top down, and a decision made high
 
 Inside a group the menu has four parts: **Actions** (Enter Card, Print Cards, Follow Up), **Reports** (All
 Comments, Billing, Analytics, Audit Log), **Staff** (Restaurants & Staff, All Staff) and, at the bottom,
-**Configuration** (Permissions, Settings, Card Design). Each person sees only the entries they may use. Every
+**Configuration** (Getting Started until set-up is finished, Permissions, Settings, Card Design). Each person sees only the entries they may use. Every
 word of a tab's name is capitalized, in both menus; the section titles are in the site's blue.
 
 Every change of these rules is audited (`PermissionRulesSetBySite`, `PermissionRulesChanged`,

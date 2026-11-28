@@ -463,6 +463,23 @@ export interface CommentRequest {
   force: boolean
 }
 
+// ---- Getting a new investment group started ----
+export interface OnboardingStep { id: string; title: string; confirmed: boolean; confirmedAt?: string | null; confirmedBy?: string | null; required: boolean }
+/** status: new (not started), open (started or left for later), done, or none (not this person's to do). */
+export interface Onboarding {
+  status: 'new' | 'open' | 'done' | 'none'; canRun: boolean; groupName: string; displayName: string; welcomeNote?: string | null; welcomeNoteBy?: string | null
+  steps: OnboardingStep[]; minimumMet: boolean
+  restaurants: { id: number; name: string; streetAddress?: string | null; city?: string | null; state?: string | null; zip?: string | null; phone?: string | null }[]
+  people: { name: string; role: string; notSignedInYet: boolean }[]
+  sending?: { mail: 'on' | 'off' | 'each'; groupDecidesMail: boolean; mode: string; priceCents: number; printFeeCents: number; hasPayMethod: boolean; payRequired: boolean; signatureForAll?: string | null } | null
+  assistant?: { on: boolean; groupDecides: boolean; level: string; price: string } | null
+  offers: string[]; reasons: string[]; completedAt?: string | null
+}
+export interface SystemOnboarding {
+  groupId: number; status: 'new' | 'open' | 'done'; welcomeNote?: string | null; startedAt?: string | null; laterAt?: string | null; completedAt?: string | null; completedBy?: string | null
+  steps: OnboardingStep[]
+}
+
 // ---- The AI assistant ----
 /** A face: how upset the guest was, and the reward it stands for at this group. */
 export interface AiFace { level: number; face: string; label: string; meaning: string; reward?: string | null }

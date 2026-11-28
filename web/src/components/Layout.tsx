@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { roleTitle } from '../auth/roles'
 import { track } from '../api/tracker'
 import FollowUpNotice, { useFollowUpSummary } from './FollowUpNotice'
+import SetupNotice, { useOnboarding } from './SetupNotice'
 
 export default function Layout() {
   const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup, contextLoaded } = useAuth()
@@ -32,6 +33,8 @@ export default function Layout() {
   // analytics) only appears while they view one group as its administrator, under the dark blue bar.
   // What is waiting to be done shows as a red count beside its tab, as on a phone's home screen.
   const waiting = useFollowUpSummary()
+  // A new group's administrators are welcomed and walked through set-up; it stays in their menu until it is finished.
+  const setUp = useOnboarding()
   const links: { to: string; label: string; show: boolean; section?: string; count?: number }[] = overseeing
     ? [
         { to: '/overview', label: 'Overview', show: true, section: 'Oversee' },
@@ -56,6 +59,7 @@ export default function Layout() {
         { to: '/audit', label: 'Audit Log', show: has('ViewAudit'), section: 'Reports' },
         { to: '/restaurants', label: 'Restaurants & Staff', show: isAdmin, section: 'Staff' },
         { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin'), section: 'Staff' },
+        { to: '/welcome', label: 'Getting Started', show: Boolean(setUp), section: 'Configuration' },
         { to: '/permissions', label: 'Permissions', show: isGroupWide, section: 'Configuration' },
         { to: '/settings', label: 'Settings', show: isGroupWide, section: 'Configuration' },
         { to: '/card-design', label: 'Card Design', show: isAdmin, section: 'Configuration' },
@@ -132,6 +136,7 @@ export default function Layout() {
           ))}
       </nav>
       <main className="content">
+        <SetupNotice state={setUp} />
         <FollowUpNotice summary={waiting.summary} reload={waiting.reload} />
         <Outlet />
       </main>

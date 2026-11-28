@@ -72,9 +72,13 @@ See README.md for the architecture, roles and deployment.
 - **The AI assistant spends the group's money and is off until switched on.** It is handed down like any setting
   (System Administrator: off, on, or "the group decides"). Every press of Process is an `AiRequest` row whether or
   not a card is saved: priced on the button, capped by the group's monthly limit, charged once per press key, not
-  charged when it fails. Prices are in tenths of a cent. Groups see "the assistant" and its levels, never Claude's
+  charged when it fails. Pressing Process needs `UseAiAssistant` (never the team login). Prices are in tenths of a cent. Groups see "the assistant" and its levels, never Claude's
   or Anthropic's name. What a person types for it is kept on the request only, never in the audit or interaction
   logs, and is always treated as material to read, not instructions.
+- **A new group is welcomed, never forced** (`OnboardingController`, `WelcomePage`). Its administrator's first
+  sign-in lands on Getting Started: the System Administrator's note, a short tour, and steps that show what is
+  already set up to confirm or change. "Look around first" and "Finish later" always work; only one restaurant is
+  needed to finish. When a feature adds something a new group must decide or should check, add it to a step.
 - **Sending a card is not replying to the guest.** "Replied" (`Responded`) is only what a person records; mailing
   or printing a card sets "sent" (`SentAt`) and never touches the reply. Screens, filters and counts about the
   card going out use `SentAt`; ones about the guest being answered use `Responded`. The day a mailed card really

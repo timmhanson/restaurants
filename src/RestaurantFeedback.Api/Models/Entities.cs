@@ -710,6 +710,24 @@ public class CardImage
 
 /// <summary>One entry in a comment's follow-up history, shared by every manager who can see the comment.</summary>
 /// <summary>
+/// Where an investment group has got to in getting started (see OnboardingController): the System Administrator's
+/// welcome note, when its administrator began, chose to look around first or finished, and the steps confirmed.
+/// A group with no row has not started.
+/// </summary>
+public class GroupOnboarding
+{
+    [System.ComponentModel.DataAnnotations.Key] public int GroupId { get; set; }
+    public string? WelcomeNote { get; set; }
+    public string? WelcomeNoteBy { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? LaterAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string? CompletedBy { get; set; }
+    /// <summary>The steps confirmed, as JSON: {step: {At, By}}.</summary>
+    public string StepsJson { get; set; } = "{}";
+}
+
+/// <summary>
 /// A "Needs your attention" item a System Administrator has dismissed from their Overview. It stays dismissed only
 /// while the item reads exactly the same (Fingerprint): when it changes, or goes away and comes back, it shows again.
 /// </summary>
