@@ -156,6 +156,14 @@ card; sending it from the site is not built yet.
   sends the keys of its requests when it saves). A request that never became a card stays on record as "no card
   saved". The group sees its requests on Billing; the System Administrator sees them all on **Reports, AI
   assistant** (`GET /api/system/ai/usage`), by group, restaurant, level and day, with what each cost.
+- **Understanding the usage** (`AiUsageCharts`, `AiCharts`). The group's Billing page and the System
+  Administrator's Reports both show graphs: requests day by day, by level, by person and by restaurant; which
+  faces the assistant picks beside the faces on the saved cards; and how often people kept its face and reward or
+  changed them, with a table of what was changed to what. When a card is saved, the face and reward it carries are
+  kept on the request beside what was suggested (`AiRequest.FinalMood`, `FinalOffer`). **Show** on any request
+  gives what was typed, everything the assistant filled in, the level and the effort it ran at (`Effort`, always
+  low), what was charged and what went on the card. The group sees this for its own requests; the model, the
+  tokens, the cost to the site and why a try failed stay with the System Administrator.
 - **The site's key** is entered on Connected Systems (`AiAccountStore`, encrypted, never shown again;
   `Ai__ApiKey` is a fallback). What was typed is never written to the audit or interaction logs.
 

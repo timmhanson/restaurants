@@ -782,6 +782,14 @@ public class AiRequest
     /// <summary>The card saved from this request; null while (or if) none was.</summary>
     public int? CommentId { get; set; }
     public DateTime? LinkedAt { get; set; }
+    /// <summary>How hard the model was asked to think (the API's effort setting) for this request.</summary>
+    public string? Effort { get; set; }
+    /// <summary>
+    /// The face and the reward on the card as it was saved, to set beside what the assistant suggested (Mood, Offer):
+    /// whether the person kept its pick or changed it, and to what. Null while no card has been saved from it.
+    /// </summary>
+    public int? FinalMood { get; set; }
+    public string? FinalOffer { get; set; }
 }
 
 public class CommentActivity

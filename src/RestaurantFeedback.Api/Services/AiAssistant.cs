@@ -32,6 +32,8 @@ public record AiLevel(string Id, string Label, string Says, string Model, string
 public static class AiLevels
 {
     public const string Quick = "quick", Balanced = "balanced", Thorough = "thorough";
+    /// <summary>How hard every level is asked to think: low, which keeps a short, well-bounded job quick and its cost predictable. Recorded on each request.</summary>
+    public const string Effort = "low";
     public const string Default = Balanced;
 
     public static readonly AiLevel[] All =
@@ -408,6 +410,8 @@ public class AiLedger(AppDbContext db)
         {
             r.CommentId = card.Id;
             r.LinkedAt = DateTime.UtcNow;
+            // What went on the card in the end, beside what the assistant suggested.
+            (r.FinalMood, r.FinalOffer) = (card.Mood, card.CouponOffer);
         }
         await db.SaveChangesAsync(ct);
     }

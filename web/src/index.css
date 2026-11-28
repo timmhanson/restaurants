@@ -98,6 +98,7 @@ table.compact tr:last-child td { border-bottom: none; }
 .setup-notice { border-left-color: var(--accent); }
 /* The AI assistant's faces: how upset the guest was, each with the reward it stands for. */
 .ai-panel { border-color: var(--accent); }
+.ai-typed { white-space: pre-wrap; padding: 0.6rem 0.75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-size: 0.95rem; }
 .panel > h3 { margin: 1rem 0 0.35rem; }
 .ai-faces { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
 .ai-face { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; padding: 0.55rem 0.4rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card, #fff); cursor: pointer; font: inherit; text-align: center; min-width: 0; }

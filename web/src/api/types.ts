@@ -504,10 +504,20 @@ export interface AiSettings {
 export interface AiRequestRow {
   id: number; at: string; by: string; groupId: number; group?: string | null; restaurantId: number; restaurant: string; level: string; priceMills: number
   outcome: 'ok' | 'failed' | string; wantEmail: boolean; commentId?: number | null; guest?: string | null; reason?: string | null; mood?: number | null; offer?: string | null
+  /** What was typed and what the assistant filled in; the face and reward on the saved card; how hard it was asked to think. */
+  input?: string | null; fields?: AiFields | null; finalMood?: number | null; finalOffer?: string | null; effort?: string | null
   /** System Administrator only. */
-  input?: string | null; model?: string | null; inputTokens?: number | null; outputTokens?: number | null; costMicros?: number | null; error?: string | null
+  model?: string | null; inputTokens?: number | null; outputTokens?: number | null; costMicros?: number | null; error?: string | null
 }
-export interface AiUsageList { requests: number; charged: number; mills: number; notSaved: number; rows: AiRequestRow[] }
+export interface AiUsageList { requests: number; charged: number; mills: number; notSaved: number; rows: AiRequestRow[]; charts?: AiCharts | null }
+export interface AiChange { from: string; to: string; count: number }
+/** The figures behind the graphs. Kept: the saved card carried the assistant's pick; noCard: no card was saved from the request. */
+export interface AiCharts {
+  byDay: AiUsageBucket[]; byLevel: AiUsageBucket[]; byPerson: AiUsageBucket[]; byRestaurant: AiUsageBucket[]
+  faces: { level: number; face: string; label: string; suggested: number; final: number }[]
+  faceKept: number; faceRaised: number; faceLowered: number; rewardKept: number; rewardChanged: number; noCard: number
+  faceChanges: AiChange[]; rewardChanges: AiChange[]
+}
 export interface AiSite {
   configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; savedAt?: string | null; savedBy?: string | null; canEnter: boolean
   levels: { id: string; label: string; model: string; priceMills: number; price: string; inPerMillion: number; outPerMillion: number }[]; defaultLimitCents: number
@@ -516,7 +526,7 @@ export interface AiGroupSettings { groupId: number; on: boolean; groupDecides: b
 export interface AiUsageBucket { key: string; label: string; requests: number; charged: number; failed: number; notSaved: number; mills: number; costMicros: number }
 export interface AiUsage {
   requests: number; charged: number; failed: number; notSaved: number; withEmail: number; mills: number; costMicros: number
-  byGroup: AiUsageBucket[]; byRestaurant: AiUsageBucket[]; byLevel: AiUsageBucket[]; byDay: AiUsageBucket[]; rows: AiRequestRow[]
+  byGroup: AiUsageBucket[]; byRestaurant: AiUsageBucket[]; byLevel: AiUsageBucket[]; byDay: AiUsageBucket[]; rows: AiRequestRow[]; charts?: AiCharts | null
 }
 
 export interface CommentSummary {

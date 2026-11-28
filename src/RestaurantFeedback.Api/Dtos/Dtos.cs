@@ -791,15 +791,36 @@ public record AiSettingsRequest(bool? On, string? Level, List<string?>? Rewards)
 public record AiRequestRow(int Id, DateTime At, string By, int GroupId, string? Group, int RestaurantId, string Restaurant, string Level, int PriceMills, string Outcome, bool WantEmail,
     int? CommentId, string? Guest, string? Reason, int? Mood, string? Offer)
 {
-    /// <summary>System Administrator only: what was typed, the model, the tokens and what it cost the site (millionths of a dollar).</summary>
+    /// <summary>What was typed, and what the assistant filled in from it. The group's own, so its owners and administrators see them.</summary>
     public string? Input { get; init; }
+    public Services.AiFields? Fields { get; init; }
+    /// <summary>The face and reward on the card as it was saved, beside what was suggested (Mood, Offer); null when no card was saved.</summary>
+    public int? FinalMood { get; init; }
+    public string? FinalOffer { get; init; }
+    /// <summary>How hard the model was asked to think.</summary>
+    public string? Effort { get; init; }
+    /// <summary>System Administrator only: the model, the tokens, what it cost the site (millionths of a dollar) and why a try failed.</summary>
     public string? Model { get; init; }
     public int? InputTokens { get; init; }
     public int? OutputTokens { get; init; }
     public int? CostMicros { get; init; }
     public string? Error { get; init; }
 }
-public record AiUsageList(int Requests, int Charged, int Mills, int NotSaved, List<AiRequestRow> Rows);
+public record AiUsageList(int Requests, int Charged, int Mills, int NotSaved, List<AiRequestRow> Rows)
+{
+    public AiChartsDto? Charts { get; init; }
+}
+/// <summary>How often each face was the assistant's pick, and how often it was the face on the saved card.</summary>
+public record AiFaceCount(int Level, string Face, string Label, int Suggested, int Final);
+/// <summary>A change a person made to what the assistant suggested, and how many times.</summary>
+public record AiChange(string From, string To, int Count);
+/// <summary>
+/// The figures behind the graphs. Faces and rewards count requests that worked: Kept means the saved card carried
+/// the assistant's pick; Raised and Lowered that the person chose a more or a less upset face; NoCard that no card
+/// was saved from the request.
+/// </summary>
+public record AiChartsDto(List<AiUsageBucket> ByDay, List<AiUsageBucket> ByLevel, List<AiUsageBucket> ByPerson, List<AiUsageBucket> ByRestaurant, List<AiFaceCount> Faces,
+    int FaceKept, int FaceRaised, int FaceLowered, int RewardKept, int RewardChanged, int NoCard, List<AiChange> FaceChanges, List<AiChange> RewardChanges);
 // The System Administrator's side.
 public record AiKeyRequest(string? ApiKey);
 public record AiSiteLevelDto(string Id, string Label, string Model, int PriceMills, string Price, decimal InPerMillion, decimal OutPerMillion);
@@ -814,7 +835,10 @@ public record AiGroupRequest(bool? On, bool? GroupDecides, string? Level, int? L
 public record AiUsageBucket(string Key, string Label, int Requests, int Charged, int Failed, int NotSaved, int Mills, int CostMicros);
 /// <summary>The System Administrator's analytics. Mills is what groups were charged (tenths of a cent); CostMicros what it cost the site (millionths of a dollar).</summary>
 public record AiUsageDto(int Requests, int Charged, int Failed, int NotSaved, int WithEmail, int Mills, int CostMicros, List<AiUsageBucket> ByGroup, List<AiUsageBucket> ByRestaurant,
-    List<AiUsageBucket> ByLevel, List<AiUsageBucket> ByDay, List<AiRequestRow> Rows);
+    List<AiUsageBucket> ByLevel, List<AiUsageBucket> ByDay, List<AiRequestRow> Rows)
+{
+    public AiChartsDto? Charts { get; init; }
+}
 
 // ---- Which service checks guest addresses, and the site's Geocodio key ----------------------------------------
 

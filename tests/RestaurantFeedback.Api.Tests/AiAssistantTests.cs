@@ -125,16 +125,31 @@ public class AiAssistantTests(ApiFactory factory)
             var saved = await owner.PostAsJsonAsync("/api/comments", new CommentRequest
             {
                 RestaurantId = rid, Source = "Phone call", GuestFirstName = "Dana", GuestLastName = "Typed", Phone = "815-555-0142", VisitDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1),
-                Reason = "Wait time", CouponOffer = answer.CouponOffer, Mood = 2, GuestEmail = "dana@example.com", EmailSubject = "About your visit", EmailBody = answer.Fields.EmailBody,
+                Reason = "Wait time", CouponOffer = config.Faces[3].Reward, Mood = 4, GuestEmail = "dana@example.com", EmailSubject = "About your visit", EmailBody = answer.Fields.EmailBody,
                 AiRequestKeys = ["k-1"], Force = true
             });
             Assert.Equal(HttpStatusCode.Created, saved.StatusCode);
             var card = (await saved.Content.ReadFromJsonAsync<CommentSummary>())!;
-            Assert.Equal((2, "dana@example.com"), (card.Mood, card.GuestEmail));
+            Assert.Equal((4, "dana@example.com"), (card.Mood, card.GuestEmail));
             var list = (await owner.GetFromJsonAsync<AiUsageList>("/api/ai/requests"))!;
             Assert.Equal((3, 2, 60, 1), (list.Requests, list.Charged, list.Mills, list.NotSaved));
             Assert.Equal(card.Id, list.Rows.Single(r => r.Guest == "Dana Typed" && r.CommentId != null).CommentId);
-            Assert.All(list.Rows, r => Assert.Null(r.Input)); // what was typed, the model and the cost are the System Administrator's
+            // The group sees what was typed and what came back for its own requests; the model and the cost are the System Administrator's.
+            var mineRow = list.Rows.Single(r => r.CommentId == card.Id);
+            Assert.Contains("cold burger", mineRow.Input);
+            Assert.Equal(("Dana", 2, "low"), (mineRow.Fields!.GuestFirstName, mineRow.Fields.Mood, mineRow.Effort));
+            Assert.All(list.Rows, r => Assert.True(r.Model is null && r.CostMicros is null && r.Error is null));
+            // The person chose a more upset face than the assistant, and so a different reward: that is kept beside its suggestion.
+            Assert.Equal((2, 4, config.Faces[1].Reward, config.Faces[3].Reward), (mineRow.Mood, mineRow.FinalMood, mineRow.Offer, mineRow.FinalOffer));
+            var charts = list.Charts!;
+            Assert.Equal((0, 1, 0, 0, 1, 1), (charts.FaceKept, charts.FaceRaised, charts.FaceLowered, charts.RewardKept, charts.RewardChanged, charts.NoCard));
+            Assert.Equal(new AiChange("😐 Let down", "😠 Angry", 1), Assert.Single(charts.FaceChanges));
+            Assert.Equal(new AiChange(config.Faces[1].Reward!, config.Faces[3].Reward!, 1), Assert.Single(charts.RewardChanges));
+            Assert.Equal([0, 1, 0, 1, 0], charts.Faces.Select(f => f.Suggested));
+            Assert.Equal([0, 0, 0, 1, 0], charts.Faces.Select(f => f.Final));
+            Assert.Equal((3, 2, 1), (charts.ByDay.Sum(b => b.Requests), charts.ByDay.Sum(b => b.Charged), charts.ByDay.Sum(b => b.Failed)));
+            Assert.All(charts.ByLevel, b => Assert.Equal(0, b.CostMicros));
+            Assert.DoesNotContain("claude", await (await owner.GetAsync("/api/ai/requests")).Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
             Assert.Equal((2, 60), ((await owner.GetFromJsonAsync<AiSettingsDto>("/api/ai/settings"))!.UsedRequests, (await owner.GetFromJsonAsync<AiSettingsDto>("/api/ai/settings"))!.UsedMills));
 
             // The System Administrator sees how it is used and by which group, with what was typed and what it cost.
@@ -145,6 +160,8 @@ public class AiAssistantTests(ApiFactory factory)
             Assert.Equal(groupId.ToString(), Assert.Single(usage.ByGroup).Key);
             Assert.Contains(usage.Rows, r => r.Input!.Contains("cold burger") && r.Model == "claude-opus-5-5" && r.CommentId == card.Id);
             Assert.Contains(usage.Rows, r => r.Outcome == "failed" && r.PriceMills == 0 && r.Error == "Anthropic could not be reached.");
+            Assert.Equal((1, 1), (usage.Charts!.FaceRaised, usage.Charts.NoCard));
+            Assert.True(usage.Charts.ByLevel.Sum(b => b.CostMicros) > 0);
             Assert.Empty((await site.GetFromJsonAsync<AiUsageDto>($"/api/system/ai/usage?groupIds=987654"))!.Rows);
             // On the month's bill it is a line of its own, in whole cents.
             var month = await Db(async db => { using var scope = factory.Services.CreateScope(); return await scope.ServiceProvider.GetRequiredService<AiLedger>().MonthAsync(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow.AddDays(1)); });

@@ -99,7 +99,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         var entry = new AiRequest
         {
             RequestKey = key, GroupId = groupId, RestaurantId = restaurant.Id, UserId = me.Id, UserName = me.DisplayName, Level = level.Id, Model = level.Model,
-            WantEmail = true, Input = text
+            WantEmail = true, Input = text, Effort = AiLevels.Effort
         };
         AiAnswer answer;
         try
@@ -222,14 +222,22 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
         var names = await db.Restaurants.AsNoTracking().Where(r => r.GroupId == groupId).ToDictionaryAsync(r => r.Id, r => r.Name, ct);
         var list = rows.Select(r => Row(r, names.GetValueOrDefault(r.RestaurantId, ""), null, false)).ToList();
         var charged = rows.Where(r => r.Outcome == AiOutcomes.Ok).ToList();
-        return new AiUsageList(rows.Count, charged.Count, charged.Sum(r => r.PriceMills), charged.Count(r => r.CommentId is null), list);
+        return new AiUsageList(rows.Count, charged.Count, charged.Sum(r => r.PriceMills), charged.Count(r => r.CommentId is null), list)
+        {
+            Charts = AiCharts.Build(rows, names, forSite: false)
+        };
     }
 
     public static AiRequestRow Row(AiRequest r, string restaurant, string? group, bool forSite)
     {
         var row = new AiRequestRow(r.Id, DateTime.SpecifyKind(r.At, DateTimeKind.Utc), r.UserName, r.GroupId, group, r.RestaurantId, restaurant, AiLevels.Of(r.Level).Label, r.PriceMills, r.Outcome,
             r.WantEmail, r.CommentId, r.GuestName, r.Reason, r.Mood, r.Offer);
-        return forSite ? row with { Input = r.Input, Model = r.Model, InputTokens = r.InputTokens, OutputTokens = r.OutputTokens, CostMicros = r.CostMicros, Error = r.Error } : row;
+        // What was typed and what came back are the group's own, so its owners and administrators see them too; the
+        // model, the tokens, the cost to the site and why a try failed are the System Administrator's.
+        AiFields? fields = null;
+        try { fields = r.ResultJson is null ? null : JsonSerializer.Deserialize<AiFields>(r.ResultJson, Json); } catch (JsonException) { }
+        row = row with { Input = r.Input, Fields = fields, FinalMood = r.FinalMood, FinalOffer = r.FinalOffer, Effort = r.Effort ?? AiLevels.Effort };
+        return forSite ? row with { Model = r.Model, InputTokens = r.InputTokens, OutputTokens = r.OutputTokens, CostMicros = r.CostMicros, Error = r.Error } : row;
     }
 }
 
@@ -368,6 +376,9 @@ public class SystemAiController(AppDbContext db, CurrentUserProvider users, IAiD
             rows.GroupBy(r => r.RestaurantId).Select(g => Bucket(g.Key.ToString(), restaurants.GetValueOrDefault(g.Key, $"Restaurant {g.Key}"), g)).OrderByDescending(b => b.Requests).ToList(),
             AiLevels.All.Select(l => Bucket(l.Id, $"{l.Label} ({l.ModelName})", rows.Where(r => r.Level == l.Id))).ToList(),
             rows.GroupBy(r => DateOnly.FromDateTime(r.At)).OrderBy(g => g.Key).Select(g => Bucket(g.Key.ToString("yyyy-MM-dd"), g.Key.ToString("MMM d", CultureInfo.InvariantCulture), g)).ToList(),
-            rows.Take(1000).Select(r => AiAssistantController.Row(r, restaurants.GetValueOrDefault(r.RestaurantId, ""), groups.GetValueOrDefault(r.GroupId), true)).ToList());
+            rows.Take(1000).Select(r => AiAssistantController.Row(r, restaurants.GetValueOrDefault(r.RestaurantId, ""), groups.GetValueOrDefault(r.GroupId), true)).ToList())
+        {
+            Charts = AiCharts.Build(rows, restaurants, forSite: true)
+        };
     }
 }

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, qs } from '../api/client'
 import type { AiConfig, AiFace, AiGroupSettings, AiProcessResponse, AiRequestRow, AiSettings, AiSite, AiUsage, AiUsageBucket, AiUsageList, ServiceTestResult } from '../api/types'
+import AiUsageCharts, { AiRequestDetail, moodName } from './AiUsageCharts'
 import DataTable, { type Column } from './DataTable'
 import Stat from './Stat'
 import { Alert, Badge, Confirm, Field, Spinner, fmtDateTime } from './ui'
@@ -108,7 +109,15 @@ export function AiCardPanel({ restaurantId, mood, onFilled, onMood }: {
 
 // ---- The group's own panel (on Billing): on or off, the level, the rewards, and every request ------------------
 
-const requestColumns = (withRestaurant: boolean): Column<AiRequestRow>[] => [
+/** Whether the person kept the assistant's face and reward on the card they saved, or changed them. */
+const changed = (r: AiRequestRow) => {
+  if (r.outcome !== 'ok' || r.commentId == null) return null
+  const face = r.finalMood != null && r.mood != null && r.finalMood !== r.mood
+  const reward = (r.finalOffer ?? '').toLowerCase() !== (r.offer ?? '').toLowerCase()
+  return face && reward ? 'face and reward changed' : face ? 'face changed' : reward ? 'reward changed' : 'kept'
+}
+
+const requestColumns = (withRestaurant: boolean, onOpen: (r: AiRequestRow) => void): Column<AiRequestRow>[] => [
   { key: 'at', label: 'When', value: (r) => r.at, render: (r) => fmtDateTime(r.at) },
   { key: 'by', label: 'Who', value: (r) => r.by },
   ...(withRestaurant ? [{ key: 'restaurant', label: 'Restaurant', value: (r: AiRequestRow) => r.restaurant }] : []),
@@ -119,10 +128,28 @@ const requestColumns = (withRestaurant: boolean): Column<AiRequestRow>[] => [
         : <>{r.guest ? `${r.guest} ` : ''}<Badge kind="warn" title="Process was pressed, and no card was saved from it">no card saved</Badge></>),
   },
   { key: 'reason', label: 'Reason', value: (r) => r.reason ?? null },
+  { key: 'face', label: 'Face it picked', value: (r) => (r.outcome === 'ok' ? moodName(r.mood) : null) },
+  {
+    key: 'kept', label: 'Kept or changed', value: changed,
+    render: (r) => {
+      const c = changed(r)
+      return c == null ? <span className="muted">—</span> : c === 'kept' ? <Badge kind="ok">kept</Badge>
+        : <Badge kind="warn" title={`${moodName(r.mood)} → ${moodName(r.finalMood)}; ${r.offer ?? 'none'} → ${r.finalOffer ?? 'none'}`}>{c}</Badge>
+    },
+  },
   { key: 'level', label: 'Level', value: (r) => r.level },
+  { key: 'effort', label: 'Effort', value: (r) => r.effort ?? 'low', csvOnly: true },
+  { key: 'typed', label: 'What was typed', value: (r) => r.input ?? '', csvOnly: true },
+  { key: 'faceSaved', label: 'Face on the saved card', value: (r) => (r.commentId != null ? moodName(r.finalMood ?? r.mood) : ''), csvOnly: true },
+  { key: 'reward', label: 'Reward it suggested', value: (r) => r.offer ?? '', csvOnly: true },
+  { key: 'rewardSaved', label: 'Reward on the saved card', value: (r) => (r.commentId != null ? r.finalOffer ?? '' : ''), csvOnly: true },
   {
     key: 'price', label: 'Charged', num: true, value: (r) => r.priceMills / 1000,
     render: (r) => (r.outcome === 'ok' ? aiDollars(r.priceMills) : <Badge kind="neutral" title="It did not work, so it was not charged">not charged</Badge>),
+  },
+  {
+    key: 'open', label: '', value: () => null, noSort: true, noCsv: true,
+    render: (r) => <button type="button" className="btn btn-sm" onClick={() => onOpen(r)} aria-label="Show what was typed and what the assistant filled in">Show</button>,
   },
 ]
 
@@ -135,6 +162,7 @@ export function AiGroupPanel() {
   const [s, setS] = useState<AiSettings | null>(null)
   const [usage, setUsage] = useState<AiUsageList | null>(null)
   const [month, setMonth] = useState(thisMonth())
+  const [opened, setOpened] = useState<AiRequestRow | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -171,7 +199,7 @@ export function AiGroupPanel() {
       <h2>AI assistant {s.on ? <Badge kind="ok">on</Badge> : <Badge kind="neutral">off</Badge>}</h2>
       <p className="muted">
         On Enter Card, the assistant reads what someone types about a guest’s visit and fills in the card, picks how upset the guest was (which sets the
-        reward) and, when asked, drafts an email. A person always checks it before the card is saved. You are charged for each press of Process, on your monthly bill.
+        reward) and drafts an email to the guest. A person always checks it before the card is saved. You are charged for each press of Process, on your monthly bill.
       </p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {!s.ready && s.on && <Alert kind="warn">The assistant is switched on for you, but it is not set up on this site yet, so it does not appear on Enter Card. Ask the site’s administrator.</Alert>}
@@ -223,7 +251,11 @@ export function AiGroupPanel() {
       </p>
       {!s.canChange && <p className="muted small">Your investment group’s administrators choose the level and the rewards.</p>}
 
-      <h3 style={{ marginTop: '1.25rem' }}>Every request</h3>
+      <h3 style={{ marginTop: '1.25rem' }}>How it is being used</h3>
+      <p className="muted">
+        Every press of Process in a month: who used it and how much, what it cost, how upset it judged guests to be, and how often your people kept its face
+        and reward or changed them. “Show” on a request gives what was typed and everything the assistant filled in.
+      </p>
       <div className="filters">
         <label>Month<input type="month" value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} /></label>
       </div>
@@ -234,10 +266,12 @@ export function AiGroupPanel() {
             {usage.requests > usage.charged ? `, ${usage.requests - usage.charged} that did not work and were not charged` : ''}
             {usage.notSaved > 0 ? `. ${usage.notSaved} of the charged ones did not become a saved card.` : '.'}
           </p>
-          <DataTable<AiRequestRow> title="Requests" rows={usage.rows} columns={requestColumns(true)} rowKey={(r) => r.id} filename={`ai-assistant-${month}.csv`}
+          {usage.charts && usage.requests > 0 && <AiUsageCharts charts={usage.charts} />}
+          <DataTable<AiRequestRow> title="Every request" rows={usage.rows} columns={requestColumns(true, setOpened)} rowKey={(r) => r.id} filename={`ai-assistant-${month}.csv`}
             defaultSort={{ key: 'at', desc: true }} empty="No requests in this month." />
         </>
       )}
+      {opened && <AiRequestDetail row={opened} onClose={() => setOpened(null)} />}
     </div>
   )
 }
@@ -505,6 +539,7 @@ export function AiUsageSection({ from, to, groupIds, restaurantIds }: { from: st
             <Stat value={cost(data.costMicros)} label="cost to you" />
             <Stat value={data.notSaved.toLocaleString()} label="charged, but no card was saved" warn={data.notSaved > 0} />
           </div>
+          {data.charts && <div style={{ marginBottom: '1rem' }}><AiUsageCharts charts={data.charts} forSite /></div>}
           <DataTable<AiUsageBucket> title="By investment group" rows={data.byGroup} columns={bucketColumns('Investment group')} rowKey={(b) => b.key} filename={`ai-by-group-${from}-to-${to}.csv`} defaultSort={{ key: 'requests', desc: true }} empty="None." />
           <DataTable<AiUsageBucket> title="By restaurant" rows={data.byRestaurant} columns={bucketColumns('Restaurant')} rowKey={(b) => b.key} filename={`ai-by-restaurant-${from}-to-${to}.csv`} defaultSort={{ key: 'requests', desc: true }} empty="None." />
           <DataTable<AiUsageBucket> title="By level" rows={data.byLevel} columns={bucketColumns('Level')} rowKey={(b) => b.key} filename={`ai-by-level-${from}-to-${to}.csv`} empty="None." />
@@ -522,6 +557,12 @@ export function AiUsageSection({ from, to, groupIds, restaurantIds }: { from: st
                 render: (r) => (r.outcome !== 'ok' ? <span className="muted">—</span> : r.commentId ? <>Card {r.commentId}{r.guest ? ` · ${r.guest}` : ''}</> : <><Badge kind="warn">no card saved</Badge>{r.guest ? ` ${r.guest}` : ''}</>),
               },
               { key: 'level', label: 'Level', value: (r) => r.level },
+              { key: 'kept', label: 'Kept or changed', value: changed, render: (r) => { const c = changed(r); return c == null ? <span className="muted">—</span> : <Badge kind={c === 'kept' ? 'ok' : 'warn'}>{c}</Badge> } },
+              { key: 'effort', label: 'Effort', value: (r) => r.effort ?? 'low', csvOnly: true },
+              { key: 'face', label: 'Face it picked', value: (r) => (r.outcome === 'ok' ? moodName(r.mood) : ''), csvOnly: true },
+              { key: 'faceSaved', label: 'Face on the saved card', value: (r) => (r.commentId != null ? moodName(r.finalMood ?? r.mood) : ''), csvOnly: true },
+              { key: 'reward', label: 'Reward it suggested', value: (r) => r.offer ?? '', csvOnly: true },
+              { key: 'rewardSaved', label: 'Reward on the saved card', value: (r) => (r.commentId != null ? r.finalOffer ?? '' : ''), csvOnly: true },
               { key: 'model', label: 'Model', value: (r) => r.model ?? '', csvOnly: true },
               { key: 'tokens', label: 'Tokens in / out', value: (r) => `${r.inputTokens ?? 0} / ${r.outputTokens ?? 0}` },
               { key: 'price', label: 'Billed', num: true, value: (r) => r.priceMills / 1000, render: (r) => (r.outcome === 'ok' ? aiDollars(r.priceMills) : <Badge kind="neutral">failed</Badge>) },
@@ -537,10 +578,7 @@ export function AiUsageSection({ from, to, groupIds, restaurantIds }: { from: st
           />
         </>
       )}
-      {opened && (
-        <Confirm title={`Request ${opened.id} · ${fmtDateTime(opened.at)}`} confirmLabel="Close" onConfirm={() => setOpened(null)} onCancel={() => setOpened(null)}
-          message={`${opened.by} at ${opened.restaurant}${opened.group ? ` (${opened.group})` : ''}. ${opened.outcome === 'ok' ? `Billed ${aiDollars(opened.priceMills)}.` : `Failed, not billed: ${opened.error ?? ''}`} ${opened.commentId ? `Saved as card ${opened.commentId}.` : opened.outcome === 'ok' ? 'No card was saved from it.' : ''}\n\nWhat was typed:\n${opened.input ?? ''}`} />
-      )}
+      {opened && <AiRequestDetail row={opened} forSite onClose={() => setOpened(null)} />}
     </div>
   )
 }

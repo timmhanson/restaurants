@@ -32,7 +32,16 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("CostMicros")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Effort")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("FinalMood")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FinalOffer")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("GroupId")
