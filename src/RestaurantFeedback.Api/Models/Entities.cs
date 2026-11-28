@@ -68,8 +68,10 @@ public enum ManagerPermission
     DesignCards = 8192,
     /// <summary>Switch the AI assistant on or off (where the group decides), and choose its level and the reward each face stands for. Owner-only.</summary>
     ManageAiAssistant = 16384,
+    /// <summary>Spend money: press Process on the AI assistant when entering a card (each press is charged to the group). For owners and managers; team logins never hold it.</summary>
+    UseAiAssistant = 32768,
     All = ViewComments | EditComments | DeleteComments | MarkResponded | ViewAnalytics | ExportComments | ViewAudit | ManageTeamLogin | BuyPostage | SetFollowUpDays
-        | ManageStaff | SetPermissions | EditRestaurants | DesignCards | ManageAiAssistant
+        | ManageStaff | SetPermissions | EditRestaurants | DesignCards | ManageAiAssistant | UseAiAssistant
 }
 
 /// <summary>An investment / ownership group. The tenant boundary for users and restaurants.</summary>

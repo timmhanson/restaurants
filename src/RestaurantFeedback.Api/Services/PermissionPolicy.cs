@@ -62,7 +62,7 @@ public static class PermissionPolicy
         _ => ManagerPermission.None
     };
 
-    public static bool SpendsMoney(ManagerPermission p) => p == ManagerPermission.BuyPostage;
+    public static bool SpendsMoney(ManagerPermission p) => p is ManagerPermission.BuyPostage or ManagerPermission.UseAiAssistant;
 
     public static List<PermissionState> States(OwnerGroup? g)
     {
@@ -99,6 +99,7 @@ public static class PermissionPolicy
         ManagerPermission.SetPermissions => "Choose what each manager may do",
         ManagerPermission.EditRestaurants => "Add restaurants, and change a restaurant's details and coupon card settings",
         ManagerPermission.DesignCards => "Change a restaurant's coupon card design",
+        ManagerPermission.UseAiAssistant => "Spend money: use the AI assistant to fill in a card (each press of Process is charged)",
         ManagerPermission.ManageAiAssistant => "Switch the AI assistant on or off where the group decides, and choose its level and rewards",
         _ => p.ToString()
     };

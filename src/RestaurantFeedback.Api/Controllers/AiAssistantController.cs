@@ -19,8 +19,9 @@ namespace RestaurantFeedback.Api.Controllers;
 /// It spends the group's money, a little each time, so: it is off for every group until the System Administrator
 /// switches it on or leaves that to the group; the price is on the button; a group cannot be charged past its
 /// monthly limit; a press that arrives twice is answered and charged once; a request that fails is not charged; and
-/// every press is kept (AiRequest) with who, when, what was typed and the card it led to, if any. Anyone who can
-/// enter a card where it is on can use it, as with the fee for a card printed by hand. What was typed is never
+/// every press is kept (AiRequest) with who, when, what was typed and the card it led to, if any. Pressing Process
+/// needs the UseAiAssistant permission, which owners and managers hold as the levels above allow; the shared team
+/// login never does, so it does not see the assistant. What was typed is never
 /// written to the audit or interaction logs. Groups are never told which company's model is behind a level.
 /// </summary>
 [ApiController]
@@ -48,7 +49,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
     {
         var me = await users.GetAsync();
         var off = new AiConfigDto(false, null, 0, null, []);
-        if (me.GroupId is not int groupId || !me.CanAccessRestaurant(restaurantId) || !drafter.Configured) return off;
+        if (me.GroupId is not int groupId || !me.CanAccessRestaurant(restaurantId) || !drafter.Configured || !me.Has(ManagerPermission.UseAiAssistant)) return off;
         var rules = AiPolicy.For(await Row(groupId, ct), options);
         if (!rules.On) return off;
         return new AiConfigDto(true, rules.Level.Label, rules.Level.PriceMills, AiLevels.Price(rules.Level.PriceMills), Faces(await settingsStore.GetAsync(groupId, ct)));
@@ -59,6 +60,7 @@ public class AiAssistantController(AppDbContext db, CurrentUserProvider users, I
     {
         var me = await users.GetAsync();
         if (me.GroupId is not int groupId || !me.CanAccessRestaurant(req.RestaurantId)) return Forbid();
+        if (!me.Has(ManagerPermission.UseAiAssistant)) return StatusCode(403, new { message = "You have not been given permission to use the AI assistant. Fill in the card yourself, or ask your owner or administrator." });
         var key = req.RequestKey.Trim();
         var settings = await settingsStore.GetAsync(groupId, ct);
         var faces = Faces(settings);

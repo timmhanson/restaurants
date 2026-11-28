@@ -118,7 +118,9 @@ card; sending it from the site is not built yet.
   cent ("mills"); a month's requests go onto the bill as a line of their own for each restaurant, in whole cents.
 - **Money rules.** The price is on the button; a group cannot be charged past its monthly limit; each press
   carries its own key, so a press that arrives twice is answered and charged once; a try that fails is recorded
-  and not charged. Anyone who can enter a card where it is on can use it, as with the hand-print fee.
+  and not charged. Pressing Process needs the `UseAiAssistant` permission, which shows on the Permissions
+  screens with the others: administrators hold it, owners do unless it is taken away, managers only when it is
+  given to them, and the shared team login never (so it does not see the assistant at all).
 - **Every press is kept** (`AiRequest`, `AiLedger`): who, when, where, the level, what it was charged, what was
   typed, what came back, the tokens used and what it cost the site, and the card saved from it (the card form
   sends the keys of its requests when it saves). A request that never became a card stays on record as "no card

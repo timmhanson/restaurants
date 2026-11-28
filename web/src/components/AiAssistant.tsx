@@ -224,6 +224,10 @@ export function AiGroupPanel() {
         ))}
       </div>
       {saved && <p className="muted small" style={{ margin: '0.4rem 0 0' }}>Saved.</p>}
+      <p className="muted small" style={{ margin: '0.4rem 0 0' }}>
+        Who can press Process is a permission, “Use the AI assistant”: administrators and owners can unless that has been switched off, managers only when it is
+        given to them, and the shared team login never. It is set with the other permissions.
+      </p>
       {!s.canChange && <p className="muted small">Your investment group’s administrators choose the level and the rewards.</p>}
 
       <h3 style={{ marginTop: '1.25rem' }}>Every request</h3>

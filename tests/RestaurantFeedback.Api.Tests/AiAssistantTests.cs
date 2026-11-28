@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RestaurantFeedback.Api.Data;
 using RestaurantFeedback.Api.Dtos;
@@ -78,6 +79,24 @@ public class AiAssistantTests(ApiFactory factory)
             var raw = await (await owner.GetAsync("/api/ai/settings")).Content.ReadAsStringAsync();
             Assert.DoesNotContain("claude", raw, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("anthropic", raw, StringComparison.OrdinalIgnoreCase);
+
+            // Pressing Process is a permission. A manager without it, and the shared team login, do not see the assistant and cannot use it.
+            foreach (var (name, role) in new[] { ("ai-manager", "Manager"), ("ai-team", "TeamMember") })
+                Assert.Equal(HttpStatusCode.Created, (await owner.PostAsJsonAsync("/api/users", new UserRequest { Username = name, DisplayName = name, Password = "AiTest!12345", Role = role, RestaurantIds = [rid] })).StatusCode);
+            // (They would be asked to choose a new password at first sign-in; that is not what is being tested here.)
+            await Db(async db => { foreach (var u in db.Users.Where(u => u.Username == "ai-manager" || u.Username == "ai-team")) u.MustChangePassword = false; return await db.SaveChangesAsync(); });
+            foreach (var name in new[] { "ai-manager", "ai-team" })
+            {
+                var who = await factory.LoginAsync(name, "AiTest!12345");
+                Assert.False((await who.GetFromJsonAsync<AiConfigDto>($"/api/ai/config?restaurantId={rid}"))!.Enabled);
+                var refused = await who.PostAsJsonAsync("/api/ai/process", new AiProcessRequest($"k-{name}", rid, Typed, false));
+                Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            }
+            // Given the permission, the manager can; a team login cannot be given it.
+            var managerId = await Db(async db => (await db.Users.FirstAsync(u => u.Username == "ai-manager")).Id);
+            Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/users/{managerId}", new UserRequest { Username = "ai-manager", DisplayName = "ai-manager", Role = "Manager", RestaurantIds = [rid], Permissions = ["UseAiAssistant"] })).StatusCode);
+            Assert.True((await (await factory.LoginAsync("ai-manager", "AiTest!12345")).GetFromJsonAsync<AiConfigDto>($"/api/ai/config?restaurantId={rid}"))!.Enabled);
+            Assert.Equal(callsBefore, factory.Ai.Calls);
 
             // A press: the card's fields come back, the face stands for one of the group's rewards, and it is charged once.
             var pressed = await Press("k-1", email: true);
@@ -171,7 +190,12 @@ public class AiAssistantTests(ApiFactory factory)
         finally
         {
             await ForGroup(new AiGroupRequest(false, false, AiLevels.Balanced, null, UseDefaultLimit: true, MaxLevel: AiLevels.Thorough));
-            await Db(async db => { db.AiRequests.RemoveRange(db.AiRequests.Where(r => r.GroupId == groupId)); return await db.SaveChangesAsync(); });
+            await Db(async db =>
+            {
+                db.AiRequests.RemoveRange(db.AiRequests.Where(r => r.GroupId == groupId));
+                db.Users.RemoveRange(db.Users.Where(u => u.Username == "ai-manager" || u.Username == "ai-team"));
+                return await db.SaveChangesAsync();
+            });
         }
     }
 
