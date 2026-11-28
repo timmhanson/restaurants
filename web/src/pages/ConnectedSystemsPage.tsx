@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { SystemStatus } from '../api/types'
+import AddressCheckingPanel from '../components/AddressCheckingPanel'
+import GeocodioPanel from '../components/GeocodioPanel'
 import PostGridSitePanel from '../components/PostGridSitePanel'
 import StripePanel from '../components/StripePanel'
 import UspsAccountPanel from '../components/UspsAccountPanel'
@@ -9,13 +11,19 @@ import { Alert, Badge } from '../components/ui'
 
 /**
  * The outside services the site connects to, for the System Administrator: where the accounts for them are
- * entered (USPS, PostGrid, Stripe) and, for the ones managed elsewhere, where that is.
+ * entered (Geocodio, USPS, PostGrid, Stripe) and, for the ones managed elsewhere, where that is. Which of the
+ * address services checks guest addresses is chosen at the top.
  */
 export default function ConnectedSystemsPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Goes up when a key is saved or removed, so the choice of address service shows what is set up now.
+  const [version, setVersion] = useState(0)
+  const [chosen, setChosen] = useState<string | null>(null)
+
   const load = useCallback(() => {
+    setVersion((v) => v + 1)
     api.get<SystemStatus>('/system/status').then(setStatus).catch((e) => setError((e as Error).message))
   }, [])
   useEffect(load, [load])
@@ -28,8 +36,10 @@ export default function ConnectedSystemsPage() {
       <p className="muted">The outside services this site uses, and the account each one runs on.</p>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
 
+      <AddressCheckingPanel version={version} onChosen={setChosen} />
+      <GeocodioPanel onChanged={load} chosen={chosen} />
       <UspsAccountPanel onChanged={load} />
-      <PostGridSitePanel onChanged={load} />
+      <PostGridSitePanel onChanged={load} chosen={chosen} />
       <StripePanel onChanged={load} />
 
       <div className="panel">

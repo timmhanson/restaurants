@@ -213,13 +213,27 @@ work as a fallback when nothing is entered in the site. The audit log records, p
 version passed over), including when a card is saved without choosing. Answers are remembered for a day and checks pause when USPS says it is busy, to stay within
 USPS's request allowance. USPS allows this only to help send mail, which is what it is used for.
 
-PostGrid can check addresses too (`PostGridAddressVerifier`, PostGrid Address Verification, which uses USPS
-data), as a backup for USPS or instead of it. The System Administrator enters PostGrid's *Address
-Verification* API key under **Connected Systems, PostGrid, Checking guest addresses** (`PostGridAddressAccountStore`,
-encrypted the same way) and picks **USPS first** (PostGrid answers only when USPS is not set up or cannot answer)
-or **PostGrid first**. `AddressCheckers` asks them in that order and moves to the next whenever one cannot
-answer. PostGrid charges per lookup after its free allowance, billed to the account whose key is entered; the
-`PostGrid__AddressApiKey` app setting is a fallback when nothing is entered in the site.
+Three services can check addresses, and the System Administrator chooses which one does, on **Connected
+Systems, Checking guest addresses** (`AddressServiceChoice`, `GET/PUT /api/system/address-checking`; the choice
+saves as it is made, and only a service that is set up can be chosen):
+
+- **Geocodio** (`GeocodioAddressVerifier`, `GET /geocode` with `fields=zip4`): finds the address at its house
+  number and how it is properly written, and from the post office's ZIP+4 data says whether mail is delivered
+  there and whether a unit number is missing or not known. An address placed only at a street, a town or the
+  nearest other building counts as not found. Each check uses two lookups (the address and the ZIP+4 data);
+  answers are remembered for a day. The key is entered under **Connected Systems, Geocodio**
+  (`GeocodioAccountStore`, encrypted, never shown again; `Geocodio__ApiKey` is a fallback) and travels in a
+  header, never in the address of the request. Entering it for the first time makes Geocodio the chosen
+  service. Geocodio does not offer addresses as they are typed.
+- **USPS**, as above.
+- **PostGrid** (`PostGridAddressVerifier`, PostGrid Address Verification, which uses USPS data), with its *Address
+  Verification* API key under **Connected Systems, PostGrid, Checking guest addresses**
+  (`PostGridAddressAccountStore`, encrypted the same way; `PostGrid__AddressApiKey` is a fallback). It charges
+  per lookup after its free allowance.
+
+`AddressCheckers` asks the chosen service, and moves to the others that are set up (Geocodio, USPS, PostGrid, in
+that order) only when it cannot answer, so one outage never switches address checking off. Removing a service's
+key is how to make sure it is never asked. Nothing said to a person entering a card names any of these companies.
 
 **Addresses offered as the street is typed.** With that key entered, the street address box on Enter Card offers
 addresses that begin the way the street has been typed, for restaurants that have their cards printed and mailed
@@ -441,7 +455,7 @@ A System Administrator oversees the whole site, not restaurants, and has a menu 
 | **People** | everyone with access: group, restaurants, account state, last sign-in, last seen; reset password, suspend/restore, add and edit System Administrators; **Open in group** to change roles or restaurants |
 | **Reports**, **Activity log**, **Audit log** | see below |
 | **Billing** | what mailed cards cost and the site's fee (for every group and per group), monthly limits, when and how bills go out, every bill and whether it is paid, and what was mailed month by month |
-| **Connected Systems** | the accounts for outside services the whole site uses, each with Save and test: USPS and PostGrid's address verification key (and which is asked first), PostGrid's Print & Mail key (mails every group's cards), and Stripe (takes payment for mailing bills); EasyPost and email are summarised with where each is managed |
+| **Connected Systems** | the accounts for outside services the whole site uses, each with Save and test: which service checks guest addresses (Geocodio, USPS or PostGrid) with each one's key or account, PostGrid's Print & Mail key (mails every group's cards), and Stripe (takes payment for mailing bills); EasyPost and email are summarised with where each is managed |
 | **Security** | sign-ins, failed sign-ins by username, refused access, requests from out-of-date copies, accounts to look at, the System Administrators |
 | **System status** | version, uptime, database size and row counts, settings storage, email service (with a test email), 24-hour request and error figures, recent server errors with what went wrong, slowest requests |
 

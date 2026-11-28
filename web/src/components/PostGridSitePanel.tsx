@@ -9,15 +9,14 @@ import { Alert, Badge, Confirm, Field, Spinner, fmtDateTime } from './ui'
  * PostGrid on Connected Systems: the site's Print & Mail key, which prints and mails every investment group's cards
  * on the site's own PostGrid account, and its address verification key (checks guest addresses before or after USPS).
  */
-export default function PostGridSitePanel({ onChanged }: { onChanged?: () => void }) {
+export default function PostGridSitePanel({ onChanged, chosen }: { onChanged?: () => void; chosen?: string | null }) {
   const [site, setSite] = useState<PostGridSite | null>(null)
   const [key, setKey] = useState('')
-  const [useFirst, setUseFirst] = useState(false)
   const [entering, setEntering] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [test, setTest] = useState<ServiceTestResult | null>(null)
-  const [busy, setBusy] = useState<'save' | 'test' | 'remove' | 'order' | null>(null)
+  const [busy, setBusy] = useState<'save' | 'test' | 'remove' | null>(null)
 
   useEffect(() => {
     api.get<PostGridSite>('/system/postgrid').then(setSite).catch((e) => setError((e as Error).message))
@@ -42,7 +41,8 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
     setError(null)
     setTest(null)
     try {
-      setSite(await api.put<PostGridSite>('/system/postgrid', { apiKey: key, useFirst }))
+      // Which service checks addresses is chosen at the top of the page; replacing the key leaves that as it is.
+      setSite(await api.put<PostGridSite>('/system/postgrid', { apiKey: key, useFirst: chosen ? chosen === 'postgrid' : site?.useFirst ?? false }))
       setKey('')
       setEntering(false)
       onChanged?.()
@@ -50,19 +50,6 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
       await runTest()
     } catch (err) {
       setError((err as Error).message)
-      setBusy(null)
-    }
-  }
-
-  const setOrder = async (first: boolean) => {
-    setBusy('order')
-    setError(null)
-    try {
-      setSite(await api.put<PostGridSite>('/system/postgrid/order', { useFirst: first }))
-      onChanged?.()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
       setBusy(null)
     }
   }
@@ -141,7 +128,8 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
 
           <h3>Checking guest addresses</h3>
           <p className="muted">
-            PostGrid can also check each guest address as a card is entered, against USPS data, as a backup for USPS or instead of it. It uses a separate
+            PostGrid can also check each guest address as a card is entered, against USPS data. Whether it is the service that checks them is chosen at the
+            top of this page, under “Checking guest addresses”. It uses a separate
             Address Verification key (in PostGrid: Address Verification, Developers). New accounts get some free lookups; after that PostGrid charges per
             lookup, billed to the account whose key is entered here.
           </p>
@@ -164,24 +152,15 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
                       ? `${site.savedAt ? fmtDateTime(site.savedAt) : ''}${site.savedBy ? ` by ${site.savedBy}` : ''}`
                       : 'In the web app’s settings in Azure. Entering a key here takes over from it.'}
                   </dd>
-                  <dt>Order</dt>
+                  <dt>Used</dt>
                   <dd>
-                    <div className="source-choice two" role="radiogroup" aria-label="Which service checks addresses first">
-                      <label className={!site.useFirst ? 'selected' : ''}>
-                        <input type="radio" name="pg-order" checked={!site.useFirst} disabled={busy !== null || site.source !== 'Saved in the site'} onChange={() => void setOrder(false)} />
-                        <span className="source-label">USPS first</span>
-                        <span className="source-hint">PostGrid is asked only when USPS is not set up or cannot answer.</span>
-                      </label>
-                      <label className={site.useFirst ? 'selected' : ''}>
-                        <input type="radio" name="pg-order" checked={site.useFirst} disabled={busy !== null || site.source !== 'Saved in the site'} onChange={() => void setOrder(true)} />
-                        <span className="source-label">PostGrid first</span>
-                        <span className="source-hint">USPS is asked only when PostGrid cannot answer.</span>
-                      </label>
-                    </div>
+                    {(chosen ? chosen === 'postgrid' : site.useFirst)
+                      ? <Badge kind="ok">checks guest addresses</Badge>
+                      : <Badge kind="neutral" title="Choose PostGrid under Checking guest addresses, at the top of this page">a backup, and offers addresses as they are typed</Badge>}
                   </dd>
                 </dl>
               ) : (
-                <p><Badge kind="neutral">not set up</Badge> Only USPS checks addresses, when its account is set up.</p>
+                <p><Badge kind="neutral">not set up</Badge> PostGrid does not check addresses, and no addresses are offered as they are typed.</p>
               )}
 
               {entering || !site.configured ? (
@@ -189,10 +168,6 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
                   <Field label="PostGrid Address Verification API key" hint="Stored encrypted and never shown again.">
                     <input type="password" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" spellCheck={false} required minLength={12} />
                   </Field>
-                  <label className="check">
-                    <input type="checkbox" checked={useFirst} onChange={(e) => setUseFirst(e.target.checked)} />
-                    <span>Ask PostGrid before USPS <span className="muted">(leave unticked to use PostGrid only when USPS cannot answer)</span></span>
-                  </label>
                   <div className="row-actions">
                     {entering && <button type="button" className="btn" onClick={() => { setEntering(false); setKey('') }} disabled={busy !== null}>Cancel</button>}
                     <button type="submit" className="btn btn-primary" disabled={busy !== null || key.trim().length < 12}>{busy === 'save' ? 'Saving…' : 'Save and test'}</button>
@@ -201,7 +176,7 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
               ) : (
                 <div className="row-actions" style={{ marginTop: '0.75rem' }}>
                   <button type="button" className="btn btn-primary" onClick={() => void runTest()} disabled={busy !== null}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>
-                  <button type="button" className="btn" onClick={() => { setEntering(true); setUseFirst(site.useFirst) }} disabled={busy !== null}>Replace key</button>
+                  <button type="button" className="btn" onClick={() => setEntering(true)} disabled={busy !== null}>Replace key</button>
                   {site.source === 'Saved in the site' && (
                     <button type="button" className="btn btn-danger" onClick={() => setRemoving(true)} disabled={busy !== null}>Remove</button>
                   )}
@@ -214,7 +189,7 @@ export default function PostGridSitePanel({ onChanged }: { onChanged?: () => voi
       {removing && (
         <Confirm
           title="Remove the PostGrid address key?"
-          message="PostGrid will no longer check guest addresses; USPS still does if its account is set up. Mailing cards is not affected. Nothing is changed at PostGrid."
+          message="PostGrid will no longer check guest addresses or offer them as they are typed; another service still checks them if one is set up. Mailing cards is not affected. Nothing is changed at PostGrid."
           confirmLabel="Remove"
           danger
           busy={busy === 'remove'}

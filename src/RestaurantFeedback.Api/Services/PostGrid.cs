@@ -1069,24 +1069,28 @@ public class PostGridAddressVerifier(HttpClient http, PostGridAddressAccountStor
 }
 
 /// <summary>
-/// The site's address checking: USPS and PostGrid, in the order the System Administrator chose. When the first cannot
-/// answer (not set up, refused, busy or down) the second is asked, so one outage never switches checking off.
+/// The site's address checking: Geocodio, USPS and PostGrid. The one the System Administrator chose on Connected
+/// Systems is asked; when it cannot answer (not set up, refused, busy or down) the others that are set up are
+/// asked in turn, so one outage never switches checking off.
 /// </summary>
-public class AddressCheckers(UspsAddressVerifier usps, PostGridAddressVerifier postGrid, PostGridAddressAccountStore postGridAccount) : IAddressVerifier
+public class AddressCheckers(UspsAddressVerifier usps, PostGridAddressVerifier postGrid, GeocodioAddressVerifier geocodio, AddressServiceChoice choice) : IAddressVerifier
 {
     public UspsAddressVerifier Usps => usps;
     public PostGridAddressVerifier PostGrid => postGrid;
+    public GeocodioAddressVerifier Geocodio => geocodio;
 
-    private IAddressVerifier[] Order => postGridAccount.Current?.UseFirst == true ? [postGrid, usps] : [usps, postGrid];
+    public IAddressVerifier Of(string service) => service switch { AddressServices.Geocodio => geocodio, AddressServices.PostGrid => postGrid, _ => usps };
 
-    public bool Configured => usps.Configured || postGrid.Configured;
+    private IAddressVerifier[] Order => AddressServices.Order(choice.First).Select(Of).ToArray();
+
+    public bool Configured => usps.Configured || postGrid.Configured || geocodio.Configured;
 
     public string Description
     {
         get
         {
             var on = Order.Where(v => v.Configured).Select(v => v.Description).ToList();
-            return on.Count switch { 0 => "Not set up", 1 => on[0], _ => $"{on[0]}, then {on[1]} when it cannot answer" };
+            return on.Count switch { 0 => "Not set up", 1 => on[0], _ => $"{on[0]}, then {string.Join(", then ", on.Skip(1))} when it cannot answer" };
         }
     }
 

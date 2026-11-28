@@ -769,6 +769,25 @@ export interface PostageAccount {
   provider: string
 }
 
+/** Which service checks guest addresses (first), and which of them are set up. The others set up are the fallback. */
+export interface AddressChecking {
+  first: 'geocodio' | 'usps' | 'postgrid' | string
+  services: { id: string; name: string; configured: boolean }[]
+  canChoose: boolean
+}
+
+/** The site's Geocodio key for address checking. The key never reaches the browser, only its last four characters. */
+export interface GeocodioSite {
+  configured: boolean
+  source: 'Saved in the site' | 'App settings' | 'None'
+  keyEnding?: string | null
+  savedAt?: string | null
+  savedBy?: string | null
+  canEnter: boolean
+  /** Geocodio is the service chosen to check addresses. */
+  inUse: boolean
+}
+
 /** The site's USPS account for address checking. Neither the key nor the secret ever reaches the browser. */
 export interface UspsAccount {
   configured: boolean

@@ -84,6 +84,10 @@ builder.Services.AddSingleton<UspsAccountStore>();
 var postGrid = config.GetSection("PostGrid").Get<PostGridOptions>() ?? new PostGridOptions();
 builder.Services.AddSingleton(postGrid);
 builder.Services.AddSingleton<PostGridAddressAccountStore>();
+var geocodio = config.GetSection("Geocodio").Get<GeocodioOptions>() ?? new GeocodioOptions();
+builder.Services.AddSingleton(geocodio);
+builder.Services.AddSingleton<GeocodioAccountStore>();
+builder.Services.AddSingleton<AddressServiceChoice>();
 builder.Services.AddSingleton<SiteMailing>();
 builder.Services.AddSingleton<DatabaseHealth>();
 builder.Services.AddSingleton<CardCodes>();
@@ -120,6 +124,7 @@ else
 {
     builder.Services.AddHttpClient<UspsAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
     builder.Services.AddHttpClient<PostGridAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
+    builder.Services.AddHttpClient<GeocodioAddressVerifier>(c => c.Timeout = TimeSpan.FromSeconds(8));
     builder.Services.AddTransient<IAddressVerifier, AddressCheckers>();
 }
 // Addresses offered as the street is typed. Locally, with stand-ins switched on, they are made up.
@@ -253,6 +258,8 @@ app.MapFallbackToFile("index.html", CachePolicy.StaticFiles());
 await DbSeeder.SeedAsync(app.Services);
 await app.Services.GetRequiredService<UspsAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<PostGridAddressAccountStore>().LoadAsync();
+await app.Services.GetRequiredService<GeocodioAccountStore>().LoadAsync();
+await app.Services.GetRequiredService<AddressServiceChoice>().LoadAsync();
 await app.Services.GetRequiredService<SiteMailing>().LoadAsync();
 await app.Services.GetRequiredService<CardCodes>().LoadAsync();
 await app.Services.GetRequiredService<PaymentAccountStore>().LoadAsync();

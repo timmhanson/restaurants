@@ -710,6 +710,20 @@ public record UspsAccountRequest(string? ConsumerKey, string? ConsumerSecret, bo
 public record UspsAccountDto(bool Configured, string Source, string? KeyEnding, bool TestEnvironment, DateTime? SavedAt, string? SavedBy, bool CanEnter);
 public record ServiceTestResult(bool Ok, string Message);
 
+// ---- Which service checks guest addresses, and the site's Geocodio key ----------------------------------------
+
+/// <param name="Id">geocodio, usps or postgrid.</param>
+/// <param name="Configured">Its key or account has been entered, so it can be chosen and asked.</param>
+public record AddressServiceDto(string Id, string Name, bool Configured);
+/// <param name="First">The service that checks addresses. The others that are set up are asked only when it cannot answer.</param>
+/// <param name="CanChoose">False on a copy of the site that uses a stand-in address service.</param>
+public record AddressCheckingDto(string First, List<AddressServiceDto> Services, bool CanChoose);
+public record AddressCheckingRequest(string? First);
+public record GeocodioKeyRequest(string? ApiKey);
+/// <param name="KeyEnding">The last four characters of the key; the key is never returned.</param>
+/// <param name="InUse">Geocodio is the service chosen to check addresses.</param>
+public record GeocodioDto(bool Configured, string Source, string? KeyEnding, DateTime? SavedAt, string? SavedBy, bool CanEnter, bool InUse);
+
 // ---- PostGrid: the site's mailing account, prices and limits, and its address verification key -----------------
 
 /// <param name="UseFirst">Ask PostGrid before USPS (otherwise PostGrid is the backup for when USPS cannot answer).</param>

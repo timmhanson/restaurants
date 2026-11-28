@@ -19,7 +19,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Authorize(Roles = "SuperAdmin")]
 public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnvironment env, IGroupSettingsStore settingsStore, IEmailSender mail,
     InteractionLogOptions logOptions, AuditService audit, CurrentUserProvider users, IPostageProvider postage, CardFollowUps followUps,
-    IAddressVerifier addressVerifier, IAddressSuggester addressSuggester, DatabaseHealth databaseHealth, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
+    IAddressVerifier addressVerifier, IAddressSuggester addressSuggester, GeocodioAccountStore geocodioAccount, AddressServiceChoice addressChoice, DatabaseHealth databaseHealth, UspsAccountStore uspsAccount, PostGridAddressAccountStore postGridAccount, SiteMailing siteMailing, IPostGridMailer mailer,
     MailLedger ledger, PaymentAccountStore payAccount, IPaymentProvider payments, PaymentOptions paymentOptions, DatabaseBackups backups) : ControllerBase
 {
     private const string SignIn = "Login";
@@ -119,7 +119,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         if (never > 0)
             attention.Add(new("medium", $"{never} {(never == 1 ? "person has" : "people have")} never signed in", "Their accounts were created more than two days ago.", "/people?status=never"));
         if (!addressVerifier.Configured)
-            attention.Add(new("info", "Guest addresses are not being checked", "Enter the site's USPS account or a PostGrid address verification key on Connected Systems to switch address checking on.", "/connected-systems"));
+            attention.Add(new("info", "Guest addresses are not being checked", "Enter a Geocodio key, the site's USPS account or a PostGrid address verification key on Connected Systems to switch address checking on.", "/connected-systems"));
         // Said here and nowhere inside a group: which company does this is the site's business.
         if (!addressSuggester.Configured && (siteMailing.Live is not null || siteMailing.Test is not null))
             attention.Add(new("info", "Addresses are not offered as they are typed",
@@ -325,6 +325,96 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             : new UspsAccountDto(true, a.Source, a.ClientId.Length >= 4 ? a.ClientId[^4..] : null, a.BaseUrl.Contains("-tem."), a.SavedAt, a.SavedBy, real);
     }
 
+    // ---- Which service checks guest addresses, and the site's Geocodio key ------------------------------------------
+
+    [HttpGet("address-checking")]
+    public AddressCheckingDto AddressChecking() => AddressCheckingNow();
+
+    /// <summary>
+    /// Chooses the service that checks guest addresses: Geocodio, USPS or PostGrid. Only one that is set up can be
+    /// chosen. The others that are set up stay as the fallback for when the chosen one cannot answer.
+    /// </summary>
+    [HttpPut("address-checking")]
+    public async Task<ActionResult<AddressCheckingDto>> SetAddressChecking(AddressCheckingRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var first = (req.First ?? "").Trim().ToLowerInvariant();
+        if (!AddressServices.All.Contains(first)) return BadRequest(new { message = "Choose Geocodio, USPS or PostGrid." });
+        if (!ServiceSetUp(first)) return BadRequest(new { message = $"{AddressServices.Name(first)} is not set up yet. Enter its key below first." });
+        var before = addressChoice.First;
+        await addressChoice.SetAsync(first, me.DisplayName, ct);
+        if (before != first) await audit.LogAsync(me, "AddressCheckOrderChanged", details: new { First = AddressServices.Name(first), Was = AddressServices.Name(before) });
+        return AddressCheckingNow();
+    }
+
+    [HttpGet("geocodio")]
+    public GeocodioDto Geocodio() => GeocodioNow();
+
+    /// <summary>
+    /// Saves the Geocodio API key, encrypted; it is never shown again or written to any log. Entering the key for
+    /// the first time also makes Geocodio the service that checks addresses (it can be changed back above).
+    /// </summary>
+    [HttpPut("geocodio")]
+    public async Task<ActionResult<GeocodioDto>> SetGeocodio(GeocodioKeyRequest req, CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var key = (req.ApiKey ?? "").Trim();
+        if (key.Length is < 12 or > 200 || key.Any(char.IsWhiteSpace))
+            return BadRequest(new { message = "Enter the API key exactly as Geocodio shows it (dash.geocod.io, API Keys), with no spaces." });
+        var isNew = geocodioAccount.Current is null;
+        await geocodioAccount.SaveAsync(key, me.DisplayName, ct);
+        await audit.LogAsync(me, "GeocodioKeySet", details: new { KeyEnding = key[^4..] });
+        if (isNew && addressChoice.First != AddressServices.Geocodio)
+        {
+            var before = addressChoice.First;
+            await addressChoice.SetAsync(AddressServices.Geocodio, me.DisplayName, ct);
+            await audit.LogAsync(me, "AddressCheckOrderChanged", details: new { First = "Geocodio", Was = AddressServices.Name(before) });
+        }
+        return GeocodioNow();
+    }
+
+    [HttpDelete("geocodio")]
+    public async Task<ActionResult<GeocodioDto>> RemoveGeocodio(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var before = geocodioAccount.Current;
+        await geocodioAccount.RemoveAsync(ct);
+        if (before?.Source == "Saved in the site") await audit.LogAsync(me, "GeocodioKeyRemoved", details: new { KeyEnding = before.ApiKey[^4..] });
+        return GeocodioNow();
+    }
+
+    /// <summary>Looks up one known address with the saved key, to prove it works. Uses two of the account's lookups.</summary>
+    [HttpPost("geocodio/test")]
+    public async Task<ServiceTestResult> TestGeocodio(CancellationToken ct)
+    {
+        var me = await users.GetAsync();
+        var (ok, message) = addressVerifier is AddressCheckers all
+            ? await all.Geocodio.TestAsync(ct)
+            : (false, "Geocodio cannot be tested on this copy of the site (it uses a stand-in address service).");
+        await audit.LogAsync(me, ok ? "GeocodioTestPassed" : "GeocodioTestFailed", details: new { message });
+        return new ServiceTestResult(ok, message);
+    }
+
+    private bool ServiceSetUp(string service) => service switch
+    {
+        AddressServices.Geocodio => geocodioAccount.Current is not null,
+        AddressServices.PostGrid => postGridAccount.Current is not null,
+        _ => uspsAccount.Current is not null
+    };
+
+    private AddressCheckingDto AddressCheckingNow() =>
+        new(addressChoice.First, AddressServices.All.Select(s => new AddressServiceDto(s, AddressServices.Name(s), ServiceSetUp(s))).ToList(), addressVerifier is AddressCheckers);
+
+    private GeocodioDto GeocodioNow()
+    {
+        var a = geocodioAccount.Current;
+        var real = addressVerifier is AddressCheckers;
+        var inUse = a is not null && addressChoice.First == AddressServices.Geocodio;
+        return a is null
+            ? new GeocodioDto(false, "None", null, null, null, real, false)
+            : new GeocodioDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.SavedAt, a.SavedBy, real, inUse);
+    }
+
     // ---- PostGrid: the site's address verification key, and how groups use PostGrid for mailing -------------------
 
     [HttpGet("postgrid")]
@@ -340,6 +430,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
             return BadRequest(new { message = "Enter the address verification API key exactly as PostGrid shows it (Address Verification, Developers), with no spaces." });
         await postGridAccount.SaveAsync(key, req.UseFirst, me.DisplayName, ct);
         await audit.LogAsync(me, "PostGridAddressKeySet", details: new { KeyEnding = key[^4..], req.UseFirst });
+        await PostGridFirst(req.UseFirst, me, ct);
         return await PostGridDto(ct);
     }
 
@@ -350,8 +441,18 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var me = await users.GetAsync();
         if (!await postGridAccount.SetUseFirstAsync(req.UseFirst, me.DisplayName, ct))
             return BadRequest(new { message = "Save a PostGrid address verification key first." });
-        await audit.LogAsync(me, "AddressCheckOrderChanged", details: new { First = req.UseFirst ? "PostGrid" : "USPS" });
+        await PostGridFirst(req.UseFirst, me, ct);
         return await PostGridDto(ct);
+    }
+
+    /// <summary>"Ask PostGrid first" (or not), said the older way, becomes the one choice of which service checks addresses.</summary>
+    private async Task PostGridFirst(bool first, CurrentUser me, CancellationToken ct)
+    {
+        var before = addressChoice.First;
+        var now = first ? AddressServices.PostGrid : before == AddressServices.PostGrid ? AddressServices.Usps : before;
+        if (now == before) return;
+        await addressChoice.SetAsync(now, me.DisplayName, ct);
+        await audit.LogAsync(me, "AddressCheckOrderChanged", details: new { First = AddressServices.Name(now), Was = AddressServices.Name(before) });
     }
 
     [HttpDelete("postgrid")]
@@ -437,7 +538,7 @@ public class SystemAdminController(AppDbContext db, AppInfo app, IWebHostEnviron
         var real = addressVerifier is AddressCheckers;
         return a is null
             ? new PostGridSiteDto(false, "None", null, false, null, null, real, mail, mailed, tests, thisMonth) { MailTestKey = Key(siteMailing.Test, true), MailLiveKey = Key(siteMailing.Live, false) }
-            : new PostGridSiteDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, a.UseFirst, a.SavedAt, a.SavedBy, real, mail, mailed, tests, thisMonth)
+            : new PostGridSiteDto(true, a.Source, a.ApiKey.Length >= 4 ? a.ApiKey[^4..] : null, addressChoice.First == AddressServices.PostGrid, a.SavedAt, a.SavedBy, real, mail, mailed, tests, thisMonth)
             {
                 MailTestKey = Key(siteMailing.Test, true), MailLiveKey = Key(siteMailing.Live, false)
             };
