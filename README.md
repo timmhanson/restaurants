@@ -81,6 +81,39 @@ send each card carried, cards printed and marked sent, and refusals from the aud
   service every half hour about the cards it has not finished with, and Follow Up asks when it opens
   (`POST /api/comments/mail/refresh`), so "waiting to print" is never left standing.
 
+### The AI assistant on Enter Card
+
+Where it is switched on, Enter Card starts with a box: the person types what happened in their own words, ticks
+"Also draft an email" if one is wanted, and presses **Process**. The assistant (`IAiDrafter`, `ClaudeDrafter`:
+one Messages API request to Claude with a JSON schema, no tools) reads it and fills in the card for them to check:
+the guest, the visit, the reason (only ever one from the group's own list), a short account for managers, and how
+upset the guest was as one of five faces (`AiMoods`, 🙂 to 😡). Each face stands for one of the group's rewards
+(`GroupSettings.AiRewards`, else its offers spread in order), which goes on the card; picking another face changes
+the reward. What was typed is treated as material to read, never as instructions. Nothing is saved until the card
+is. The card also has an optional email section (the guest's address, a subject and the email), kept with the
+card; sending it from the site is not built yet.
+
+- **Off by default, handed down like every other setting** (`AiPolicy`, `GroupBilling.AiEnabled`,
+  `GroupChoice.Ai`). The System Administrator sets each group, in its Edit dialog (`PUT /api/system/groups/{id}/ai`):
+  off, on for the group, or "the group decides", plus the most it may be charged in a month. Where the group
+  decides, its administrators, and owners who hold `ManageAiAssistant`, switch it on or off on their Billing page
+  (`AiGroupPanel`, `PUT /api/ai/settings`), where they also choose the level and the reward for each face. Where it
+  is off, the section is simply not on the card form (`GET /api/ai/config`).
+- **Levels and prices** (`AiLevels`): Quick (0.1¢ a request), Balanced (1.8¢) and Most thorough (3¢), which run on
+  Claude Haiku 5.5, Sonnet 5.5 and Opus 5.5. Groups see the labels and prices and "the assistant", never the
+  company or the model; those names are on Connected Systems and Reports only. Prices are kept in tenths of a
+  cent ("mills"); a month's requests go onto the bill as a line of their own for each restaurant, in whole cents.
+- **Money rules.** The price is on the button; a group cannot be charged past its monthly limit; each press
+  carries its own key, so a press that arrives twice is answered and charged once; a try that fails is recorded
+  and not charged. Anyone who can enter a card where it is on can use it, as with the hand-print fee.
+- **Every press is kept** (`AiRequest`, `AiLedger`): who, when, where, the level, what it was charged, what was
+  typed, what came back, the tokens used and what it cost the site, and the card saved from it (the card form
+  sends the keys of its requests when it saves). A request that never became a card stays on record as "no card
+  saved". The group sees its requests on Billing; the System Administrator sees them all on **Reports, AI
+  assistant** (`GET /api/system/ai/usage`), by group, restaurant, level and day, with what each cost.
+- **The site's key** is entered on Connected Systems (`AiAccountStore`, encrypted, never shown again;
+  `Ai__ApiKey` is a fallback). What was typed is never written to the audit or interaction logs.
+
 ### Who decides what: handed down level by level
 
 Permissions and settings are decided from the top down, and a decision made higher up takes precedence

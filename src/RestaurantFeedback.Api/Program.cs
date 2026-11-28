@@ -88,6 +88,15 @@ var geocodio = config.GetSection("Geocodio").Get<GeocodioOptions>() ?? new Geoco
 builder.Services.AddSingleton(geocodio);
 builder.Services.AddSingleton<GeocodioAccountStore>();
 builder.Services.AddSingleton<AddressServiceChoice>();
+// ---- The AI assistant on Enter Card (optional; off for every group until switched on) ----
+var ai = config.GetSection("Ai").Get<AiOptions>() ?? new AiOptions();
+builder.Services.AddSingleton(ai);
+builder.Services.AddSingleton<AiAccountStore>();
+builder.Services.AddScoped<AiLedger>();
+if (ai.Sample && builder.Environment.IsDevelopment())
+    builder.Services.AddSingleton<IAiDrafter, SampleAiDrafter>();
+else
+    builder.Services.AddSingleton<IAiDrafter, ClaudeDrafter>();
 builder.Services.AddSingleton<SiteMailing>();
 builder.Services.AddSingleton<DatabaseHealth>();
 builder.Services.AddSingleton<CardCodes>();
@@ -259,6 +268,7 @@ await DbSeeder.SeedAsync(app.Services);
 await app.Services.GetRequiredService<UspsAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<PostGridAddressAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<GeocodioAccountStore>().LoadAsync();
+await app.Services.GetRequiredService<AiAccountStore>().LoadAsync();
 await app.Services.GetRequiredService<AddressServiceChoice>().LoadAsync();
 await app.Services.GetRequiredService<SiteMailing>().LoadAsync();
 await app.Services.GetRequiredService<CardCodes>().LoadAsync();

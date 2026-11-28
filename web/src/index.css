@@ -77,6 +77,19 @@ table.compact tr:last-child td { border-bottom: none; }
 .app.system .sidenav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; border-left-color: #ffd23f; }
 .app.system .nav-section { color: #8fa0bb; }
 .sidenav a { padding: 0.6rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; display: flex; align-items: center; gap: 0.5rem; }
+/* The AI assistant's faces: how upset the guest was, each with the reward it stands for. */
+.ai-panel { border-color: var(--accent); }
+.panel > h3 { margin: 1rem 0 0.35rem; }
+.ai-faces { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+.ai-face { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; padding: 0.55rem 0.4rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card, #fff); cursor: pointer; font: inherit; text-align: center; min-width: 0; }
+.ai-face:hover:not(:disabled):not(.static) { border-color: var(--accent); }
+.ai-face.on { border-color: var(--accent); background: var(--info-bg); box-shadow: inset 0 0 0 2px var(--accent); }
+.ai-face.static { cursor: default; }
+.ai-face-emoji { font-size: 1.9rem; line-height: 1.1; }
+.ai-face-label { font-weight: 600; font-size: 0.85rem; }
+.ai-face-reward { font-size: 0.78rem; color: var(--muted); }
+.ai-face select { width: 100%; font-size: 0.8rem; margin-top: 0.2rem; }
+@media (max-width: 700px) { .ai-faces { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* A heading over a group of panels, e.g. the kinds of outside service on Connected Systems. */
 .section-head { margin: 1.75rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 2px solid var(--accent); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
 /* How many are waiting, beside a tab: a red bubble, as on a phone's home screen. */

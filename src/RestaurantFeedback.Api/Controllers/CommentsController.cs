@@ -15,7 +15,7 @@ namespace RestaurantFeedback.Api.Controllers;
 [Route("api/comments")]
 [Authorize]
 public class CommentsController(AppDbContext db, AuditService audit, IGroupSettingsStore settingsStore, CurrentUserProvider users,
-    CommentSummaryBuilder summaries, CardFollowUps followUps, IAddressVerifier addresses) : ControllerBase
+    CommentSummaryBuilder summaries, CardFollowUps followUps, IAddressVerifier addresses, AiLedger aiLedger) : ControllerBase
 {
     /// <summary>Comments for one restaurant, or every restaurant the user can see when restaurantId is omitted.</summary>
     [HttpGet]
@@ -249,6 +249,8 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
             new { Guest = $"{c.GuestFirstName} {c.GuestLastName}", c.Source, c.VisitDate, c.Reason, c.CouponOffer, Forced = req.Force, check.PriorCount }, c.RestaurantId);
         await AuditAddressChoice(me, c, req, verdict);
         c.Restaurant = await db.Restaurants.FindAsync([c.RestaurantId], ct) ?? new Restaurant();
+        // The AI assistant requests made while filling this card in are tied to it, for the bill.
+        await aiLedger.LinkAsync(req.AiRequestKeys, c, c.Restaurant.GroupId, ct);
         return CreatedAtAction(nameof(Get), new { id = c.Id }, CommentSummary.From(c, check.PriorCount + 1));
     }
 
@@ -377,6 +379,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
             EnteredAt = c.CreatedAt, EnteredBy = c.CreatedByName, LastChangedAt = c.UpdatedAt, c.LastActivityAt,
             Replied = c.Responded, c.RepliedOn, c.ReplyMethod, ReplyConfirmedAt = c.RespondedAt, ReplyConfirmedBy = c.RespondedByName,
             CardSentAt = c.SentAt, CardSentBy = c.SentByName, InTheMailAt = c.InMailAt,
+            c.GuestEmail, c.EmailSubject, c.EmailBody, c.Mood,
             c.PrintedAt, c.PrintedByName, c.PrintCount, c.PrintFeeCents, c.PrintFeeAt,
             c.PostageCents, c.PostageTest, c.PostageTrackingCode, c.PostagePurchasedAt, c.PostageByName,
             MailedForYou = c.MailId is not null, MailReference = c.MailId, c.MailStatus, c.MailedAt, c.MailedByName, MailTestOrder = c.MailTest,
@@ -552,6 +555,8 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         c.Reason = settings.ReasonCategories.First(r => r.Equals(req.Reason, StringComparison.OrdinalIgnoreCase));
         c.ReasonDetails = req.ReasonDetails?.Trim();
         c.Notes = req.Notes?.Trim();
+        static string? Kept(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+        (c.GuestEmail, c.EmailSubject, c.EmailBody, c.Mood) = (Kept(req.GuestEmail), Kept(req.EmailSubject), Kept(req.EmailBody), req.Mood);
         c.PhoneNormalized = GuestMatcher.NormalizePhone(req.Phone);
         c.NameNormalized = GuestMatcher.NormalizeName(req.GuestFirstName, req.GuestLastName);
         c.GuestKey = GuestMatcher.BuildGuestKey(req.GuestFirstName, req.GuestLastName, req.Phone, req.StreetAddress, req.Zip);

@@ -28,6 +28,12 @@ public class GroupSettings
         "Mailed coupon card", "Phone call", "Email", "Text message", "In person"
     ];
 
+    /// <summary>
+    /// The reward each face of the AI assistant stands for, from 🙂 (a small slip) to 😡 (furious): five entries, each
+    /// one of CouponOffers. Empty, or an entry no longer on that list, falls back to the offers spread in order.
+    /// </summary>
+    public List<string> AiRewards { get; set; } = [];
+
     /// <summary>"This coupon is good for 3 months from date of issue."</summary>
     public int CouponValidityMonths { get; set; } = 3;
 

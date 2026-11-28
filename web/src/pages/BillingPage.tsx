@@ -1,3 +1,4 @@
+import { AiGroupPanel } from '../components/AiAssistant'
 import BillSplitPanel from '../components/BillSplitPanel'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -233,6 +234,8 @@ export default function BillingPage() {
           )}
         </div>
       )}
+
+      <AiGroupPanel />
 
       <div className="panel">
         <h2>Cards mailed, month by month</h2>

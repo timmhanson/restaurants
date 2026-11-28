@@ -112,6 +112,8 @@ public record GroupTerms(int CostCents, int FeeCents, int LimitCents, bool HasPa
 
 public record InvoiceLine(int RestaurantId, string Restaurant, int Cards, int Cents)
 {
+    /// <summary>AI assistant requests (Cards is then how many), not cards.</summary>
+    public bool Ai { get; init; }
     /// <summary>Cards the restaurant printed itself for a stamp by hand (the site's fee only), not cards mailed for it.</summary>
     public bool Printed { get; init; }
 }
@@ -236,7 +238,7 @@ public class MailLedger(AppDbContext db, SiteMailing site)
 /// Monthly bills for mailed cards: creating them for a finished month, emailing them (and posting a printed copy
 /// when that is switched on), and charging a group's saved payment method. Every step writes an audit row.
 /// </summary>
-public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger, IEmailSender email, IPostGridMailer mailer, IPaymentProvider payments,
+public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger, AiLedger aiLedger, IEmailSender email, IPostGridMailer mailer, IPaymentProvider payments,
     PaymentAccountStore payAccount, AuditService audit, ILogger<BillingService> log)
 {
     public const string Schedule = "Billing schedule";
@@ -254,7 +256,9 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         if (MailLedger.Range(month) is not { } range) throw new InvalidOperationException("Choose a month.");
         if (range.To > DateTime.UtcNow) throw new InvalidOperationException($"{MailLedger.MonthName(month)} is not over yet. Bills are created once the month has ended.");
         var rows = (await ledger.ChargesAsync(null, ct)).Where(c => c.At >= range.From && c.At < range.To)
-            .Select(c => new { c.GroupId, c.RestaurantId, c.Restaurant, Cost = c.CostCents, Fee = c.FeeCents, c.Printed }).ToList();
+            .Select(c => new { c.GroupId, c.RestaurantId, c.Restaurant, Cost = c.CostCents, Fee = c.FeeCents, c.Printed, Ai = false, Units = 1 }).ToList();
+        // The month's AI assistant requests: one row for each restaurant, in whole cents, counted apart from cards.
+        rows.AddRange((await aiLedger.MonthAsync(range.From, range.To, ct)).Select(a => new { a.GroupId, a.RestaurantId, a.Restaurant, Cost = 0, Fee = a.Cents, Printed = false, Ai = true, Units = a.Requests }));
         var have = await db.MailInvoices.Where(i => i.Month == month).Select(i => i.GroupId).ToListAsync(ct);
         var settings = site.Billing;
         var splits = await db.GroupBilling.AsNoTracking().ToDictionaryAsync(b => b.GroupId, BillSplits.Of, ct);
@@ -277,13 +281,13 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
                 var cost = u.Sum(r => r.Cost);
                 var fee = u.Sum(r => r.Fee);
                 // Cards mailed for the restaurant and cards it printed itself are separate lines, mailed first.
-                var lines = u.GroupBy(r => new { r.RestaurantId, r.Restaurant, r.Printed }).OrderBy(r => r.Key.Restaurant).ThenBy(r => r.Key.Printed)
-                    .Select(r => new InvoiceLine(r.Key.RestaurantId, r.Key.Restaurant, r.Count(), r.Sum(x => x.Cost + x.Fee)) { Printed = r.Key.Printed }).ToList();
+                var lines = u.GroupBy(r => new { r.RestaurantId, r.Restaurant, r.Printed, r.Ai }).OrderBy(r => r.Key.Restaurant).ThenBy(r => r.Key.Ai).ThenBy(r => r.Key.Printed)
+                    .Select(r => new InvoiceLine(r.Key.RestaurantId, r.Key.Restaurant, r.Sum(x => x.Units), r.Sum(x => x.Cost + x.Fee)) { Printed = r.Key.Printed, Ai = r.Key.Ai }).ToList();
                 var first = u.First();
                 mine.Add(new MailInvoice
                 {
                     GroupId = g.Key, Month = month, Unit = whole ? "" : u.Key, UnitName = whole ? null : UnitOf(first.RestaurantId, first.Restaurant).Name,
-                    Number = $"{month.Replace("-", "")}-{g.Key:000}" + (whole ? "" : $"-{n + 1:00}"), Cards = u.Count(), CostCents = cost, FeeCents = fee,
+                    Number = $"{month.Replace("-", "")}-{g.Key:000}" + (whole ? "" : $"-{n + 1:00}"), Cards = u.Count(r => !r.Ai), CostCents = cost, FeeCents = fee,
                     TotalCents = cost + fee, LinesJson = JsonSerializer.Serialize(lines, Json), IssuedAt = DateTime.UtcNow,
                     DueOn = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(settings.DueDays)
                 });
@@ -565,8 +569,8 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         sb.Append($"<p><strong>Bill {H(i.Number)}</strong> for {H(string.IsNullOrWhiteSpace(billing?.BillingName) ? group : billing!.BillingName)}{(i.UnitName is null ? "" : $": {H(i.UnitName)}")}<br>");
         sb.Append($"Coupon cards for {H(MailLedger.MonthName(i.Month))}<br>");
         sb.Append($"Date {i.IssuedAt.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} &middot; Due {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}</p>");
-        sb.Append("<table><tr><th>Restaurant</th><th class=\"n\">Cards</th><th class=\"n\">Amount</th></tr>");
-        foreach (var l in Lines(i)) sb.Append($"<tr><td>{H(l.Restaurant)}<br><span class=\"muted\">{(l.Printed ? "Printed by you, stamped by hand" : "Printed and mailed for you")}</span></td><td class=\"n\">{l.Cards}</td><td class=\"n\">{Dollars(l.Cents)}</td></tr>");
+        sb.Append("<table><tr><th>Restaurant</th><th class=\"n\">How many</th><th class=\"n\">Amount</th></tr>");
+        foreach (var l in Lines(i)) sb.Append($"<tr><td>{H(l.Restaurant)}<br><span class=\"muted\">{(l.Ai ? "AI assistant requests" : l.Printed ? "Printed by you, stamped by hand" : "Printed and mailed for you")}</span></td><td class=\"n\">{l.Cards}</td><td class=\"n\">{Dollars(l.Cents)}</td></tr>");
         if (i.CreditCents > 0)
         {
             sb.Append($"<tr class=\"total\"><td>Total</td><td class=\"n\">{i.Cards}</td><td class=\"n\">{Dollars(i.TotalCents)}</td></tr>");
@@ -592,7 +596,10 @@ public class BillingService(AppDbContext db, SiteMailing site, MailLedger ledger
         var sb = new StringBuilder();
         sb.AppendLine($"{s.BusinessName}: bill {i.Number} for {group}{(i.UnitName is null ? "" : $": {i.UnitName}")}");
         sb.AppendLine($"Coupon cards for {MailLedger.MonthName(i.Month)}");
-        foreach (var l in Lines(i)) sb.AppendLine($"  {l.Restaurant}, {(l.Printed ? "printed by you" : "mailed for you")}: {l.Cards} card{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}");
+        foreach (var l in Lines(i))
+            sb.AppendLine(l.Ai
+                ? $"  {l.Restaurant}, AI assistant: {l.Cards} request{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}"
+                : $"  {l.Restaurant}, {(l.Printed ? "printed by you" : "mailed for you")}: {l.Cards} card{(l.Cards == 1 ? "" : "s")}, {Dollars(l.Cents)}");
         if (i.CreditCents > 0) sb.AppendLine($"Total: {Dollars(i.TotalCents)}, less your credit of {Dollars(i.CreditCents)}");
         sb.AppendLine(Due(i) == 0 && i.CreditCents > 0 ? "Nothing to pay: your credit covered this bill."
             : $"Total due: {Dollars(Due(i))} by {i.DueOn.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}");

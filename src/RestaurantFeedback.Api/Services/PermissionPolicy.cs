@@ -32,7 +32,7 @@ public static class PermissionPolicy
     public const string Yes = "yes", No = "no", Group = "group", Each = "each", All = "all", None = "none", Site = "site", Owners = "owners";
 
     /// <summary>Permissions that belong to owners and are never given to a manager.</summary>
-    public const ManagerPermission OwnerOnly = ManagerPermission.ManageStaff | ManagerPermission.SetPermissions | ManagerPermission.EditRestaurants | ManagerPermission.DesignCards;
+    public const ManagerPermission OwnerOnly = ManagerPermission.ManageStaff | ManagerPermission.SetPermissions | ManagerPermission.EditRestaurants | ManagerPermission.DesignCards | ManagerPermission.ManageAiAssistant;
     public const ManagerPermission ForManagers = ManagerPermission.All & ~OwnerOnly;
 
     public static IEnumerable<ManagerPermission> Each_() =>
@@ -99,6 +99,7 @@ public static class PermissionPolicy
         ManagerPermission.SetPermissions => "Choose what each manager may do",
         ManagerPermission.EditRestaurants => "Add restaurants, and change a restaurant's details and coupon card settings",
         ManagerPermission.DesignCards => "Change a restaurant's coupon card design",
+        ManagerPermission.ManageAiAssistant => "Switch the AI assistant on or off where the group decides, and choose its level and rewards",
         _ => p.ToString()
     };
 

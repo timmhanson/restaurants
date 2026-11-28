@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import type { AiProcessResponse } from '../api/types'
+import { AiCardPanel } from './AiAssistant'
 import { api, ApiError } from '../api/client'
 import { COMMENT_SOURCES, PHONE_SOURCE, type CommentRequest, type CommentSummary, type DuplicateCheckResult } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
@@ -27,6 +29,10 @@ export function emptyCard(restaurantId: number, offer = ''): CardFormValues {
     reason: '',
     reasonDetails: '',
     notes: '',
+    guestEmail: '',
+    emailSubject: '',
+    emailBody: '',
+    mood: null,
   }
 }
 
@@ -48,6 +54,10 @@ export function cardFromSummary(c: CommentSummary): CardFormValues {
     reason: c.reason,
     reasonDetails: c.reasonDetails ?? '',
     notes: c.notes ?? '',
+    guestEmail: c.guestEmail ?? '',
+    emailSubject: c.emailSubject ?? '',
+    emailBody: c.emailBody ?? '',
+    mood: c.mood ?? null,
   }
 }
 
@@ -102,6 +112,24 @@ interface Props {
 export default function CardForm({ initial, editingId, onSaved, onCancel, submitLabel }: Props) {
   const { restaurants, settings, has, isTeamMember, user } = useAuth()
   const [v, setV] = useState<CardFormValues>(initial)
+  // The optional email to the guest, and the AI assistant's requests made while this card is filled in.
+  const [emailOpen, setEmailOpen] = useState(Boolean(initial.guestEmail || initial.emailBody))
+  const [aiKeys, setAiKeys] = useState<string[]>([])
+  /** What the assistant read is put into the card, leaving alone anything it was not told. The person checks it all. */
+  const fillFromAssistant = (a: AiProcessResponse) => {
+    const f = a.fields
+    setAiKeys((keys) => [...keys, a.requestKey])
+    setNeedsForce(false)
+    setV((s) => ({
+      ...s,
+      guestFirstName: f.guestFirstName ?? s.guestFirstName, guestLastName: f.guestLastName ?? s.guestLastName, phone: f.phone ?? s.phone,
+      streetAddress: f.streetAddress ?? s.streetAddress, city: f.city ?? s.city, state: f.state ?? s.state, zip: f.zip ?? s.zip,
+      visitDate: f.visitDate ?? s.visitDate, source: f.source ?? s.source, reason: f.reason ?? s.reason, reasonDetails: f.details ?? s.reasonDetails,
+      couponOffer: a.couponOffer ?? s.couponOffer, mood: f.mood,
+      guestEmail: f.email ?? s.guestEmail, emailSubject: f.emailSubject ?? s.emailSubject, emailBody: f.emailBody ?? s.emailBody,
+    }))
+    if (f.email || f.emailBody) setEmailOpen(true)
+  }
   // Who signs a new card unless another name is typed: a manager, owner or administrator signs with their own
   // name; a card entered with the shared team login takes the name set for its restaurant.
   const signsOwn = user?.role === 'Manager' || user?.role === 'Owner' || user?.role === 'GroupAdmin'
@@ -222,7 +250,10 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
     setBusy(true)
     try {
       const chose = addressChoice && addressChoice.address === addressLine(v) ? addressChoice : null
-      const body: CommentRequest = { ...v, source: v.source || null, force: needsForce, addressChoice: chose?.choice ?? null, addressAsTyped: chose?.typed ?? null }
+      const email = emailOpen
+        ? { guestEmail: v.guestEmail?.trim() || null, emailSubject: v.emailSubject?.trim() || null, emailBody: v.emailBody?.trim() || null }
+        : { guestEmail: null, emailSubject: null, emailBody: null }
+      const body: CommentRequest = { ...v, ...email, source: v.source || null, force: needsForce, addressChoice: chose?.choice ?? null, addressAsTyped: chose?.typed ?? null, aiRequestKeys: aiKeys }
       const saved = editingId ? await api.put<CommentSummary>(`/comments/${editingId}`, body) : await api.post<CommentSummary>('/comments', body)
       onSaved(saved)
     } catch (err) {
@@ -257,6 +288,17 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
     <form onSubmit={submit} ref={formRef}>
       {error && <Alert kind="error" onClose={() => setError(null)}>{error}</Alert>}
       {check && <DuplicateAlert check={check} showDetails={canSeeDetails} />}
+
+      {!editingId && (
+        <AiCardPanel
+          restaurantId={v.restaurantId}
+          mood={v.mood ?? null}
+          wantEmail={emailOpen}
+          onWantEmail={setEmailOpen}
+          onFilled={fillFromAssistant}
+          onMood={(face) => setV((s) => ({ ...s, mood: face.level, couponOffer: face.reward ?? s.couponOffer }))}
+        />
+      )}
 
       <fieldset className="panel source-panel">
         <legend>How did this comment come in?</legend>
@@ -426,6 +468,23 @@ export default function CardForm({ initial, editingId, onSaved, onCancel, submit
             </Field>
           )}
         </div>
+        <label className="check" style={{ marginTop: '0.75rem' }}>
+          <input type="checkbox" checked={emailOpen} onChange={(e) => setEmailOpen(e.target.checked)} />
+          <span>Also email the guest <span className="muted">(optional, as well as the coupon card)</span></span>
+        </label>
+        {emailOpen && (
+          <div className="visit-panel" style={{ marginTop: '0.5rem' }}>
+            <Field label="Guest’s email address">
+              <input type="email" value={v.guestEmail ?? ''} onChange={(e) => set('guestEmail', e.target.value)} autoComplete="off" maxLength={200} placeholder="name@example.com" />
+            </Field>
+            <Field label="Subject">
+              <input value={v.emailSubject ?? ''} onChange={(e) => set('emailSubject', e.target.value)} maxLength={200} />
+            </Field>
+            <Field label="Email to the guest" className="span2" hint="Kept with the card. Sending it from this site is coming; until then, copy it into your own email.">
+              <textarea rows={7} value={v.emailBody ?? ''} onChange={(e) => set('emailBody', e.target.value)} maxLength={4000} />
+            </Field>
+          </div>
+        )}
         <div className="actions">
           {checking && <span className="muted">Checking for duplicates…</span>}
           {onCancel && (

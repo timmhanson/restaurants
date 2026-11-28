@@ -66,8 +66,10 @@ public enum ManagerPermission
     EditRestaurants = 4096,
     /// <summary>Change a restaurant's coupon card design.</summary>
     DesignCards = 8192,
+    /// <summary>Switch the AI assistant on or off (where the group decides), and choose its level and the reward each face stands for. Owner-only.</summary>
+    ManageAiAssistant = 16384,
     All = ViewComments | EditComments | DeleteComments | MarkResponded | ViewAnalytics | ExportComments | ViewAudit | ManageTeamLogin | BuyPostage | SetFollowUpDays
-        | ManageStaff | SetPermissions | EditRestaurants | DesignCards
+        | ManageStaff | SetPermissions | EditRestaurants | DesignCards | ManageAiAssistant
 }
 
 /// <summary>An investment / ownership group. The tenant boundary for users and restaurants.</summary>
@@ -249,6 +251,14 @@ public class GuestComment
     /// </summary>
     public DateTime? InMailAt { get; set; }
 
+    // An email to the guest, as well as (never instead of) the card: optional. The address, and a reply written
+    // or drafted for it. Sending it from the site comes later; until then it is kept with the card to copy.
+    public string? GuestEmail { get; set; }
+    public string? EmailSubject { get; set; }
+    public string? EmailBody { get; set; }
+    /// <summary>How upset the guest was, 1 (a small slip) to 5 (furious), when a face was chosen on the card (AiMoods); null otherwise.</summary>
+    public int? Mood { get; set; }
+
     // Printing the coupon card onto a postcard
     public DateTime? PrintedAt { get; set; }
     public string? PrintedByName { get; set; }
@@ -359,6 +369,8 @@ public enum GroupChoice
     Usual = 4,
     /// <summary>The name that signs for the team login.</summary>
     Signature = 8,
+    /// <summary>Whether the AI assistant is switched on. Not left to groups by default: it is off until the System Administrator says otherwise.</summary>
+    Ai = 16,
     /// <summary>What a group decides for itself unless the System Administrator says otherwise: everything but switching mailing on.</summary>
     Default = Mode | Usual | Signature
 }
@@ -392,6 +404,15 @@ public class GroupBilling
     public string UsualWay { get; set; } = Services.MailChoices.Each;
     /// <summary>The name that signs team-login cards at every restaurant in the group. Empty: each restaurant decides.</summary>
     public string? SignatureForAll { get; set; }
+    /// <summary>
+    /// The AI assistant on Enter Card is switched on for this group. Off to begin with. Whose decision that is depends
+    /// on GroupDecides (GroupChoice.Ai): the System Administrator's, or left to the group.
+    /// </summary>
+    public bool AiEnabled { get; set; }
+    /// <summary>The level of the assistant the group chose (AiLevels); null is the usual one.</summary>
+    public string? AiLevel { get; set; }
+    /// <summary>The most the group may be charged for the assistant in a calendar month, in cents. Null uses the site's default.</summary>
+    public int? AiMonthlyLimitCents { get; set; }
     /// <summary>
     /// Whether this group must have a payment method saved before its cards can be mailed. Null follows the site's
     /// setting (required unless the System Administrator has switched that off).
@@ -684,6 +705,46 @@ public class CardImage
 }
 
 /// <summary>One entry in a comment's follow-up history, shared by every manager who can see the comment.</summary>
+/// <summary>
+/// One press of "Process" on the AI assistant: see AiLedger. Kept whether or not a card was ever saved from it, so
+/// every request a group is charged for can be shown with who made it, when, what was typed and what came back.
+/// </summary>
+public class AiRequest
+{
+    public int Id { get; set; }
+    /// <summary>Made by the browser for each press, so the same press arriving twice is answered once and charged once.</summary>
+    public string RequestKey { get; set; } = "";
+    public int GroupId { get; set; }
+    public int RestaurantId { get; set; }
+    public int? UserId { get; set; }
+    public string UserName { get; set; } = "";
+    public DateTime At { get; set; } = DateTime.UtcNow;
+    /// <summary>The level it ran at (AiLevels) and the model behind that level then.</summary>
+    public string Level { get; set; } = "";
+    public string Model { get; set; } = "";
+    /// <summary>What the group is charged for it, in tenths of a cent. 0 for a request that failed.</summary>
+    public int PriceMills { get; set; }
+    public bool WantEmail { get; set; }
+    /// <summary>ok or failed.</summary>
+    public string Outcome { get; set; } = "";
+    /// <summary>Why it failed, for the System Administrator.</summary>
+    public string? Error { get; set; }
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+    /// <summary>What the request cost the site, in millionths of a dollar.</summary>
+    public int CostMicros { get; set; }
+    /// <summary>What was typed, and the answer as JSON: the evidence for the charge, and what a repeated press is answered with.</summary>
+    public string Input { get; set; } = "";
+    public string? ResultJson { get; set; }
+    public string? GuestName { get; set; }
+    public string? Reason { get; set; }
+    public int? Mood { get; set; }
+    public string? Offer { get; set; }
+    /// <summary>The card saved from this request; null while (or if) none was.</summary>
+    public int? CommentId { get; set; }
+    public DateTime? LinkedAt { get; set; }
+}
+
 public class CommentActivity
 {
     public int Id { get; set; }

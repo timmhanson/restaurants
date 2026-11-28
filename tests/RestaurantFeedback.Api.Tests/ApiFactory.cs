@@ -50,6 +50,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     public FakeAddressSuggester Suggestions { get; } = new();
     public FakePostGridMailer Mail { get; } = new();
     public FakePayments Payments { get; } = new();
+    public FakeAiDrafter Ai { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -62,6 +63,7 @@ public class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<IAddressSuggester>(Suggestions);
             services.AddSingleton<IPostGridMailer>(Mail);
             services.AddSingleton<IPaymentProvider>(Payments);
+            services.AddSingleton<IAiDrafter>(Ai);
         });
     }
 
@@ -294,5 +296,28 @@ public class FakeAddressVerifier : IAddressVerifier
         return Task.FromResult(street.Contains("Avenue")
             ? new AddressCheck(AddressStatuses.Corrected, $"USPS writes this address as {suggestion.StreetAddress}.", suggestion)
             : new AddressCheck(AddressStatuses.Verified, "USPS delivers to this address.", suggestion));
+    }
+}
+
+/// <summary>Stands in for the AI assistant: reads a name and a mood out of the text without calling anything. "Outage" fails.</summary>
+public class FakeAiDrafter : IAiDrafter
+{
+    public bool Configured { get; set; } = true;
+    public int Calls { get; private set; }
+    public AiAsk? Last { get; private set; }
+    public string? LastModel { get; private set; }
+
+    public Task<AiAnswer> AskAsync(AiLevel level, AiAsk ask, CancellationToken ct = default)
+    {
+        Calls++;
+        (Last, LastModel) = (ask, level.Model);
+        if (ask.Text.Contains("Outage")) throw new AiException("The assistant could not be reached. Try again in a minute, or fill in the card yourself.", "Anthropic could not be reached.");
+        var mood = ask.Text.Contains("furious") ? 5 : ask.Text.Contains("angry") ? 4 : 2;
+        return Task.FromResult(new AiAnswer(new AiFields
+        {
+            GuestFirstName = "Dana", GuestLastName = "Typed", Phone = "815-555-0142", Email = ask.WantEmail ? "dana@example.com" : null, State = "Illinois",
+            VisitDate = ask.Today.AddDays(-1).ToString("yyyy-MM-dd"), Source = "Phone call", Reason = ask.Reasons[0], Details = "The burger was cold after a long wait.",
+            Mood = mood, MoodWhy = "Calm, but a real mistake.", EmailSubject = "About your visit", EmailBody = "Hello Dana,\n\nWe are sorry.\n\nThe restaurant"
+        }, 2000, 500));
     }
 }

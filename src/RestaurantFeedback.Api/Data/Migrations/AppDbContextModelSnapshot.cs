@@ -17,6 +17,100 @@ namespace RestaurantFeedback.Api.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
+            modelBuilder.Entity("RestaurantFeedback.Api.Models.AiRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CommentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CostMicros")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GroupId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("GuestName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Input")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("InputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LinkedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Mood")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Offer")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OutputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PriceMills")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RestaurantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WantEmail")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommentId");
+
+                    b.HasIndex("RequestKey")
+                        .IsUnique();
+
+                    b.HasIndex("GroupId", "At");
+
+                    b.ToTable("AiRequests");
+                });
+
             modelBuilder.Entity("RestaurantFeedback.Api.Models.AppUser", b =>
                 {
                     b.Property<int>("Id")
@@ -398,6 +492,15 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("GroupId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("AiEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AiLevel")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AiMonthlyLimitCents")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("AutoPay")
                         .HasColumnType("INTEGER");
 
@@ -566,6 +669,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<DateOnly>("DateIssued")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("EmailBody")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EmailSubject")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly>("ExpiresOn")
                         .HasColumnType("TEXT");
 
@@ -576,6 +685,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly?>("FollowedUpOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GuestEmail")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("GuestFirstName")
@@ -625,6 +737,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<string>("MailedByName")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("Mood")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("NameNormalized")
                         .IsRequired()

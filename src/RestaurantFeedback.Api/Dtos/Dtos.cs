@@ -171,6 +171,14 @@ public class CommentRequest
     [Required, MaxLength(100)] public string Reason { get; set; } = "";
     [MaxLength(2000)] public string? ReasonDetails { get; set; }
     [MaxLength(2000)] public string? Notes { get; set; }
+    /// <summary>Optional: the guest's email address and a reply to send them (sending from the site comes later).</summary>
+    [MaxLength(200), EmailAddress] public string? GuestEmail { get; set; }
+    [MaxLength(200)] public string? EmailSubject { get; set; }
+    [MaxLength(4000)] public string? EmailBody { get; set; }
+    /// <summary>How upset the guest was, 1 to 5, when a face was chosen.</summary>
+    [Range(1, 5)] public int? Mood { get; set; }
+    /// <summary>The AI assistant requests made while this card was being filled in (their keys), so they are tied to the card.</summary>
+    public List<string>? AiRequestKeys { get; set; }
     /// <summary>Set true to save even though a duplicate / repeat guest was detected.</summary>
     public bool Force { get; set; }
     /// <summary>
@@ -219,6 +227,11 @@ public record CommentSummary(
     public string? FollowedUpByName { get; init; }
     /// <summary>The day the guest should be followed up with; null when none is needed (not sent by mail, already done, redeemed, or turned off).</summary>
     public DateOnly? FollowUpDueOn { get; init; }
+    public string? GuestEmail { get; init; }
+    public string? EmailSubject { get; init; }
+    public string? EmailBody { get; init; }
+    /// <summary>How upset the guest was, 1 (a small slip) to 5 (furious); null when no face was chosen.</summary>
+    public int? Mood { get; init; }
     public string? ReplyMethod { get; init; }
     /// <summary>How many times the card has been sent (attempts that went, not refusals or cancellations).</summary>
     public int Sends { get; init; }
@@ -237,6 +250,7 @@ public record CommentSummary(
         c.GuestKey, guestCommentCount)
     {
         SentAt = c.SentAt, SentByName = c.SentByName, InMailAt = c.InMailAt,
+        GuestEmail = c.GuestEmail, EmailSubject = c.EmailSubject, EmailBody = c.EmailBody, Mood = c.Mood,
         Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
         PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest,
         PrintFeeCents = c.PrintFeeCents, CardId = c.PublicId, MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
@@ -709,6 +723,48 @@ public record UspsAccountRequest(string? ConsumerKey, string? ConsumerSecret, bo
 /// <param name="KeyEnding">The last four characters of the Consumer Key; neither the key nor the secret is ever returned.</param>
 public record UspsAccountDto(bool Configured, string Source, string? KeyEnding, bool TestEnvironment, DateTime? SavedAt, string? SavedBy, bool CanEnter);
 public record ServiceTestResult(bool Ok, string Message);
+
+// ---- The AI assistant on Enter Card --------------------------------------------------------------------------
+
+/// <summary>A face on the card: how upset the guest was, and the reward it stands for at this group.</summary>
+public record AiFaceDto(int Level, string Face, string Label, string Meaning, string? Reward);
+/// <summary>A level the group can choose. Groups get the label and the price, never which company's model it is.</summary>
+public record AiLevelDto(string Id, string Label, string Says, int PriceMills, string Price);
+/// <param name="Enabled">The assistant can be used for this restaurant now. False hides its section on the card.</param>
+public record AiConfigDto(bool Enabled, string? Level, int PriceMills, string? Price, List<AiFaceDto> Faces);
+public record AiProcessRequest([Required, MaxLength(64)] string RequestKey, int RestaurantId, [Required, MaxLength(4000)] string Text, bool WantEmail);
+/// <summary>What the assistant filled in. CouponOffer is the reward its face stands for.</summary>
+public record AiProcessResponse(string RequestKey, int PriceMills, string Price, Services.AiFields Fields, string? CouponOffer, List<AiFaceDto> Faces);
+/// <param name="DecidedBy">"site": the System Administrator decided whether it is on; "group": the group does.</param>
+/// <param name="CanChange">This person may change the level and rewards (and switch it on or off, when the group decides).</param>
+/// <param name="Ready">The site has the assistant set up. When false it cannot be used whatever is chosen here.</param>
+public record AiSettingsDto(bool On, string DecidedBy, bool CanChange, bool Ready, string Level, List<AiLevelDto> Levels, int LimitCents, int UsedMills, int UsedRequests,
+    List<AiFaceDto> Faces, List<string> Offers);
+public record AiSettingsRequest(bool? On, string? Level, List<string?>? Rewards);
+/// <summary>One request, for the group's Billing page and the System Administrator's analytics. Guest and CommentId say which card it was for; CommentId is null when no card was saved.</summary>
+public record AiRequestRow(int Id, DateTime At, string By, int GroupId, string? Group, int RestaurantId, string Restaurant, string Level, int PriceMills, string Outcome, bool WantEmail,
+    int? CommentId, string? Guest, string? Reason, int? Mood, string? Offer)
+{
+    /// <summary>System Administrator only: what was typed, the model, the tokens and what it cost the site (millionths of a dollar).</summary>
+    public string? Input { get; init; }
+    public string? Model { get; init; }
+    public int? InputTokens { get; init; }
+    public int? OutputTokens { get; init; }
+    public int? CostMicros { get; init; }
+    public string? Error { get; init; }
+}
+public record AiUsageList(int Requests, int Charged, int Mills, int NotSaved, List<AiRequestRow> Rows);
+// The System Administrator's side.
+public record AiKeyRequest(string? ApiKey);
+public record AiSiteLevelDto(string Id, string Label, string Model, int PriceMills, string Price, decimal InPerMillion, decimal OutPerMillion);
+public record AiSiteDto(bool Configured, string Source, string? KeyEnding, DateTime? SavedAt, string? SavedBy, bool CanEnter, List<AiSiteLevelDto> Levels, int DefaultLimitCents);
+/// <param name="GroupDecides">Left to the group to switch on or off; otherwise On is the System Administrator's answer.</param>
+public record AiGroupDto(int GroupId, bool On, bool GroupDecides, string Level, int? LimitCents, int DefaultLimitCents, int UsedMills, int UsedRequests, List<AiLevelDto> Levels);
+public record AiGroupRequest(bool? On, bool? GroupDecides, string? Level, int? LimitCents, bool UseDefaultLimit = false);
+public record AiUsageBucket(string Key, string Label, int Requests, int Charged, int Failed, int NotSaved, int Mills, int CostMicros);
+/// <summary>The System Administrator's analytics. Mills is what groups were charged (tenths of a cent); CostMicros what it cost the site (millionths of a dollar).</summary>
+public record AiUsageDto(int Requests, int Charged, int Failed, int NotSaved, int WithEmail, int Mills, int CostMicros, List<AiUsageBucket> ByGroup, List<AiUsageBucket> ByRestaurant,
+    List<AiUsageBucket> ByLevel, List<AiUsageBucket> ByDay, List<AiRequestRow> Rows);
 
 // ---- Which service checks guest addresses, and the site's Geocodio key ----------------------------------------
 

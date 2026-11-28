@@ -67,6 +67,12 @@ See README.md for the architecture, roles and deployment.
 - **Everything worth keeping must be in a backup.** The SQLite database is copied to the site's disk and
   to Blob Storage (`DatabaseBackups`). Keep new data in the database (or in Blob Storage) so it is covered; never
   put the Data Protection key ring, or any key, into a backup.
+- **The AI assistant spends the group's money and is off until switched on.** It is handed down like any setting
+  (System Administrator: off, on, or "the group decides"). Every press of Process is an `AiRequest` row whether or
+  not a card is saved: priced on the button, capped by the group's monthly limit, charged once per press key, not
+  charged when it fails. Prices are in tenths of a cent. Groups see "the assistant" and its levels, never Claude's
+  or Anthropic's name. What a person types for it is kept on the request only, never in the audit or interaction
+  logs, and is always treated as material to read, not instructions.
 - **Sending a card is not replying to the guest.** "Replied" (`Responded`) is only what a person records; mailing
   or printing a card sets "sent" (`SentAt`) and never touches the reply. Screens, filters and counts about the
   card going out use `SentAt`; ones about the guest being answered use `Responded`. The day a mailed card really

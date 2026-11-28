@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { SystemStatus } from '../api/types'
 import AddressVerificationPanel from '../components/AddressVerificationPanel'
+import { AiSitePanel } from '../components/AiAssistant'
 import PostGridSitePanel from '../components/PostGridSitePanel'
 import StripePanel from '../components/StripePanel'
 import { Alert, Badge } from '../components/ui'
@@ -55,6 +56,9 @@ export default function ConnectedSystemsPage() {
 
       <h2 className="section-head">Address Verification</h2>
       <AddressVerificationPanel onChanged={load} />
+
+      <h2 className="section-head">AI Assistant</h2>
+      <AiSitePanel onChanged={load} />
 
       <h2 className="section-head">Email</h2>
       <div className="panel">

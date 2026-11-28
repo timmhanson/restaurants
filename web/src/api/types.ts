@@ -452,7 +452,51 @@ export interface CommentRequest {
   reason: string
   reasonDetails?: string | null
   notes?: string | null
+  /** Optional: the guest's email address and a reply written for them (sending from the site comes later). */
+  guestEmail?: string | null
+  emailSubject?: string | null
+  emailBody?: string | null
+  /** How upset the guest was, 1 (a small slip) to 5 (furious), when a face was chosen. */
+  mood?: number | null
+  /** The AI assistant requests made while this card was being filled in, so they are tied to the card. */
+  aiRequestKeys?: string[]
   force: boolean
+}
+
+// ---- The AI assistant ----
+/** A face: how upset the guest was, and the reward it stands for at this group. */
+export interface AiFace { level: number; face: string; label: string; meaning: string; reward?: string | null }
+export interface AiLevelChoice { id: string; label: string; says: string; priceMills: number; price: string }
+/** Whether Enter Card shows the assistant for a restaurant, and what a press costs. */
+export interface AiConfig { enabled: boolean; level?: string | null; priceMills: number; price?: string | null; faces: AiFace[] }
+export interface AiFields {
+  guestFirstName?: string | null; guestLastName?: string | null; phone?: string | null; email?: string | null
+  streetAddress?: string | null; city?: string | null; state?: string | null; zip?: string | null
+  visitDate?: string | null; source?: string | null; reason?: string | null; details?: string | null
+  mood: number; moodWhy?: string | null; emailSubject?: string | null; emailBody?: string | null
+}
+export interface AiProcessResponse { requestKey: string; priceMills: number; price: string; fields: AiFields; couponOffer?: string | null; faces: AiFace[] }
+/** The group's own settings. usedMills is tenths of a cent. */
+export interface AiSettings {
+  on: boolean; decidedBy: 'site' | 'group'; canChange: boolean; ready: boolean; level: string; levels: AiLevelChoice[]
+  limitCents: number; usedMills: number; usedRequests: number; faces: AiFace[]; offers: string[]
+}
+export interface AiRequestRow {
+  id: number; at: string; by: string; groupId: number; group?: string | null; restaurantId: number; restaurant: string; level: string; priceMills: number
+  outcome: 'ok' | 'failed' | string; wantEmail: boolean; commentId?: number | null; guest?: string | null; reason?: string | null; mood?: number | null; offer?: string | null
+  /** System Administrator only. */
+  input?: string | null; model?: string | null; inputTokens?: number | null; outputTokens?: number | null; costMicros?: number | null; error?: string | null
+}
+export interface AiUsageList { requests: number; charged: number; mills: number; notSaved: number; rows: AiRequestRow[] }
+export interface AiSite {
+  configured: boolean; source: 'Saved in the site' | 'App settings' | 'None'; keyEnding?: string | null; savedAt?: string | null; savedBy?: string | null; canEnter: boolean
+  levels: { id: string; label: string; model: string; priceMills: number; price: string; inPerMillion: number; outPerMillion: number }[]; defaultLimitCents: number
+}
+export interface AiGroupSettings { groupId: number; on: boolean; groupDecides: boolean; level: string; limitCents?: number | null; defaultLimitCents: number; usedMills: number; usedRequests: number; levels: AiLevelChoice[] }
+export interface AiUsageBucket { key: string; label: string; requests: number; charged: number; failed: number; notSaved: number; mills: number; costMicros: number }
+export interface AiUsage {
+  requests: number; charged: number; failed: number; notSaved: number; withEmail: number; mills: number; costMicros: number
+  byGroup: AiUsageBucket[]; byRestaurant: AiUsageBucket[]; byLevel: AiUsageBucket[]; byDay: AiUsageBucket[]; rows: AiRequestRow[]
 }
 
 export interface CommentSummary {
@@ -518,6 +562,10 @@ export interface CommentSummary {
   followedUpByName?: string | null
   /** The day the guest should be followed up with; absent when none is needed. */
   followUpDueOn?: string | null
+  guestEmail?: string | null
+  emailSubject?: string | null
+  emailBody?: string | null
+  mood?: number | null
   attemptCount: number
   latestNote?: ActivityDto | null
 }

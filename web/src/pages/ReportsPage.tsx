@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { AiUsageSection } from '../components/AiAssistant'
 import { Link } from 'react-router-dom'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api, qs } from '../api/client'
@@ -251,6 +252,7 @@ export default function ReportsPage() {
           />
         </div>
       )}
+      <AiUsageSection from={from} to={to} groupIds={groupIds} restaurantIds={restaurantIds} />
     </>
   )
 }
