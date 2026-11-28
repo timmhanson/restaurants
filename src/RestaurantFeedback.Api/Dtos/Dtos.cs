@@ -192,6 +192,11 @@ public record CommentSummary(
     public string? Source { get; init; }
     /// <summary>USPS's verdict on the mailing address when the card was saved: Verified, Corrected, NeedsUnit, UnitNotConfirmed or NotFound.</summary>
     public string? AddressStatus { get; init; }
+    /// <summary>When the coupon card was sent (handed to the mailing service, or printed here and marked as sent); null while it has not been. Not the same as replied.</summary>
+    public DateTime? SentAt { get; init; }
+    public string? SentByName { get; init; }
+    /// <summary>When a card mailed for the restaurant really went into the mail (handed to the post office); null until then.</summary>
+    public DateTime? InMailAt { get; init; }
     // Printing, postage, redemption and the after-sending follow-up
     public DateTime? PrintedAt { get; init; }
     public string? PrintedByName { get; init; }
@@ -231,6 +236,7 @@ public record CommentSummary(
         c.Responded, c.RespondedAt, c.RespondedByName, c.CreatedAt, c.CreatedByName, c.UpdatedAt,
         c.GuestKey, guestCommentCount)
     {
+        SentAt = c.SentAt, SentByName = c.SentByName, InMailAt = c.InMailAt,
         Source = c.Source, AddressStatus = c.AddressStatus, PrintedAt = c.PrintedAt, PrintedByName = c.PrintedByName, PrintCount = c.PrintCount, PostageCents = c.PostageCents,
         PostageLabelUrl = c.PostageLabelUrl, PostageTrackingCode = c.PostageTrackingCode, PostageTest = c.PostageTest,
         PrintFeeCents = c.PrintFeeCents, CardId = c.PublicId, MailStatus = c.MailId == null ? null : c.MailStatus, MailedAt = c.MailedAt, MailTest = c.MailTest, RedeemedOn = c.RedeemedOn,
@@ -450,7 +456,11 @@ public record MailRequest(int[] CommentIds, int ConfirmCount, int ConfirmCentsPe
 /// (never the split). MailStatus is the mailing service's latest status of that attempt.
 /// </summary>
 public record CardSendDto(int Number, DateTime At, string? ByName, string Method, string Outcome, bool Resend, string? StreetAddress, string? City, string? State, string? Zip,
-    string? AddressStatus, string? MailStatus, bool Test, int BilledCents, string? Error);
+    string? AddressStatus, string? MailStatus, bool Test, int BilledCents, string? Error)
+{
+    /// <summary>When this attempt really went into the mail; null until the mailing service has handed it to the post office.</summary>
+    public DateTime? InMailAt { get; init; }
+}
 /// <param name="Status">The mail house's status: ready, printing, processed_for_delivery, completed or cancelled.</param>
 public record MailOutcome(int CommentId, bool Ok, string? Status, bool Test, bool AlreadyMailed, string? Error)
 {
@@ -659,7 +669,15 @@ public record UndoRequest(string? Reason);
 /// </summary>
 public record FollowedUpRequest(bool Reached, string? Method, DateOnly? ContactedOn, string? Notes);
 public record FollowUpRestaurant(int Id, string Name, int? Days, int EffectiveDays, bool CanSet);
-public record FollowUpSummary(int Due, DateOnly? OldestDueOn, int DefaultDays, List<FollowUpRestaurant> Restaurants);
+public record FollowUpSummary(int Due, DateOnly? OldestDueOn, int DefaultDays, List<FollowUpRestaurant> Restaurants)
+{
+    /// <summary>Guests not replied to yet.</summary>
+    public int NeedsReply { get; init; }
+    /// <summary>Cards on the Follow Up list: the guest needs a reply, or the follow-up call is due. The count beside Follow Up in the menu.</summary>
+    public int Pending { get; init; }
+    /// <summary>Coupon cards not sent yet. The count beside Print Cards in the menu.</summary>
+    public int ToSend { get; init; }
+}
 public record FollowUpDaysRequest(int? Days);
 
 // ---- Checking a mailing address with USPS ------------------------------------------------------------------

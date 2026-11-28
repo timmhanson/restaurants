@@ -244,6 +244,8 @@ export interface CardSend {
   number: number; at: string; byName?: string | null; method: 'mail' | 'stamp' | string; outcome: 'sent' | 'refused' | 'cancelled' | string; resend: boolean
   streetAddress?: string | null; city?: string | null; state?: string | null; zip?: string | null; addressStatus?: string | null
   mailStatus?: string | null; test: boolean; billedCents: number; error?: string | null
+  /** When this attempt really went into the mail; absent until the mailing service has handed it to the post office. */
+  inMailAt?: string | null
 }
 export interface MailOutcome {
   commentId: number; ok: boolean; status?: MailStatus | null; test: boolean; alreadyMailed: boolean; error?: string | null
@@ -402,7 +404,8 @@ export interface StripeAccount extends SiteKeyInfo {
 }
 export interface PostageOutcome { commentId: number; ok: boolean; cents?: number | null; labelUrl?: string | null; test: boolean; alreadyBought: boolean; error?: string | null }
 export interface FollowUpRestaurant { id: number; name: string; days?: number | null; effectiveDays: number; canSet: boolean }
-export interface FollowUpSummary { due: number; oldestDueOn?: string | null; defaultDays: number; restaurants: FollowUpRestaurant[] }
+/** needsReply, pending and toSend are what is waiting to be done; pending and toSend are the counts beside Follow Up and Print Cards in the menu. */
+export interface FollowUpSummary { due: number; oldestDueOn?: string | null; defaultDays: number; restaurants: FollowUpRestaurant[]; needsReply: number; pending: number; toSend: number }
 
 export interface GroupSettings {
   schemaVersion: number
@@ -472,9 +475,15 @@ export interface CommentSummary {
   reason: string
   reasonDetails?: string | null
   notes?: string | null
+  /** A person recorded that the guest was replied to. Sending the coupon card is separate: see sentAt. */
   responded: boolean
   respondedAt?: string | null
   respondedByName?: string | null
+  /** When the coupon card was sent (handed to the mailing service, or printed here and marked as sent); absent while it has not been. */
+  sentAt?: string | null
+  sentByName?: string | null
+  /** When a card mailed for the restaurant really went into the mail (handed to the post office); absent until then. */
+  inMailAt?: string | null
   createdAt: string
   createdByName: string
   updatedAt?: string | null
@@ -514,7 +523,7 @@ export interface CommentSummary {
 }
 
 export type ActivityKind =
-  | 'Note' | 'Attempt' | 'Replied' | 'Reopened' | 'Printed' | 'PostageBought' | 'Redeemed' | 'RedemptionUndone' | 'FollowedUp' | 'FollowUpAttempt' | 'Mailed' | 'MailCancelled'
+  | 'Note' | 'Attempt' | 'Replied' | 'Reopened' | 'Printed' | 'PostageBought' | 'Redeemed' | 'RedemptionUndone' | 'FollowedUp' | 'FollowUpAttempt' | 'Mailed' | 'MailCancelled' | 'Sent'
 
 export interface ActivityDto {
   id: number

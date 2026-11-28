@@ -45,16 +45,43 @@ public class SendHistory(AppDbContext db)
     public Task<bool> SentBeforeAsync(int commentId, CancellationToken ct = default) =>
         db.CardSends.AnyAsync(s => s.CommentId == commentId && s.Outcome == SendOutcomes.Sent, ct);
 
-    /// <summary>Brings the history row of a mailed card in line with the card's latest status from the mailing service.</summary>
-    public async Task SyncStatusAsync(GuestComment c, CancellationToken ct = default)
+    /// <summary>
+    /// Brings the history row of a mailed card in line with the card's latest status from the mailing service, and
+    /// notes when the card really went into the mail: the first time the mailing service says it has handed the
+    /// card to the post office. The mailing service keeps no time for that, so it is the time it last changed the
+    /// order (<paramref name="changedAt"/>) when that is believable, else when this site first saw the status.
+    /// A test order is never in the mail.
+    /// </summary>
+    public async Task SyncStatusAsync(GuestComment c, CancellationToken ct = default, DateTime? changedAt = null)
     {
         if (c.MailId is null) return;
-        foreach (var s in await db.CardSends.Where(s => s.CommentId == c.Id && s.MailId == c.MailId).ToListAsync(ct))
+        var now = DateTime.UtcNow;
+        var rows = await db.CardSends.Where(s => s.CommentId == c.Id && s.MailId == c.MailId).ToListAsync(ct);
+        if (MailStatuses.InTheMail(c.MailStatus) && !c.MailTest && c.InMailAt is null)
+        {
+            // When this site first saw the card in the mail, if that was before today's check.
+            var seen = rows.Where(s => MailStatuses.InTheMail(s.MailStatus) && s.StatusCheckedAt is not null).Min(s => s.StatusCheckedAt);
+            var said = changedAt is { } at && at <= now && (c.MailedAt is null || at >= c.MailedAt) ? changedAt : null;
+            c.InMailAt = new[] { said, seen }.Where(t => t is not null).Min() ?? now;
+        }
+        foreach (var s in rows)
         {
             s.MailStatus = c.MailStatus;
-            s.StatusCheckedAt = DateTime.UtcNow;
+            s.StatusCheckedAt = now;
             if (c.MailStatus == MailStatuses.Cancelled) s.Outcome = SendOutcomes.Cancelled;
+            if (MailStatuses.InTheMail(c.MailStatus)) s.InMailAt ??= c.InMailAt;
         }
+    }
+
+    /// <summary>
+    /// Marks the card as sent by its latest send that went, or as not sent when none did (its only send was cancelled).
+    /// <paramref name="except"/> is a send to leave out: the one being cancelled.
+    /// </summary>
+    public async Task RestoreSentAsync(GuestComment c, string? except, CancellationToken ct = default)
+    {
+        var last = await db.CardSends.Where(s => s.CommentId == c.Id && s.Outcome == SendOutcomes.Sent && s.MailId != except)
+            .OrderByDescending(s => s.Number).ThenByDescending(s => s.Id).FirstOrDefaultAsync(ct);
+        (c.SentAt, c.SentByName, c.InMailAt) = (last?.At, last?.ByName, last?.InMailAt);
     }
 }
 
@@ -72,7 +99,8 @@ public class MailStatusRefresher(AppDbContext db, SiteMailing site, IPostGridMai
     /// <returns>How many cards' statuses changed.</returns>
     public async Task<int> RefreshAsync(IReadOnlyCollection<int>? restaurantIds, int most = 200, CancellationToken ct = default)
     {
-        var q = db.Comments.Where(c => c.MailId != null && c.MailStatus != "completed" && c.MailStatus != MailStatuses.Cancelled);
+        // Cards the mailing service has not finished with, and finished ones whose day in the mail is not known yet.
+        var q = db.Comments.Where(c => c.MailId != null && c.MailStatus != MailStatuses.Cancelled && (c.MailStatus != "completed" || (c.InMailAt == null && !c.MailTest)));
         if (restaurantIds is not null) q = q.Where(c => restaurantIds.Contains(c.RestaurantId));
         var cards = await q.OrderBy(c => c.MailedAt).Take(most).ToListAsync(ct);
         var changed = 0;
@@ -85,9 +113,10 @@ public class MailStatusRefresher(AppDbContext db, SiteMailing site, IPostGridMai
             {
                 var now = await mailer.GetPostcardAsync(account.ApiKey, c.MailId!, ct);
                 cache.Set($"mail-status:{c.Id}", true, TimeSpan.FromMinutes(10));
-                if (now.Status == c.MailStatus) continue;
+                var dayMissing = MailStatuses.InTheMail(now.Status) && !c.MailTest && c.InMailAt is null;
+                if (now.Status == c.MailStatus && !dayMissing) continue;
                 c.MailStatus = now.Status;
-                await history.SyncStatusAsync(c, ct);
+                await history.SyncStatusAsync(c, ct, now.UpdatedAt);
                 changed++;
             }
             catch (PostGridException ex)

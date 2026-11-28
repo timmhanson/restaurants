@@ -45,23 +45,75 @@ public class CardMailingTests(ApiFactory factory)
         Assert.Contains("mailed", (await owner.GetFromJsonAsync<PrintConfig>("/api/comments/print-config"))!.MailedMethod, StringComparison.OrdinalIgnoreCase);
 
         var printed = (await (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([card.Id]))).Content.ReadFromJsonAsync<List<CommentSummary>>())!.Single();
-        Assert.True(printed.Responded);
-        Assert.Equal("Mailed coupon card", printed.ReplyMethod);
+        // Sent, which is not replied: only a person records that the guest was replied to.
+        Assert.NotNull(printed.SentAt);
+        Assert.False(printed.Responded);
+        Assert.Null(printed.ReplyMethod);
         Assert.Equal(1, printed.PrintCount);
         Assert.NotNull(printed.PrintedAt);
         Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5), printed.FollowUpDueOn); // default: follow up after 5 days
 
-        // A reprint is counted but does not record a second reply.
+        // A reprint is counted but is not a second send.
         printed = (await (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([card.Id]))).Content.ReadFromJsonAsync<List<CommentSummary>>())!.Single();
         Assert.Equal(2, printed.PrintCount);
         var history = (await owner.GetFromJsonAsync<List<ActivityDto>>($"/api/comments/{card.Id}/activity"))!;
         Assert.Equal(2, history.Count(a => a.Kind == "Printed"));
-        Assert.Single(history, a => a.Kind == "Replied");
+        Assert.Single(history, a => a.Kind == "Sent");
+        Assert.DoesNotContain(history, a => a.Kind == "Replied");
+        Assert.Equal(printed.SentAt, (await owner.GetFromJsonAsync<CommentSummary>($"/api/comments/{card.Id}"))!.SentAt);
         Assert.Contains("stamp added by hand", history.First(a => a.Kind == "Printed").Text);
 
         // The list can pull exactly the cards chosen for printing.
         var chosen = await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?ids={card.Id}");
         Assert.Equal([card.Id], chosen!.Items.Select(c => c.Id));
+    }
+
+    [Fact]
+    public async Task Sending_a_card_is_not_replying_and_the_menu_counts_what_is_waiting()
+    {
+        var (owner, rid) = await OwnerAsync();
+        async Task<FollowUpSummary> Waiting() => (await owner.GetFromJsonAsync<FollowUpSummary>("/api/follow-ups/summary"))!;
+        async Task<List<int>> Ids(string status) =>
+            (await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?pageSize=500&status={status}"))!.Items.Select(c => c.Id).ToList();
+        var before = await Waiting();
+        var card = await Create(owner, Card(rid, "Waiting"));
+
+        // A new card waits for both: to be sent (the count beside Print Cards) and for a reply (beside Follow Up).
+        var entered = await Waiting();
+        Assert.Equal((before.ToSend + 1, before.Pending + 1, before.NeedsReply + 1), (entered.ToSend, entered.Pending, entered.NeedsReply));
+        Assert.Contains(card.Id, await Ids("not-sent"));
+
+        // Printed and marked as sent: nothing left to send, and the guest still waits for a reply.
+        var printed = (await (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([card.Id]))).Content.ReadFromJsonAsync<List<CommentSummary>>())!.Single();
+        Assert.True(printed.SentAt is not null && !printed.Responded);
+        var sent = await Waiting();
+        Assert.Equal((before.ToSend, before.Pending + 1, before.NeedsReply + 1), (sent.ToSend, sent.Pending, sent.NeedsReply));
+        Assert.Contains(card.Id, await Ids("sent"));
+        Assert.Contains(card.Id, await Ids("open"));
+        Assert.Contains(card.Id, await Ids("waiting"));
+        Assert.DoesNotContain(card.Id, await Ids("not-sent"));
+        Assert.DoesNotContain(card.Id, await Ids("replied"));
+
+        // A person replies: that, and only that, makes the card "replied". The card stays sent.
+        var reply = await owner.PostAsJsonAsync($"/api/comments/{card.Id}/followup", new FollowUpRequest { Kind = "Replied", Method = "Phone call", Confirmed = true, Text = "Apologised." });
+        Assert.Equal(HttpStatusCode.OK, reply.StatusCode);
+        var replied = (await reply.Content.ReadFromJsonAsync<FollowUpResponse>())!.Comment;
+        Assert.True(replied.Responded && replied.SentAt == printed.SentAt);
+        Assert.Equal("Phone call", replied.ReplyMethod);
+        Assert.Equal((before.Pending, before.NeedsReply), ((await Waiting()).Pending, (await Waiting()).NeedsReply));
+        Assert.DoesNotContain(card.Id, await Ids("open"));
+        // The follow-up call counts from the day the card was sent, and can be recorded now that it has been.
+        Assert.Equal(DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5), replied.FollowUpDueOn);
+
+        // Removed: everything the card held is in the audit log, the follow-up history and the sends too.
+        Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync($"/api/comments/{card.Id}")).StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<RestaurantFeedback.Api.Data.AppDbContext>();
+        var details = db.AuditLogs.Where(a => a.Action == "CommentDeleted" && a.EntityId == card.Id.ToString()).Select(a => a.Details!).Single();
+        foreach (var part in new[] { "\"guest\":\"Mail Waiting\"", "\"streetAddress\":\"42 Postcard Ln\"", "\"couponOffer\":\"Free Value Basket\"", "\"replyMethod\":\"Phone call\"",
+                     "\"cardSentAt\":", "\"history\":[", "Apologised.", "\"sends\":[", "\"method\":\"stamp\"", "\"cardId\":" })
+            Assert.Contains(part, details);
+        Assert.DoesNotContain("PostGrid", details);
     }
 
     [Fact]
@@ -73,7 +125,7 @@ public class CardMailingTests(ApiFactory factory)
         async Task<List<int>> Ids(string query) =>
             (await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?pageSize=500&{query}"))!.Items.Select(c => c.Id).ToList();
 
-        Assert.Contains(fresh.Id, await Ids("status=waiting"));
+        Assert.Contains(fresh.Id, await Ids("status=not-sent"));
         Assert.Contains(fresh.Id, await Ids($"enteredFrom={today:yyyy-MM-dd}&enteredTo={today:yyyy-MM-dd}"));
         Assert.Contains(fresh.Id, await Ids($"enteredFrom={today.AddDays(-3):yyyy-MM-dd}&enteredTo={today:yyyy-MM-dd}&restaurantId={rid}"));
         Assert.DoesNotContain(fresh.Id, await Ids($"enteredTo={today.AddDays(-1):yyyy-MM-dd}"));
@@ -81,7 +133,7 @@ public class CardMailingTests(ApiFactory factory)
 
         // Once printed and sent it leaves the "not sent" list but is still found by its date.
         await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([fresh.Id]));
-        Assert.DoesNotContain(fresh.Id, await Ids("status=waiting"));
+        Assert.DoesNotContain(fresh.Id, await Ids("status=not-sent"));
         Assert.Contains(fresh.Id, await Ids($"enteredFrom={today:yyyy-MM-dd}&enteredTo={today:yyyy-MM-dd}"));
     }
 

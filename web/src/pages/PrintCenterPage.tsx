@@ -72,7 +72,7 @@ export default function PrintCenterPage() {
     setError(null)
     api
       .get<PagedResult<CommentSummary>>(
-        `/comments${qs({ restaurantId, status: which === 'not-sent' || notSentOnly ? 'waiting' : '', ...dates, sort: 'visitDate', dir: 'asc', page: 1, pageSize: LIMIT })}`,
+        `/comments${qs({ restaurantId, status: which === 'not-sent' || notSentOnly ? 'not-sent' : '', ...dates, sort: 'visitDate', dir: 'asc', page: 1, pageSize: LIMIT })}`,
       )
       .then((r) => {
         setData(r)
@@ -323,7 +323,7 @@ export default function PrintCenterPage() {
                       {c.addressStatus && c.addressStatus !== 'Verified' && c.addressStatus !== 'Corrected' && <AddressBadge status={c.addressStatus} />}
                     </td>
                     <td>
-                      {c.responded ? <Badge kind="ok">Sent</Badge> : <Badge kind="danger">Not sent</Badge>}{' '}
+                      {c.sentAt ? <Badge kind="ok">Sent</Badge> : <Badge kind="danger">Not sent</Badge>}{' '}
                       {c.printCount > 0 && <Badge kind="neutral">printed {c.printCount}×</Badge>}{' '}
                       {c.mailStatus && c.mailStatus !== 'cancelled' && <MailStatusBadge status={c.mailStatus} test={c.mailTest} />}
                     </td>

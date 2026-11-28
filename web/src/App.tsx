@@ -29,7 +29,7 @@ import ReportsPage from './pages/ReportsPage'
 import RestaurantsPage from './pages/RestaurantsPage'
 import SecurityPage from './pages/SecurityPage'
 import PermissionsPage from './pages/PermissionsPage'
-import SentPostcardsPage from './pages/SentPostcardsPage'
+import FollowUpPage from './pages/FollowUpPage'
 import SettingsPage from './pages/SettingsPage'
 import SystemStatusPage from './pages/SystemStatusPage'
 import UsersPage from './pages/UsersPage'
@@ -138,7 +138,8 @@ export default function App() {
         <Route path="/print" element={<Guard home={home} allow={inGroup && perm('MarkResponded') && perm('ViewComments')}><PrintCenterPage /></Guard>} />
         <Route path="/mail-cards" element={<Guard home={home} allow={inGroup && perm('MarkResponded') && perm('ViewComments')}><MailCardsPage /></Guard>} />
         <Route path="/comments" element={<Guard home={home} allow={inGroup && perm('ViewComments')}><CommentsPage /></Guard>} />
-        <Route path="/sent-postcards" element={<Guard home={home} allow={inGroup && perm('ViewComments')}><SentPostcardsPage /></Guard>} />
+        <Route path="/follow-up" element={<Guard home={home} allow={inGroup && perm('ViewComments')}><FollowUpPage /></Guard>} />
+        <Route path="/sent-postcards" element={<Navigate to="/follow-up?show=all" replace />} />
         <Route path="/analytics" element={<Guard home={home} allow={inGroup && perm('ViewAnalytics')}><AnalyticsPage /></Guard>} />
         <Route path="/users" element={overseeing ? <Navigate to="/people" replace /> : <Guard home={home} allow={isAdmin || perm('ManageTeamLogin')}><UsersPage /></Guard>} />
         <Route path="/restaurants" element={<Guard home={home} allow={inGroup && isAdmin}><RestaurantsPage /></Guard>} />

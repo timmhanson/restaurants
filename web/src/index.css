@@ -68,14 +68,16 @@ table.compact tr:last-child td { border-bottom: none; }
 .attention-medium .attention-mark { background: #d98e00; border-radius: 2px; }
 .attention-info { border-left-color: var(--accent); }
 .attention-info .attention-mark { background: var(--accent); border-radius: 0; transform: rotate(45deg); }
-.nav-section { padding: 0.9rem 1.25rem 0.3rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.nav-section { padding: 0.9rem 1.25rem 0.3rem; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
 /* System administration has its own look so it is never mistaken for a restaurant's screens. */
 .app.system > .sidenav { background: #162033; border-right-color: #162033; }
 .app.system .sidenav a { color: #d7deea; }
 .app.system .sidenav a:hover { background: rgba(255, 255, 255, 0.07); }
 .app.system .sidenav a.active { background: rgba(255, 255, 255, 0.12); color: #fff; border-left-color: #ffd23f; }
 .app.system .nav-section { color: #8fa0bb; }
-.sidenav a { padding: 0.6rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; }
+.sidenav a { padding: 0.6rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; display: flex; align-items: center; gap: 0.5rem; }
+/* How many are waiting, beside a tab: a red bubble, as on a phone's home screen. */
+.nav-count { margin-left: auto; min-width: 1.3rem; height: 1.3rem; padding: 0 0.4rem; border-radius: 999px; background: #e0242f; color: #fff; font-size: 0.72rem; font-weight: 700; line-height: 1.3rem; text-align: center; flex: none; }
 .sidenav a:hover { background: var(--bg); }
 .sidenav a.active { border-left-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--info-bg); }
 .nav-toggle { display: none; }

@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { roleTitle } from '../auth/roles'
 import { track } from '../api/tracker'
-import FollowUpNotice from './FollowUpNotice'
+import FollowUpNotice, { useFollowUpSummary } from './FollowUpNotice'
 
 export default function Layout() {
   const { user, logout, has, isAdmin, isSuperAdmin, isGroupWide, isTeamMember, groups, groupId, settings, restaurants, viewingAs, overseeing, exitGroup, contextLoaded } = useAuth()
@@ -30,7 +30,9 @@ export default function Layout() {
   // group exactly as its Investment Group Administrator would, with the yellow bar to get back out.
   // The System Administrator has a menu of their own, about the whole site. Restaurant work (cards, comments,
   // analytics) only appears while they view one group as its administrator, under the yellow bar.
-  const links: { to: string; label: string; show: boolean; section?: string }[] = overseeing
+  // What is waiting to be done shows as a red count beside its tab, as on a phone's home screen.
+  const waiting = useFollowUpSummary()
+  const links: { to: string; label: string; show: boolean; section?: string; count?: number }[] = overseeing
     ? [
         { to: '/overview', label: 'Overview', show: true, section: 'Oversee' },
         { to: '/groups', label: 'Investment Groups', show: true },
@@ -45,15 +47,15 @@ export default function Layout() {
         { to: '/system', label: 'System Status', show: true },
       ]
     : [
-        { to: '/enter', label: 'Enter Card', show: true },
-        { to: '/comments', label: 'Comments', show: has('ViewComments') },
-        { to: '/print', label: 'Print Cards', show: has('ViewComments') && has('MarkResponded') },
-        { to: '/restaurants', label: 'Restaurants & Staff', show: isAdmin, section: 'Staff' },
-        { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin'), section: 'Staff' },
+        { to: '/enter', label: 'Enter Card', show: true, section: 'Actions' },
+        { to: '/print', label: 'Print Cards', show: has('ViewComments') && has('MarkResponded'), section: 'Actions', count: waiting.summary?.toSend },
+        { to: '/follow-up', label: 'Follow Up', show: has('ViewComments'), section: 'Actions', count: waiting.summary?.pending },
+        { to: '/comments', label: 'All Comments', show: has('ViewComments'), section: 'Reports' },
         { to: '/billing', label: 'Billing', show: isAdmin, section: 'Reports' },
         { to: '/analytics', label: 'Analytics', show: has('ViewAnalytics'), section: 'Reports' },
-        { to: '/sent-postcards', label: 'Sent Postcards', show: has('ViewComments'), section: 'Reports' },
         { to: '/audit', label: 'Audit Log', show: has('ViewAudit'), section: 'Reports' },
+        { to: '/restaurants', label: 'Restaurants & Staff', show: isAdmin, section: 'Staff' },
+        { to: '/users', label: 'All Staff', show: isAdmin || has('ManageTeamLogin'), section: 'Staff' },
         { to: '/permissions', label: 'Permissions', show: isGroupWide, section: 'Configuration' },
         { to: '/settings', label: 'Settings', show: isGroupWide, section: 'Configuration' },
         { to: '/card-design', label: 'Card Design', show: isAdmin, section: 'Configuration' },
@@ -122,14 +124,15 @@ export default function Layout() {
           .map((l, i, shown) => (
             <Fragment key={l.to}>
               {l.section && (overseeing || shown[i - 1]?.section !== l.section) && <div className="nav-section">{l.section}</div>}
-              <NavLink to={l.to} className={({ isActive }) => (isActive ? 'active' : '')}>
+              <NavLink to={l.to} className={({ isActive }) => (isActive ? 'active' : '')} aria-label={l.count ? `${l.label}, ${l.count} waiting` : undefined}>
                 {l.label}
+                {l.count ? <span className="nav-count" aria-hidden="true">{l.count > 99 ? '99+' : l.count}</span> : null}
               </NavLink>
             </Fragment>
           ))}
       </nav>
       <main className="content">
-        <FollowUpNotice />
+        <FollowUpNotice summary={waiting.summary} reload={waiting.reload} />
         <Outlet />
       </main>
     </div>

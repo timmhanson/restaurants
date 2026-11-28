@@ -300,6 +300,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                     b.Property<int>("FeeCents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("InMailAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("MailId")
                         .HasMaxLength(120)
                         .HasColumnType("TEXT");
@@ -587,6 +590,9 @@ namespace RestaurantFeedback.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("InMailAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("INTEGER");
 
@@ -711,6 +717,12 @@ namespace RestaurantFeedback.Api.Data.Migrations
 
                     b.Property<int>("RestaurantId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SentByName")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Source")
                         .HasColumnType("TEXT");

@@ -221,7 +221,7 @@ export default function PrintCardsPage() {
               <div className="print-caption no-print">
                 <strong>{name(c)}</strong>
                 <span>{c.restaurantName}</span>
-                {c.responded && <Badge kind="ok">already marked sent</Badge>}
+                {c.sentAt && <Badge kind="ok">already marked sent</Badge>}
                 {c.printCount > 0 && <Badge kind="neutral">printed {c.printCount}× before</Badge>}
                 {!hasMailingAddress(c) && <Badge kind="warn">no mailing address</Badge>}
                 {c.addressStatus && c.addressStatus !== 'Verified' && c.addressStatus !== 'Corrected' && <AddressBadge status={c.addressStatus} />}

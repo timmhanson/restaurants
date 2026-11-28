@@ -19,15 +19,47 @@ replacing the spreadsheet. Built for investment groups that operate several Culv
 | **Manager** (`Manager`) | one or more restaurants, across owners | enter cards plus what all managers in the group were given and what was ticked for them: ViewComments, EditComments, DeleteComments, MarkResponded, ViewAnalytics, ExportComments, ViewAudit, ManageTeamLogin, BuyPostage, SetFollowUpDays. Permissions apply at every restaurant they work at |
 | **Team Member** (`TeamMember`) | the shared login for a restaurant | enter cards only (duplicate checks return counts, never details) |
 
-### Sent Postcards report
+### Sent is not replied, and the day a card is in the mail
 
-Under **Reports** inside a group, **Sent Postcards** (`/sent-postcards`, `SentPostcardsPage`) lists the coupon
-postcards for the restaurants a person works at, for anyone who may see guest comments (`ViewComments`): when each
-card was created, when it was sent and how (mailed for you, or printed here for a stamp by hand), whether the
-guest has been replied to and when, the mailing status of cards mailed for the restaurant, and when the coupon
-was used. Every column sorts; filters narrow by the date created, restaurant, sent or not, how it was sent,
-mailing status, reply and a search. It reads the same `GET /api/comments` the Comments page does, so it shows
-nothing a person could not already see; the CSV download is offered only with `ExportComments`.
+Three separate things happen to a guest's comment, and each is recorded by itself (`GuestComment`):
+
+- **Replied** (`Responded`, `RepliedOn`, `ReplyMethod`): a person recorded that they replied to the guest (a call,
+  an email, a word in person). Nothing else sets it: mailing or printing a card never marks the guest as replied to.
+- **Sent** (`SentAt`, `SentByName`): the coupon card was handed to the mailing service, or printed in the
+  restaurant and marked as sent. It is the card's latest send that went (every attempt is in `CardSend`); a send
+  cancelled before printing puts the card back to its earlier send, or to "not sent". The follow-up call ("did
+  the card arrive?") counts from this day (`CardFollowUps.SentDay`).
+- **In the mail** (`InMailAt`, on the card and on each `CardSend`): for a card mailed for the restaurant, when the
+  mailing service handed it to the post office (its status reaches `processed_for_delivery`). The mailing service
+  keeps no time for that, so the site notes when it last changed the order, or when the site first saw the
+  status (it asks every half hour and whenever Follow Up opens). Noted once and never moved; never for a test order.
+
+The migration `SentIsNotReplied` carried over what had already been done: every card that had gone became "sent"
+by its latest send, cards the site itself had marked as replied went back to waiting for a person's reply, and the
+site's own "reply confirmed" history entries were kept as "card sent" entries. Replies a person recorded were
+left as they were.
+
+### Follow Up
+
+Under **Actions** inside a group, **Follow Up** (`/follow-up`, `FollowUpPage`) is the work list for anyone who may
+see guest comments (`ViewComments`): the guests still waiting for a reply, and the follow-up calls that are due
+(`GET /api/comments?status=open`). Each row shows what is left to do, whether and when the guest was replied to,
+when the card was sent and how, the day it went into the mail, the follow-up call and whether the coupon was used.
+**Reply** / **Open** opens the card to record a reply, an attempt or the follow-up call; **History** opens the
+card's sends. "Every card, by date" turns the page into a report of all cards created in a range of dates; every
+column sorts, and the CSV download is offered only with `ExportComments`. It replaced the Sent Postcards report
+(`/sent-postcards` now leads here).
+
+The menu shows a red count beside **Print Cards** (cards not sent yet) and **Follow Up** (guests waiting for a
+reply or a follow-up call), for people who can act on them (`MarkResponded`). Both come from
+`GET /api/follow-ups/summary` and are counted again on every page change and whenever something is recorded.
+
+### A removed comment stays readable in the audit log
+
+Removing a comment hides it (`IsDeleted`), and its `CommentDeleted` audit row holds everything the card held: the
+guest and address, the visit, the coupon, the reply, the send and its day in the mail, printing, postage, the
+mailing reference and status, redemption, the follow-up, its whole follow-up history and every attempt to send
+it. As everywhere a group can read, a mailed card shows the one price paid and never names the mail house.
 
 ### Sending a card again, and the history of sends
 
@@ -39,14 +71,14 @@ added (a mailed row's status is kept up to date), so the address each attempt us
 card's address is changed later. The migration that added the table carried over what had already been done: the
 send each card carried, cards printed and marked sent, and refusals from the audit log.
 
-- **History · Send again** on Sent Postcards opens a card's attempts (`GET /api/comments/{id}/sends`) and lets the
+- **History · Send again** on Follow Up opens a card's attempts (`GET /api/comments/{id}/sends`) and lets the
   address be corrected, then goes to Mail Cards or Print Cards in "again" mode (`resend`), where the cost is shown
   and confirmed as for any card. A mailed card is charged again; a reprint here is not (the hand-print fee is
   once per card). A mailed card still waiting to be printed is cancelled and corrected instead of sent twice.
 - **Billing** counts the earlier sends of a card that was sent again (`MailLedger.BilledEarlierSends`), so every
   card that really went is on the bill, and a cancelled resend is not.
 - **Mailing statuses keep themselves up to date** (`MailStatusRefresher`): a background worker asks the mailing
-  service every half hour about the cards it has not finished with, and Sent Postcards asks when it opens
+  service every half hour about the cards it has not finished with, and Follow Up asks when it opens
   (`POST /api/comments/mail/refresh`), so "waiting to print" is never left standing.
 
 ### Who decides what: handed down level by level
@@ -68,10 +100,10 @@ Permissions and settings are decided from the top down, and a decision made high
 4. **Managers** hold what all managers were given plus what was ticked for them, and never a permission the
    group's owners do not hold. **Team logins** only enter cards.
 
-Inside a group the menu has four parts: the cards (Enter Card, Comments, Print Cards), **Staff** (Restaurants &
-Staff, All Staff), **Reports** (Billing, Analytics, Sent Postcards, Audit Log) and, at the bottom, **Configuration**
-(Permissions, Settings, Card Design). Each person sees only the entries they may use. Every word of a tab's
-name is capitalized, in both menus.
+Inside a group the menu has four parts: **Actions** (Enter Card, Print Cards, Follow Up), **Reports** (All
+Comments, Billing, Analytics, Audit Log), **Staff** (Restaurants & Staff, All Staff) and, at the bottom,
+**Configuration** (Permissions, Settings, Card Design). Each person sees only the entries they may use. Every
+word of a tab's name is capitalized, in both menus; the section titles are in the site's blue.
 
 Every change of these rules is audited (`PermissionRulesSetBySite`, `PermissionRulesChanged`,
 `GroupSettingsChanged`). On **All Staff**, **Restaurants** on a person's row maps them to restaurants in one step

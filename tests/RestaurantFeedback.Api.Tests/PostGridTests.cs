@@ -165,7 +165,8 @@ public class PostGridTests(ApiFactory factory)
         var listedRaw = await listed.Content.ReadAsStringAsync();
         Assert.DoesNotContain("PostGrid", listedRaw);
         var after = JsonSerializer.Deserialize<PagedResult<CommentSummary>>(listedRaw, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } })!.Items.Single();
-        Assert.True(after.Responded && after.MailTest);
+        // Sent, not replied: only a person records a reply.
+        Assert.True(after.SentAt is not null && !after.Responded && after.MailTest);
         Assert.Equal(MailStatuses.Ready, after.MailStatus);
         Assert.NotNull(after.FollowUpDueOn);
         Assert.Equal((0, 0), await Db(async db => { var c = await db.Comments.FindAsync(card.Id); return (c!.MailEstimateCents ?? -1, c.MailFeeCents ?? -1); }));
@@ -185,8 +186,8 @@ public class PostGridTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, cancel.StatusCode);
         Assert.Equal(MailStatuses.Cancelled, (await cancel.Content.ReadFromJsonAsync<MailStatusDto>())!.Status);
         var reopened = (await owner.GetFromJsonAsync<PagedResult<CommentSummary>>($"/api/comments?ids={card.Id}"))!.Items.Single();
-        Assert.False(reopened.Responded);
-        Assert.Contains(card.Id, (await owner.GetFromJsonAsync<PagedResult<CommentSummary>>("/api/comments?status=waiting&pageSize=500"))!.Items.Select(c => c.Id));
+        Assert.Null(reopened.SentAt);
+        Assert.Contains(card.Id, (await owner.GetFromJsonAsync<PagedResult<CommentSummary>>("/api/comments?status=not-sent&pageSize=500"))!.Items.Select(c => c.Id));
         var remailed = (await Mail(owner, [card.Id])).Single();
         Assert.True(remailed.Ok && !remailed.AlreadyMailed);
         Assert.Equal(before + 2, factory.Mail.Created);
@@ -1913,7 +1914,8 @@ public class PostGridTests(ApiFactory factory)
             Assert.True((await Mail(owner, [card.Id])).Single().Ok);
             var first = Assert.Single(await Sends());
             Assert.Equal((1, "mail", "sent", false, "9 Mailer Rd", 100, "ready"), (first.Number, first.Method, first.Outcome, first.Resend, first.StreetAddress, first.BilledCents, first.MailStatus));
-            var repliedAt = (await Now()).RespondedAt;
+            var sentFirst = (await Now()).SentAt;
+            Assert.True(sentFirst is not null && !(await Now()).Responded && (await Now()).InMailAt is null);
 
             // Asked for again by mistake (not as a resend), nothing more goes. As a resend, not while the first card can still be cancelled.
             Assert.True((await Mail(owner, [card.Id])).Single().AlreadyMailed);
@@ -1930,6 +1932,12 @@ public class PostGridTests(ApiFactory factory)
             Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
             Assert.Equal("completed", (await Now()).MailStatus);
             Assert.Equal("completed", (await Sends()).Single().MailStatus);
+            // That is when the card really went into the mail, and the site notes the time, on the card and on the attempt.
+            var inMail = (await Now()).InMailAt;
+            Assert.True(inMail >= sentFirst && inMail <= DateTime.UtcNow);
+            Assert.Equal(inMail, (await Sends()).Single().InMailAt);
+            await owner.PostAsync("/api/comments/mail/status", JsonContent.Create(new CardIdsRequest([card.Id])));
+            Assert.Equal(inMail, (await Now()).InMailAt); // noted once, never moved
 
             // It never arrived: the address is corrected, and the card is sent again. Both attempts are kept, each with the address it used.
             Assert.Equal(HttpStatusCode.OK, (await owner.PutAsJsonAsync($"/api/comments/{card.Id}/address", new CardAddressRequest("10 Mailer Rd", "Joliet", "IL", "60431"))).StatusCode);
@@ -1937,7 +1945,9 @@ public class PostGridTests(ApiFactory factory)
             var two = await Sends();
             Assert.Equal(new[] { (1, "9 Mailer Rd", false, "completed"), (2, "10 Mailer Rd", true, "ready") }, two.Select(s => (s.Number, s.StreetAddress!, s.Resend, s.MailStatus!)));
             var after = await Now();
-            Assert.Equal((2, repliedAt, true), (after.Sends, after.RespondedAt, after.Responded));
+            // Sent again: the new send is the one the card goes by, and it is not in the mail yet. Still nobody has replied.
+            Assert.Equal((2, false), (after.Sends, after.Responded));
+            Assert.True(after.SentAt > sentFirst && after.InMailAt is null);
             // Each card that goes is paid for.
             Assert.Equal(usedBefore + 200, await Used());
             Assert.Contains("\"sentAgain\":true", await Db(db => Task.FromResult(db.AuditLogs.Where(a => a.Action == "CardMailed" && a.EntityId == card.Id.ToString()).OrderByDescending(a => a.Id).First().Details!)));
@@ -1946,7 +1956,8 @@ public class PostGridTests(ApiFactory factory)
             Assert.Equal(HttpStatusCode.OK, (await owner.PostAsync($"/api/comments/{card.Id}/mail/cancel", null)).StatusCode);
             Assert.Equal(new[] { "sent", "cancelled" }, (await Sends()).Select(s => s.Outcome));
             Assert.Equal(usedBefore + 100, await Used());
-            Assert.Equal((true, 1), ((await Now()).Responded, (await Now()).Sends));
+            var back = await Now();
+            Assert.Equal((sentFirst, inMail, 1), (back.SentAt, back.InMailAt, back.Sends));
 
             // Sent again by printing it here for a stamp: one more line in the history, with the address used.
             Assert.Equal(HttpStatusCode.OK, (await owner.PostAsJsonAsync("/api/comments/printed", new PrintedRequest([card.Id], true, "stamp") { Resend = true })).StatusCode);

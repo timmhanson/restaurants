@@ -38,7 +38,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
             q = q.Where(c => wanted.Contains(c.Id));
         }
         // Cards whose "did it arrive?" follow-up day has come.
-        List<int> dueIds = status == "follow-up-due" ? (await followUps.DueAsync(me.GroupId, scope)).Select(d => d.Id).ToList() : [];
+        List<int> dueIds = status is "follow-up-due" or "open" ? (await followUps.DueAsync(me.GroupId, scope)).Select(d => d.Id).ToList() : [];
         if (from is not null) q = q.Where(c => c.VisitDate >= from);
         if (to is not null) q = q.Where(c => c.VisitDate <= to);
         // When the card was entered here (as opposed to the day of the visit), e.g. "everything keyed in today".
@@ -46,6 +46,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         if (enteredTo is { } et) q = q.Where(c => c.CreatedAt < et.AddDays(1).ToDateTime(TimeOnly.MinValue));
         if (responded is not null) q = q.Where(c => c.Responded == responded);
         // Follow-up queue: needs-reply = nobody has tried yet, attempted = tried but not replied, replied = done.
+        // Sent is about the coupon card and is separate: a card can be sent while the guest still needs a reply.
         var attempted = db.CommentActivities.Where(a => a.Kind == ActivityKind.Attempt).Select(a => a.CommentId);
         q = status switch
         {
@@ -53,9 +54,13 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
             "attempted" => q.Where(c => !c.Responded && attempted.Contains(c.Id)),
             "waiting" => q.Where(c => !c.Responded),
             "replied" => q.Where(c => c.Responded),
-            "to-print" => q.Where(c => !c.Responded && c.PrintedAt == null),
+            "to-print" => q.Where(c => c.SentAt == null && c.PrintedAt == null),
+            "not-sent" => q.Where(c => c.SentAt == null),
+            "sent" => q.Where(c => c.SentAt != null),
             "follow-up-due" => q.Where(c => dueIds.Contains(c.Id)),
-            "sent-not-redeemed" => q.Where(c => c.Responded && c.RedeemedOn == null),
+            // Everything on the Follow Up list: the guest still needs a reply, or the "did the card arrive?" call is due.
+            "open" => q.Where(c => !c.Responded || dueIds.Contains(c.Id)),
+            "sent-not-redeemed" => q.Where(c => c.SentAt != null && c.RedeemedOn == null),
             "redeemed" => q.Where(c => c.RedeemedOn != null),
             _ => q
         };
@@ -318,7 +323,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
         if (c is null || !me.CanAccessRestaurant(c.RestaurantId)) return NotFound();
         return (await db.CardSends.AsNoTracking().Where(s => s.CommentId == id).OrderBy(s => s.Number).ThenBy(s => s.Id).ToListAsync(ct))
             .Select(s => new CardSendDto(s.Number, DateTime.SpecifyKind(s.At, DateTimeKind.Utc), s.ByName, s.Method, s.Outcome, s.Resend, s.StreetAddress, s.City, s.State, s.Zip, s.AddressStatus,
-                s.MailStatus, s.Test, s.CostCents + s.FeeCents, s.Error)).ToList();
+                s.MailStatus, s.Test, s.CostCents + s.FeeCents, s.Error) { InMailAt = s.InMailAt is { } m ? DateTime.SpecifyKind(m, DateTimeKind.Utc) : null }).ToList();
     }
 
     [HttpPost("{id:int}/responded")]
@@ -356,11 +361,37 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
     {
         var me = await users.GetAsync();
         if (!me.Has(ManagerPermission.DeleteComments)) return Forbid();
-        var c = await db.Comments.FirstOrDefaultAsync(x => x.Id == id);
+        var c = await db.Comments.Include(x => x.Restaurant).FirstOrDefaultAsync(x => x.Id == id);
         if (c is null || !me.CanAccessRestaurant(c.RestaurantId)) return NotFound();
+        // Everything the card held goes into the audit log, so a removed card can still be read in full: the card
+        // itself, its follow-up history and every attempt to send it. As everywhere a group can read, a mailed
+        // card shows the one price paid, never the split, and not which company mailed it.
+        var history = await db.CommentActivities.AsNoTracking().Where(a => a.CommentId == id).OrderBy(a => a.Id).ToListAsync();
+        var sends = await db.CardSends.AsNoTracking().Where(s => s.CommentId == id).OrderBy(s => s.Number).ThenBy(s => s.Id).ToListAsync();
+        var removed = new
+        {
+            Guest = $"{c.GuestFirstName} {c.GuestLastName}".Trim(), c.VisitDate, c.Reason,
+            Restaurant = c.Restaurant.Name, CardId = c.PublicId, CameInVia = c.Source, c.ReasonDetails, c.Notes,
+            c.GuestFirstName, c.GuestLastName, c.Phone, c.StreetAddress, c.City, c.State, c.Zip, c.AddressStatus, c.AddressCheckedAt,
+            c.CouponOffer, c.DateIssued, c.ExpiresOn, c.AuthorizedBy,
+            EnteredAt = c.CreatedAt, EnteredBy = c.CreatedByName, LastChangedAt = c.UpdatedAt, c.LastActivityAt,
+            Replied = c.Responded, c.RepliedOn, c.ReplyMethod, ReplyConfirmedAt = c.RespondedAt, ReplyConfirmedBy = c.RespondedByName,
+            CardSentAt = c.SentAt, CardSentBy = c.SentByName, InTheMailAt = c.InMailAt,
+            c.PrintedAt, c.PrintedByName, c.PrintCount, c.PrintFeeCents, c.PrintFeeAt,
+            c.PostageCents, c.PostageTest, c.PostageTrackingCode, c.PostagePurchasedAt, c.PostageByName,
+            MailedForYou = c.MailId is not null, MailReference = c.MailId, c.MailStatus, c.MailedAt, c.MailedByName, MailTestOrder = c.MailTest,
+            MailBilledCents = c.MailId is null ? (int?)null : (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0), TimesSentToBeMailed = c.MailAttempts,
+            c.RedeemedOn, c.RedeemedAt, c.RedeemedByName, c.FollowedUpOn, c.FollowedUpAt, c.FollowedUpByName,
+            History = history.Select(a => new { At = a.CreatedAt, By = a.CreatedByName, Kind = a.Kind.ToString(), a.Method, a.ContactedOn, a.Text }),
+            Sends = sends.Select(s => new
+            {
+                s.Number, s.At, By = s.ByName, s.Method, s.Outcome, SentAgain = s.Resend, s.StreetAddress, s.City, s.State, s.Zip, s.AddressStatus,
+                MailReference = s.MailId, s.MailStatus, InTheMailAt = s.InMailAt, TestOrder = s.Test, BilledCents = s.CostCents + s.FeeCents, s.Error
+            })
+        };
         c.IsDeleted = true; c.UpdatedAt = DateTime.UtcNow; c.UpdatedByUserId = me.Id;
         await db.SaveChangesAsync();
-        await audit.LogAsync(me, "CommentDeleted", "Comment", c.Id, new { Guest = $"{c.GuestFirstName} {c.GuestLastName}", c.VisitDate, c.Reason }, c.RestaurantId);
+        await audit.LogAsync(me, "CommentDeleted", "Comment", c.Id, removed, c.RestaurantId);
         return NoContent();
     }
 
@@ -385,7 +416,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 $"{a.CreatedAt:yyyy-MM-dd} {a.CreatedByName}: {a.Kind}{(a.Method is null ? "" : $" ({a.Method})")}{(a.Text is null ? "" : $" - {a.Text}")}")));
 
         var sb = new StringBuilder();
-        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Responded,Reply Method,Replied On,Confirmed At,Confirmed By,Printed At,Postage,Mailed For You,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
+        sb.AppendLine("Id,Restaurant,Visit Date,Day Of Week,Came In Via,Guest First Name,Guest Last Name,Phone,Street Address,City,State,Zip,Reason,Reason Details,Coupon Offer,Date Issued,Expires On,Authorized By,Replied,Reply Method,Replied On,Confirmed At,Confirmed By,Card Sent At,Card Sent By,In The Mail At,Printed At,Postage,Mailed For You,Followed Up On,Followed Up By,Redeemed On,Redeemed By,Notes,Follow-up History,Guest Cards On File,Entered By,Entered At");
         foreach (var c in rows)
         {
             sb.AppendLine(string.Join(',', new[]
@@ -394,7 +425,7 @@ public class CommentsController(AppDbContext db, AuditService audit, IGroupSetti
                 Csv(c.GuestFirstName), Csv(c.GuestLastName), Csv(c.Phone), Csv(c.StreetAddress), Csv(c.City), Csv(c.State), Csv(c.Zip),
                 Csv(c.Reason), Csv(c.ReasonDetails), Csv(c.CouponOffer), c.DateIssued.ToString("yyyy-MM-dd"), c.ExpiresOn.ToString("yyyy-MM-dd"),
                 Csv(c.AuthorizedBy), c.Responded ? "Yes" : "No", Csv(c.ReplyMethod), c.RepliedOn?.ToString("yyyy-MM-dd") ?? "",
-                c.RespondedAt?.ToString("u") ?? "", Csv(c.RespondedByName), c.PrintedAt?.ToString("u") ?? "",
+                c.RespondedAt?.ToString("u") ?? "", Csv(c.RespondedByName), c.SentAt?.ToString("u") ?? "", Csv(c.SentByName), c.InMailAt?.ToString("u") ?? "", c.PrintedAt?.ToString("u") ?? "",
                 c.PostageCents is int cents ? $"{(c.PostageTest ? "test " : "")}{cents / 100m:0.00}" : "",
                 c.MailId is null ? "" : $"{c.MailedAt:yyyy-MM-dd} {(c.MailTest ? "test order" : c.MailStatus)}", c.FollowedUpOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.FollowedUpByName),
                 c.RedeemedOn?.ToString("yyyy-MM-dd") ?? "", Csv(c.RedeemedByName), Csv(c.Notes), Csv(history.GetValueOrDefault(c.Id)),

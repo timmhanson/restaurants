@@ -136,7 +136,7 @@ export default function MailCardsPage() {
   const rules = (c: CommentSummary) => config.mailRestaurants.find((r) => r.restaurantId === c.restaurantId)
   const blocked = (c: CommentSummary) =>
     !hasMailingAddress(c) ? 'no full mailing address'
-      : c.responded && !beingMailed(c) && !again ? 'already marked as sent'
+      : c.sentAt && !beingMailed(c) && !again ? 'already marked as sent'
         : rules(c) && !rules(c)!.on ? 'having cards mailed is not switched on for this restaurant'
           : rules(c) && !rules(c)!.ready ? 'mailing is not set up for this restaurant yet'
             : null
@@ -361,7 +361,7 @@ export default function MailCardsPage() {
                         </td>
                         <td className="row-actions" style={{ whiteSpace: 'nowrap' }}>
                           <button type="button" className="btn btn-sm" onClick={() => setPreviewId(c.id)} disabled={previewId === c.id}>Show card</button>
-                          {!beingMailed(c) && !(c.responded && !outcomes[c.id]) && (
+                          {!beingMailed(c) && !(c.sentAt && !outcomes[c.id]) && (
                             <button type="button" className={`btn btn-sm ${!hasMailingAddress(c) || outcomes[c.id]?.addressProblem ? 'btn-primary' : ''}`} onClick={() => setFixing(c)} disabled={busy !== null}
                               aria-label="Correct this card’s mailing address">
                               {hasMailingAddress(c) ? 'Correct address' : 'Add address'}

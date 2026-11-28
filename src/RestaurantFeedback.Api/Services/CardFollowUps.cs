@@ -14,11 +14,17 @@ public class CardFollowUps(AppDbContext db, IGroupSettingsStore settings)
 {
     public const string MailedMethod = "Mailed coupon card";
 
-    /// <summary>Sent by mail: printed onto a postcard here, or replied to with a "mailed" method.</summary>
-    public static bool WasMailed(GuestComment c) => c.PrintedAt != null || (c.ReplyMethod ?? "").Contains("mailed", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// The day the card went to the guest: the day it was sent from this site (mailed for the restaurant, or printed
+    /// here and marked as sent), or, for a card mailed outside the site, the day of a reply recorded with a "mailed"
+    /// method. Null when no card has gone.
+    /// </summary>
+    public static DateOnly? SentDay(GuestComment c) =>
+        c.SentAt is { } at ? DateOnly.FromDateTime(at)
+        : c.Responded && (c.ReplyMethod ?? "").Contains("mailed", StringComparison.OrdinalIgnoreCase) ? c.RepliedOn : null;
 
     public static DateOnly? DueOn(GuestComment c, int days) =>
-        days > 0 && c.Responded && c.RepliedOn is { } sent && c.FollowedUpOn is null && c.RedeemedOn is null && WasMailed(c) ? sent.AddDays(days) : null;
+        days > 0 && c.FollowedUpOn is null && c.RedeemedOn is null && SentDay(c) is { } sent ? sent.AddDays(days) : null;
 
     /// <summary>Days for each restaurant: its own setting, else the group's default.</summary>
     public async Task<Dictionary<int, int>> DaysByRestaurantAsync(int? groupId, IEnumerable<int> restaurantIds, CancellationToken ct = default)
@@ -37,10 +43,10 @@ public class CardFollowUps(AppDbContext db, IGroupSettingsStore settings)
         if (active.Count == 0) return [];
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var candidates = await db.Comments.AsNoTracking()
-            .Where(c => active.Contains(c.RestaurantId) && c.Responded && c.RepliedOn != null && c.FollowedUpOn == null && c.RedeemedOn == null
-                        && (c.PrintedAt != null || EF.Functions.Like(c.ReplyMethod ?? "", "%mailed%")))
-            .Select(c => new { c.Id, c.RestaurantId, c.RepliedOn }).ToListAsync(ct);
-        return candidates.Select(c => (c.Id, DueOn: c.RepliedOn!.Value.AddDays(days[c.RestaurantId])))
+            .Where(c => active.Contains(c.RestaurantId) && c.FollowedUpOn == null && c.RedeemedOn == null
+                        && (c.SentAt != null || (c.Responded && c.RepliedOn != null && EF.Functions.Like(c.ReplyMethod ?? "", "%mailed%"))))
+            .ToListAsync(ct);
+        return candidates.Select(c => (c.Id, DueOn: SentDay(c)!.Value.AddDays(days[c.RestaurantId])))
             .Where(c => c.DueOn <= today).OrderBy(c => c.DueOn).ToList();
     }
 }

@@ -65,6 +65,12 @@ See README.md for the architecture, roles and deployment.
 - **Everything worth keeping must be in a backup.** The SQLite database is copied to the site's disk and
   to Blob Storage (`DatabaseBackups`). Keep new data in the database (or in Blob Storage) so it is covered; never
   put the Data Protection key ring, or any key, into a backup.
+- **Sending a card is not replying to the guest.** "Replied" (`Responded`) is only what a person records; mailing
+  or printing a card sets "sent" (`SentAt`) and never touches the reply. Screens, filters and counts about the
+  card going out use `SentAt`; ones about the guest being answered use `Responded`. The day a mailed card really
+  went into the mail (`InMailAt`) is noted once, from the mailing service's status, and never for a test order.
+- **A removed comment keeps everything in its audit row** (`CommentDeleted`): when a field is added to a card, add
+  it there too.
 - **Every attempt to send a card goes into its history** (`SendHistory.AddAsync`, table `CardSend`) with the address
   it used; rows are added, never rewritten. Anything that sends, resends, cancels or checks a card keeps that
   history in step, and billing counts every send that really went (`MailLedger.BilledEarlierSends`).

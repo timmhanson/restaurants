@@ -18,7 +18,12 @@ function Result({ s }: { s: CardSend }) {
   if (s.outcome === 'cancelled') return <Badge kind="neutral">cancelled before printing</Badge>
   if (s.method === 'mail') {
     const status = MAIL_STATUS[s.mailStatus as MailStatus]
-    return <><Badge kind={status?.kind ?? 'ok'}>{status?.label ?? s.mailStatus ?? 'sent'}</Badge>{s.test && <> <Badge kind="warn">test order</Badge></>}</>
+    return (
+      <>
+        <Badge kind={status?.kind ?? 'ok'}>{status?.label ?? s.mailStatus ?? 'sent'}</Badge>{s.test && <> <Badge kind="warn">test order</Badge></>}
+        {s.inMailAt && <div className="muted small">in the mail since {fmtDateTime(s.inMailAt)}</div>}
+      </>
+    )
   }
   return <Badge kind="ok">sent</Badge>
 }

@@ -221,6 +221,8 @@ public class GuestComment
     public string? Notes { get; set; }
 
     // Follow-up. The full history (attempts, replies, notes) lives in CommentActivity; these are the latest reply.
+    // Replied is what a person records (a call, an email, a word in person). Sending the coupon card is a separate
+    // fact (SentAt below): mailing or printing a card never marks the guest as replied to.
     public bool Responded { get; set; }
     /// <summary>When the reply was confirmed in the app.</summary>
     public DateTime? RespondedAt { get; set; }
@@ -236,6 +238,16 @@ public class GuestComment
     /// <summary>What USPS said about the guest's mailing address when the card was saved (see AddressStatuses); null when not checked.</summary>
     public string? AddressStatus { get; set; }
     public DateTime? AddressCheckedAt { get; set; }
+
+    // Sending the coupon card: handed to the mailing service, or printed here and marked as sent. The latest send
+    // that went; every attempt is in CardSend. Null while the card has not been sent (or its only send was cancelled).
+    public DateTime? SentAt { get; set; }
+    public string? SentByName { get; set; }
+    /// <summary>
+    /// When a card mailed for the restaurant really went into the mail: the mailing service handed it to the post
+    /// office. Null until then, and always for a card printed here or a test order.
+    /// </summary>
+    public DateTime? InMailAt { get; set; }
 
     // Printing the coupon card onto a postcard
     public DateTime? PrintedAt { get; set; }
@@ -325,7 +337,9 @@ public enum ActivityKind
     /// <summary>Sent to the mail house (PostGrid), which prints and mails the card.</summary>
     Mailed = 10,
     /// <summary>A mailing was cancelled before it printed; the card is waiting to be sent again.</summary>
-    MailCancelled = 11
+    MailCancelled = 11,
+    /// <summary>The card was sent: printed here and marked as sent. (A card mailed for the restaurant has Mailed.)</summary>
+    Sent = 12
 }
 
 /// <summary>
@@ -472,6 +486,8 @@ public class CardSend
     public string? MailId { get; set; }
     public string? MailStatus { get; set; }
     public DateTime? StatusCheckedAt { get; set; }
+    /// <summary>When this attempt really went into the mail (the mailing service handed it to the post office).</summary>
+    public DateTime? InMailAt { get; set; }
     public bool Test { get; set; }
     /// <summary>What the group is billed for this attempt: the mail house's cost and the site's fee. Nothing for a test, a refusal or a card printed here.</summary>
     public int CostCents { get; set; }

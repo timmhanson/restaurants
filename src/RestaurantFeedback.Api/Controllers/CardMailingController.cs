@@ -135,7 +135,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var again = req.Resend;
         bool NotPrintedYet(GuestComment c) => c.MailId is not null && c.MailStatus is MailStatuses.Ready or "printing";
         bool AlreadyWithMailHouse(GuestComment c) => c.MailId is not null && c.MailStatus != MailStatuses.Cancelled && (!again || NotPrintedYet(c));
-        bool AlreadySent(GuestComment c) => c.Responded && !again;
+        bool AlreadySent(GuestComment c) => c.SentAt is not null && !again;
         if (anyLive)
         {
             var limit = pricing.LimitCents;
@@ -165,8 +165,6 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
 
         var settings = await settingsStore.GetAsync(groupId, ct);
         var allDesigns = await designs.ForGroupAsync(groupId, ct);
-        var method = MailedMethod(settings);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var origin = siteAddress.Origin();
 
         var results = new List<MailOutcome>();
@@ -184,7 +182,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             }
             if (AlreadySent(c))
             {
-                results.Add(new(c.Id, false, null, false, false, "This card is already marked as sent. Reopen it first if it really needs to go out again."));
+                results.Add(new(c.Id, false, null, false, false, "This card is already marked as sent. To send it once more, use Send again in its history."));
                 continue;
             }
             var problem = MissingAddress(c);
@@ -224,9 +222,10 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                     results.Add(new(c.Id, true, sent.Status, c.MailTest, true, null));
                     continue;
                 }
-                var sentBefore = c.Responded || await history.SentBeforeAsync(c.Id, ct);
-                var firstReplyAt = c.Responded ? c.RespondedAt : null;
+                var sentBefore = c.SentAt is not null || await history.SentBeforeAsync(c.Id, ct);
                 var now = DateTime.UtcNow;
+                // Sent, which is not the same as replied: only a person records that the guest was replied to.
+                (c.SentAt, c.SentByName, c.InMailAt) = (now, me.DisplayName, null);
                 c.MailAttempts++;
                 c.MailProvider = "PostGrid";
                 c.MailId = sent.Id;
@@ -239,23 +238,12 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 var billed = (c.MailEstimateCents ?? 0) + (c.MailFeeCents ?? 0);
                 var record = await history.AddAsync(c, me, SendMethods.Mail, SendOutcomes.Sent, sentBefore, ct);
                 (record.MailId, record.MailStatus, record.Test, record.CostCents, record.FeeCents) = (sent.Id, sent.Status, c.MailTest, c.MailEstimateCents ?? 0, c.MailFeeCents ?? 0);
+                c.SentAt = record.At;
                 var again2 = sentBefore ? " again" : "";
                 Activity(c, me, ActivityKind.Mailed, text: c.MailTest
                     ? $"Sent{again2} to be printed and mailed (test order: not printed, mailed or charged)."
                     : $"Sent{again2} to be printed and mailed for the restaurant ({Dollars(billed)}).");
-                if (firstReplyAt is null)
-                {
-                    // The first time the guest is replied to. A card sent again keeps the day it was first replied to.
-                    c.Responded = true;
-                    c.RespondedAt = now;
-                    c.RespondedByUserId = me.Id;
-                    c.RespondedByName = me.DisplayName;
-                    c.ReplyMethod = method;
-                    c.RepliedOn = today < c.VisitDate ? c.VisitDate : today;
-                    var entry = Activity(c, me, ActivityKind.Replied, method, c.RepliedOn, "Coupon card printed and mailed for the restaurant.");
-                    c.LastActivityAt = entry.CreatedAt;
-                }
-                else c.LastActivityAt = now;
+                c.LastActivityAt = now;
                 // Saved card by card: once a card is with the mail house the record must exist even if a later one fails.
                 await db.SaveChangesAsync(ct);
                 await audit.LogAsync(me, "CardMailed", "Comment", c.Id, new { sent.Id, sent.Status, Test = c.MailTest, BilledCents = billed, SentAgain = sentBefore, Attempt = record.Number }, c.RestaurantId);
@@ -276,7 +264,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
                 if (ex.Answered)
                 {
                     // The refusal goes into the card's history, with the address that was refused.
-                    var refused = await history.AddAsync(c, me, SendMethods.Mail, SendOutcomes.Refused, c.Responded, ct);
+                    var refused = await history.AddAsync(c, me, SendMethods.Mail, SendOutcomes.Refused, c.SentAt is not null, ct);
                     (refused.Test, refused.Error) = (test, said);
                     await db.SaveChangesAsync(ct);
                 }
@@ -309,7 +297,7 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             {
                 var now = await mailer.GetPostcardAsync(account.ApiKey, c.MailId!, ct);
                 c.MailStatus = now.Status;
-                await history.SyncStatusAsync(c, ct);
+                await history.SyncStatusAsync(c, ct, now.UpdatedAt);
                 results.Add(new(c.Id, now.Status, c.MailTest, !string.IsNullOrWhiteSpace(now.PreviewUrl), null));
             }
             catch (PostGridException ex)
@@ -400,18 +388,14 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         }
         c.MailStatus = after.Status == MailStatuses.Ready ? MailStatuses.Cancelled : after.Status;
         await history.SyncStatusAsync(c, ct);
-        var wasSentOn = c.RepliedOn;
-        // A card that had gone before this send stays "sent": only this latest attempt is called off.
-        var wentBefore = await db.CardSends.AnyAsync(s => s.CommentId == c.Id && s.Outcome == SendOutcomes.Sent && s.MailId != c.MailId, ct);
-        if (c.MailStatus == MailStatuses.Cancelled && c.Responded && !wentBefore)
-        {
-            // Not going out after all: back to "not sent", so it shows up to print or mail again.
-            c.Responded = false; c.RespondedAt = null; c.RespondedByUserId = null; c.RespondedByName = null; c.ReplyMethod = null; c.RepliedOn = null;
-        }
+        var wasSentAt = c.SentAt;
+        // Not going out after all: back to "not sent", so it shows up to print or mail again. A card that had gone
+        // before this send stays "sent" by that earlier send: only this latest attempt is called off.
+        if (c.MailStatus == MailStatuses.Cancelled) await history.RestoreSentAsync(c, c.MailId, ct);
         var entry = Activity(c, me, ActivityKind.MailCancelled, text: "Mailing cancelled before printing, so it is not billed. The card is waiting to be sent again.");
         c.LastActivityAt = entry.CreatedAt;
         await db.SaveChangesAsync(ct);
-        await audit.LogAsync(me, "CardMailCancelled", "Comment", c.Id, new { c.MailId, c.MailStatus, wasSentOn }, c.RestaurantId);
+        await audit.LogAsync(me, "CardMailCancelled", "Comment", c.Id, new { c.MailId, c.MailStatus, wasSentAt }, c.RestaurantId);
         return new MailStatusDto(c.Id, c.MailStatus, c.MailTest, false, null);
     }
 
@@ -497,8 +481,8 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
     }
 
     /// <summary>
-    /// Records that cards were printed and, unless told otherwise, marks each as sent to the guest by mail
-    /// (the same as recording a reply by hand), so the reply queue and follow-up clock stay right.
+    /// Records that cards were printed and, unless told otherwise, marks each as sent to the guest by mail, which
+    /// starts the follow-up clock. Sent is not replied: only a person records that the guest was replied to.
     /// </summary>
     [HttpPost("comments/printed")]
     public async Task<ActionResult<List<CommentSummary>>> Printed(PrintedRequest req, CancellationToken ct)
@@ -507,13 +491,12 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
         var cards = await Cards(me, req.CommentIds, ct);
         if (cards.Count == 0) return NotFound();
-        var settings = await settingsStore.GetAsync(me.GroupId ?? 0, ct);
-        var method = MailedMethod(settings);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var now = DateTime.UtcNow;
         // A card the restaurant prints itself for a stamp by hand carries the site's fee, once, at its first print.
         var printFee = me.GroupId is int feeGroup ? (await ledger.TermsAsync(feeGroup, ct)).PrintFeeCents : 0;
         var charged = new List<GuestComment>();
+        var sent = new HashSet<int>();
 
         foreach (var c in cards)
         {
@@ -530,23 +513,19 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
             c.PrintCount++;
             Activity(c, me, ActivityKind.Printed, text: c.PrintCount > 1 ? $"Printed again ({how})" : $"Printed on a postcard ({how})");
             // Into the card's history when this printing is what sends it: the first time, or printed to be sent again.
-            if (req.MarkSent && (!c.Responded || req.Resend))
-                await history.AddAsync(c, me, SendMethods.Stamp, SendOutcomes.Sent, c.Responded, ct);
-            if (req.MarkSent && !c.Responded)
+            if (req.MarkSent && (c.SentAt is null || req.Resend))
             {
-                c.Responded = true;
-                c.RespondedAt = now;
-                c.RespondedByUserId = me.Id;
-                c.RespondedByName = me.DisplayName;
-                c.ReplyMethod = method;
-                c.RepliedOn = today < c.VisitDate ? c.VisitDate : today;
-                Activity(c, me, ActivityKind.Replied, method, c.RepliedOn, $"Coupon card printed and mailed ({how}).");
+                var again = c.SentAt is not null;
+                var record = await history.AddAsync(c, me, SendMethods.Stamp, SendOutcomes.Sent, again, ct);
+                (c.SentAt, c.SentByName, c.InMailAt) = (record.At, me.DisplayName, null);
+                sent.Add(c.Id);
+                Activity(c, me, ActivityKind.Sent, on: today < c.VisitDate ? c.VisitDate : today, text: $"Coupon card printed here and sent{(again ? " again" : "")} ({how}).");
             }
             c.LastActivityAt = now;
         }
         await db.SaveChangesAsync(ct);
         foreach (var c in cards)
-            await audit.LogAsync(me, "CardPrinted", "Comment", c.Id, new { c.PrintCount, req.Postage, MarkedSent = req.MarkSent && c.RespondedAt == now, PrintFeeCents = charged.Contains(c) ? c.PrintFeeCents : null }, c.RestaurantId);
+            await audit.LogAsync(me, "CardPrinted", "Comment", c.Id, new { c.PrintCount, req.Postage, MarkedSent = sent.Contains(c.Id), PrintFeeCents = charged.Contains(c) ? c.PrintFeeCents : null }, c.RestaurantId);
         foreach (var byRestaurant in charged.GroupBy(c => c.RestaurantId))
             await audit.LogAsync(me, "CardPrintFeeCharged", "Restaurant", byRestaurant.Key,
                 new { Cards = byRestaurant.Count(), CentsPerCard = printFee, TotalCents = byRestaurant.Count() * printFee, CardIds = byRestaurant.Select(c => c.Id).ToArray() }, byRestaurant.Key);
@@ -610,12 +589,12 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         if (!me.Has(ManagerPermission.MarkResponded)) return Forbid();
         var c = await One(me, id, ct);
         if (c is null) return NotFound();
-        if (!c.Responded) return BadRequest(new { message = "This card has not been sent yet, so there is nothing to follow up on. Record the reply first." });
+        if (CardFollowUps.SentDay(c) is not { } sentDay) return BadRequest(new { message = "This card has not been sent yet, so there is nothing to follow up on. Send the card first." });
         if (c.FollowedUpOn is not null) return BadRequest(new { message = $"{c.FollowedUpByName} already followed up on {c.FollowedUpOn:MMM d, yyyy}. Add a note instead." });
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var on = req.ContactedOn ?? today;
         if (on > today.AddDays(1)) return BadRequest(new { message = "The follow-up date cannot be in the future." });
-        if (c.RepliedOn is { } sent && on < sent) return BadRequest(new { message = $"The card was sent on {sent:MMM d, yyyy}, so the follow-up cannot be before then." });
+        if (on < sentDay) return BadRequest(new { message = $"The card was sent on {sentDay:MMM d, yyyy}, so the follow-up cannot be before then." });
         var notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim();
         var method = string.IsNullOrWhiteSpace(req.Method) ? "Phone call" : req.Method.Trim();
         if (req.Reached && notes is null) return BadRequest(new { message = "Add a note about the conversation: did the card arrive, and what did the guest say?" });
@@ -644,8 +623,16 @@ public class CardMailingController(AppDbContext db, AuditService audit, IGroupSe
         var due = me.Has(ManagerPermission.MarkResponded) ? await followUps.DueAsync(me.GroupId, mine, ct) : [];
         var restaurants = await db.Restaurants.AsNoTracking().Where(r => mine.Contains(r.Id) && r.IsActive).OrderBy(r => r.Name)
             .Select(r => new { r.Id, r.Name, r.FollowUpDays }).ToListAsync(ct);
+        // What is waiting to be done, for the counts in the menu: only for people who can do it.
+        var waiting = me.Has(ManagerPermission.MarkResponded)
+            ? await db.Comments.AsNoTracking().Where(c => mine.Contains(c.RestaurantId) && (!c.Responded || c.SentAt == null)).Select(c => new { c.Id, c.Responded, NotSent = c.SentAt == null }).ToListAsync(ct)
+            : [];
+        var needsReply = waiting.Where(c => !c.Responded).Select(c => c.Id).ToList();
         return new FollowUpSummary(due.Count, due.Count == 0 ? null : due[0].DueOn, settings.FollowUpDays,
-            restaurants.Select(r => new FollowUpRestaurant(r.Id, r.Name, r.FollowUpDays, r.FollowUpDays ?? settings.FollowUpDays, CanSetDays(me, r.Id))).ToList());
+            restaurants.Select(r => new FollowUpRestaurant(r.Id, r.Name, r.FollowUpDays, r.FollowUpDays ?? settings.FollowUpDays, CanSetDays(me, r.Id))).ToList())
+        {
+            NeedsReply = needsReply.Count, Pending = needsReply.Union(due.Select(d => d.Id)).Count(), ToSend = waiting.Count(c => c.NotSent)
+        };
     }
 
     /// <summary>

@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import type { ActivityDto, ActivityKind, CommentSummary, FollowUpRequest, FollowUpResponse } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { followUpsChanged } from './FollowUpNotice'
-import { Alert, Badge, Field, Spinner, fmtDate, fmtDateTime, today } from './ui'
+import { Alert, Badge, Field, Spinner, fmtDate, fmtDateTime, fmtDay, today } from './ui'
 
 const DEFAULT_METHODS = ['Mailed coupon card', 'Phone call', 'Email', 'Text message', 'In person']
 
@@ -32,11 +32,11 @@ export function FollowUpBadge({ c }: { c: CommentSummary }) {
 const KIND_LABEL: Record<ActivityKind, string> = {
   Note: 'Note', Attempt: 'Tried to reach guest', Replied: 'Reply confirmed', Reopened: 'Reopened', Printed: 'Card printed', PostageBought: 'Postage',
   Redeemed: 'Coupon redeemed', RedemptionUndone: 'Redemption taken back', FollowedUp: 'Followed up with guest', FollowUpAttempt: 'Tried to follow up',
-  Mailed: 'Sent to be mailed', MailCancelled: 'Mailing cancelled',
+  Mailed: 'Sent to be mailed', MailCancelled: 'Mailing cancelled', Sent: 'Card sent',
 }
 const KIND_BADGE: Record<ActivityKind, 'neutral' | 'warn' | 'ok' | 'danger' | 'accent'> = {
   Note: 'neutral', Attempt: 'warn', Replied: 'ok', Reopened: 'danger', Printed: 'neutral', PostageBought: 'neutral', Redeemed: 'accent',
-  RedemptionUndone: 'danger', FollowedUp: 'ok', FollowUpAttempt: 'warn', Mailed: 'neutral', MailCancelled: 'danger',
+  RedemptionUndone: 'danger', FollowedUp: 'ok', FollowUpAttempt: 'warn', Mailed: 'neutral', MailCancelled: 'danger', Sent: 'neutral',
 }
 
 const TITLES: Record<Exclude<Mode, null>, string> = {
@@ -55,7 +55,7 @@ const TEXT_LABEL = (mode: Mode, reached: boolean) =>
   : 'Reason'
 const TEXT_HINT = (mode: Mode, reached: boolean) =>
   mode === 'attempt' ? 'e.g. Left a voicemail, number disconnected'
-  : mode === 'reply' ? 'e.g. Mailed a Free Value Basket card, apologised for the wait'
+  : mode === 'reply' ? 'e.g. Called and apologised for the wait, said a coupon card is on its way'
   : mode === 'call' ? (reached ? 'Did the card arrive? What did the guest say? The other managers can read this.' : 'e.g. Left a voicemail, will try again Thursday')
   : mode === 'redeem' ? 'e.g. Used at the drive-thru, which team member took it'
   : mode === 'unredeem' ? 'e.g. Marked on the wrong guest'
@@ -77,11 +77,16 @@ export const followUpDue = (c: CommentSummary) => Boolean(c.followUpDueOn && c.f
 export function AfterSendBadges({ c }: { c: CommentSummary }) {
   return (
     <>
-      {c.mailStatus && c.mailStatus !== 'cancelled' && (
-        <Badge kind={c.mailTest ? 'warn' : 'neutral'} title={c.mailTest ? 'A test order: not printed, mailed or charged' : 'Printed and mailed for you'}>
-          {c.mailTest ? 'Mailing test order' : 'Mailed for you'}
+      {c.mailStatus && c.mailStatus !== 'cancelled' ? (
+        <Badge
+          kind={c.mailTest ? 'warn' : c.inMailAt ? 'ok' : 'neutral'}
+          title={c.mailTest ? 'A test order: not printed, mailed or charged' : c.inMailAt ? `Printed and mailed for you: handed to the post office ${fmtDay(c.inMailAt)}` : 'Being printed and mailed for you: not in the mail yet'}
+        >
+          {c.mailTest ? 'Mailing test order' : c.inMailAt ? `In the mail ${fmtDay(c.inMailAt)}` : 'Card sent to be mailed'}
         </Badge>
-      )}
+      ) : c.sentAt ? (
+        <Badge kind="neutral" title={`Printed here and sent ${fmtDay(c.sentAt)}${c.sentByName ? ` by ${c.sentByName}` : ''}`}>Card sent {fmtDay(c.sentAt)}</Badge>
+      ) : null}
       {c.redeemedOn && <Badge kind="accent" title={`Redeemed ${fmtDate(c.redeemedOn)} (recorded by ${c.redeemedByName ?? 'someone'})`}>Redeemed</Badge>}
       {c.followedUpOn && <Badge kind="ok" title={`Followed up ${fmtDate(c.followedUpOn)} by ${c.followedUpByName ?? 'someone'}`}>Followed up</Badge>}
       {followUpDue(c) && <Badge kind="warn" title={`Due since ${fmtDate(c.followUpDueOn)}`}>Follow-up due</Badge>}
@@ -99,7 +104,9 @@ export default function FollowUpPanel({ comment, onChanged, startWith }: { comme
   const methods = settings?.replyMethods?.length ? settings.replyMethods : DEFAULT_METHODS
   const [activity, setActivity] = useState<ActivityDto[] | null>(null)
   const [mode, setMode] = useState<Mode>(startWith && canReply ? startWith : null)
-  const [method, setMethod] = useState(methods[0])
+  // A reply is what a person did (a call, an email, a word in person); the card being sent is recorded by itself.
+  const replyMethod = methods.find((m) => !/mailed/i.test(m)) ?? methods[0]
+  const [method, setMethod] = useState(replyMethod)
   const [on, setOn] = useState(today())
   const [text, setText] = useState('')
   const [confirmed, setConfirmed] = useState(false)
@@ -119,6 +126,7 @@ export default function FollowUpPanel({ comment, onChanged, startWith }: { comme
     setConfirmed(false)
     setReached(true)
     if (m === 'call') setMethod(methods.find((x) => /phone/i.test(x)) ?? 'Phone call')
+    else if (m === 'reply' || m === 'attempt') setMethod(replyMethod)
     setOn(today())
     setError(null)
   }
@@ -205,7 +213,7 @@ export default function FollowUpPanel({ comment, onChanged, startWith }: { comme
               <button type="button" className="btn btn-sm" onClick={() => open('attempt')}>Log attempt</button>
             </>
           )}
-          {comment.responded && !comment.followedUpOn && (
+          {(comment.sentAt || comment.followUpDueOn) && !comment.followedUpOn && (
             <button type="button" className={`btn btn-sm ${followUpDue(comment) ? 'btn-primary' : ''}`} onClick={() => open('call')}>☎ Record follow-up call</button>
           )}
           {!comment.redeemedOn ? (
@@ -218,8 +226,19 @@ export default function FollowUpPanel({ comment, onChanged, startWith }: { comme
         </div>
       )}
 
-      {(comment.followUpDueOn || comment.followedUpOn || comment.redeemedOn || comment.printedAt) && (
+      {(comment.followUpDueOn || comment.followedUpOn || comment.redeemedOn || comment.printedAt || comment.sentAt) && (
         <div className="after-send small">
+          {comment.sentAt ? (
+            <div>
+              Card sent {fmtDateTime(comment.sentAt)}{comment.sentByName ? ` by ${comment.sentByName}` : ''}
+              {comment.mailStatus && comment.mailStatus !== 'cancelled'
+                ? comment.mailTest ? ' · a test order: not printed or mailed'
+                  : comment.inMailAt ? ` · in the mail since ${fmtDateTime(comment.inMailAt)}` : ' · being printed and mailed for you, not in the mail yet'
+                : ' · printed here'}
+            </div>
+          ) : (
+            <div className="muted">The coupon card has not been sent yet.</div>
+          )}
           {comment.printedAt && (
             <div>
               Printed {fmtDateTime(comment.printedAt)} by {comment.printedByName}
@@ -271,7 +290,7 @@ export default function FollowUpPanel({ comment, onChanged, startWith }: { comme
                 </select>
               </Field>
               <Field label={mode === 'reply' ? 'Date sent or made' : mode === 'call' ? 'Date of the call' : 'Date tried'}>
-                <input type="date" value={on} max={today()} min={mode === 'call' ? (comment.repliedOn ?? comment.visitDate) : comment.visitDate} onChange={(e) => setOn(e.target.value)} required />
+                <input type="date" value={on} max={today()} min={mode === 'call' ? (comment.sentAt?.slice(0, 10) ?? comment.repliedOn ?? comment.visitDate) : comment.visitDate} onChange={(e) => setOn(e.target.value)} required />
               </Field>
             </div>
           )}

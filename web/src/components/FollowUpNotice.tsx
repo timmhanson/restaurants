@@ -9,14 +9,14 @@ import { Alert, Modal, fmtDate } from './ui'
 export const followUpsChanged = () => window.dispatchEvent(new Event('gf:follow-ups'))
 
 /**
- * Shown at the top of every page to managers and owners when guests are due a follow-up: their coupon card was
- * sent the restaurant's number of days ago (5 unless changed) and nobody has checked that it arrived.
+ * What is waiting to be done, for the people who can do it: guests to reply to, follow-up calls due and cards not
+ * sent yet. Counted again on every page change and whenever something is recorded. The menu shows the counts
+ * beside Follow Up and Print Cards, and the notice below uses the same answer.
  */
-export default function FollowUpNotice() {
+export function useFollowUpSummary() {
   const { has, isTeamMember, overseeing } = useAuth()
   const location = useLocation()
   const [summary, setSummary] = useState<FollowUpSummary | null>(null)
-  const [timing, setTiming] = useState(false)
   const applies = !isTeamMember && !overseeing && has('ViewComments') && has('MarkResponded')
 
   const load = useCallback(() => {
@@ -31,7 +31,16 @@ export default function FollowUpNotice() {
     return () => window.removeEventListener('gf:follow-ups', load)
   }, [load])
 
-  if (!applies || !summary) return null
+  return { summary: applies ? summary : null, reload: load }
+}
+
+/**
+ * Shown at the top of every page to managers and owners when guests are due a follow-up: their coupon card was
+ * sent the restaurant's number of days ago (5 unless changed) and nobody has checked that it arrived.
+ */
+export default function FollowUpNotice({ summary, reload: load }: { summary: FollowUpSummary | null; reload: () => void }) {
+  const [timing, setTiming] = useState(false)
+  if (!summary) return null
   const days = [...new Set(summary.restaurants.map((r) => r.effectiveDays).filter((d) => d > 0))]
   return (
     <>
@@ -45,7 +54,7 @@ export default function FollowUpNotice() {
             has checked {summary.due === 1 ? 'it' : 'they'} arrived{summary.oldestDueOn ? ` (oldest due ${fmtDate(summary.oldestDueOn)})` : ''}.
           </span>
           <span className="row-actions">
-            <Link className="btn btn-sm btn-primary" to="/comments?status=follow-up-due">Review and call</Link>
+            <Link className="btn btn-sm btn-primary" to="/follow-up?show=call">Review and call</Link>
             {summary.restaurants.some((r) => r.canSet) && (
               <button type="button" className="btn btn-sm" onClick={() => setTiming(true)}>Change timing</button>
             )}

@@ -50,7 +50,11 @@ public record MailPostcardRequest(MailContact To, MailContact From, string Front
 /// <param name="Status">ready, printing, processed_for_delivery, completed or cancelled.</param>
 /// <param name="Live">False for a test-key order: nothing is printed, mailed or charged.</param>
 /// <param name="PreviewUrl">A short-lived link to PostGrid's PDF of the printed card.</param>
-public record MailedPostcard(string Id, string Status, bool Live, string? PreviewUrl, string? SendDate);
+public record MailedPostcard(string Id, string Status, bool Live, string? PreviewUrl, string? SendDate)
+{
+    /// <summary>When PostGrid last changed the order (UTC). It keeps no time for each status, so this is the nearest thing.</summary>
+    public DateTime? UpdatedAt { get; init; }
+}
 /// <summary>A letter (a printed bill): PostGrid adds a first page with the addresses, so the HTML needs no address block.</summary>
 public record MailLetterRequest(MailContact To, MailContact From, string Html, string Description, Dictionary<string, string> Metadata);
 
@@ -79,6 +83,8 @@ public static class MailStatuses
 {
     public const string Ready = "ready";
     public const string Cancelled = "cancelled";
+    /// <summary>Really in the mail: the mail house has handed the card to the post office.</summary>
+    public static bool InTheMail(string? status) => status is "processed_for_delivery" or "completed";
     public static bool IsKeyForTest(string key) => key.StartsWith("test_", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -255,7 +261,11 @@ public class PostGridMailer : IPostGridMailer
         Text(e, "status") ?? MailStatuses.Ready,
         e.TryGetProperty("live", out var live) && live.ValueKind == JsonValueKind.True,
         Text(e, "url"),
-        Text(e, "sendDate"));
+        Text(e, "sendDate"))
+    {
+        UpdatedAt = DateTime.TryParse(Text(e, "updatedAt"), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var at) ? at : null
+    };
 
     private static string? Text(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

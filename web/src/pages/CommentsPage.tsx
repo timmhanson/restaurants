@@ -10,10 +10,10 @@ import { FollowUpTimingButton } from '../components/FollowUpNotice'
 import { Alert, Badge, Confirm, Empty, Field, Modal, Spinner, daysAgo, fmtDate } from '../components/ui'
 
 type Sort = 'visitDate' | 'createdAt' | 'guest' | 'reason' | 'lastActivity'
-type Status = '' | 'waiting' | 'needs-reply' | 'attempted' | 'replied' | 'to-print' | 'follow-up-due' | 'sent-not-redeemed' | 'redeemed'
-const STATUSES: Status[] = ['', 'waiting', 'needs-reply', 'attempted', 'replied', 'to-print', 'follow-up-due', 'sent-not-redeemed', 'redeemed']
-/** Statuses that only make sense for cards already sent (used for the CSV's replied filter). */
-const SENT: Status[] = ['replied', 'follow-up-due', 'sent-not-redeemed', 'redeemed']
+type Status = '' | 'waiting' | 'needs-reply' | 'attempted' | 'replied' | 'to-print' | 'not-sent' | 'sent' | 'follow-up-due' | 'sent-not-redeemed' | 'redeemed'
+const STATUSES: Status[] = ['', 'waiting', 'needs-reply', 'attempted', 'replied', 'to-print', 'not-sent', 'sent', 'follow-up-due', 'sent-not-redeemed', 'redeemed']
+/** Statuses about the reply, which the CSV can be narrowed by: replied, or still waiting for one. */
+const WAITING: Status[] = ['waiting', 'needs-reply', 'attempted']
 
 export default function CommentsPage() {
   const { restaurants, settings, has } = useAuth()
@@ -122,7 +122,7 @@ export default function CommentsPage() {
 
   const exportCsv = async () => {
     try {
-      const responded = SENT.includes(status) ? 'true' : status ? 'false' : ''
+      const responded = status === 'replied' ? 'true' : WAITING.includes(status) ? 'false' : ''
       const blob = await api.blob(`/comments/export${qs({ restaurantId, from, to, responded })}`)
       downloadBlob(blob, `guest-comments-${new Date().toISOString().slice(0, 10)}.csv`)
     } catch (e) {
@@ -136,7 +136,7 @@ export default function CommentsPage() {
   return (
     <>
       <div className="page-head">
-        <h1>Guest comments</h1>
+        <h1>All comments</h1>
         <span className="grow" />
         {has('MarkResponded') && picked.length > 0 && (
           <button type="button" className="btn btn-primary" onClick={() => nav(`/print-cards?ids=${picked.join(',')}`)}>
@@ -176,9 +176,11 @@ export default function CommentsPage() {
             <option value="needs-reply">Not tried yet</option>
             <option value="attempted">Tried, not reached</option>
             <option value="replied">Replied</option>
-            <option value="to-print">Not printed or sent yet</option>
+            <option value="to-print">Card not printed or sent yet</option>
+            <option value="not-sent">Card not sent yet</option>
+            <option value="sent">Card sent</option>
             <option value="follow-up-due">Follow-up due (did the card arrive?)</option>
-            <option value="sent-not-redeemed">Sent, coupon not redeemed</option>
+            <option value="sent-not-redeemed">Card sent, coupon not redeemed</option>
             <option value="redeemed">Coupon redeemed</option>
           </select>
         </Field>
@@ -222,7 +224,7 @@ export default function CommentsPage() {
                 {!restaurantId && restaurants.length > 1 && <th>Restaurant</th>}
                 <th className="sortable" onClick={() => toggleSort('guest')}>Guest{arrow('guest')}</th>
                 <th className="sortable" onClick={() => toggleSort('reason')}>Reason{arrow('reason')}</th>
-                <th>Sent</th>
+                <th>Offer</th>
                 <th className="sortable" onClick={() => toggleSort('lastActivity')}>Follow-up{arrow('lastActivity')}</th>
                 <th className="sortable" onClick={() => toggleSort('createdAt')}>Entered{arrow('createdAt')}</th>
                 <th></th>

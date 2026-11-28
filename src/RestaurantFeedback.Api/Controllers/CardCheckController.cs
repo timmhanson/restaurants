@@ -52,7 +52,7 @@ public class CardCheckController(AppDbContext db, AuditService audit, CurrentUse
         await audit.LogAsync(me, "CardCodeChecked", "Comment", c.Id, new { CardId = cardId, Shown = true, Redeemed = c.RedeemedOn is not null, Expired = expired }, c.RestaurantId);
         return new CardCheck(true, message,
             new CardCheckDetails(c.Id, c.PublicId, c.Restaurant.Name, $"{c.GuestFirstName} {c.GuestLastName}".Trim(), c.CouponOffer, c.DateIssued, c.ExpiresOn, expired,
-                c.RedeemedOn, c.RedeemedByName, c.Responded, me.Has(ManagerPermission.ViewComments)),
+                c.RedeemedOn, c.RedeemedByName, c.SentAt is not null, me.Has(ManagerPermission.ViewComments)),
             c.RedeemedOn is null && me.Has(ManagerPermission.MarkResponded));
     }
 }
